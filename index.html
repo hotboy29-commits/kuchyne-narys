@@ -103,6 +103,20 @@ body{
 /* ───────── plátno ───────── */
 .stage{flex:1;position:relative;min-height:0;background:var(--bg)}
 #svg{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+/* lišta pro dokončení rozkreslené zdi */
+.drawbar{
+  position:absolute;left:50%;top:14px;transform:translateX(-50%);
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  background:var(--surface);border:1px solid var(--line-2);border-radius:14px;
+  box-shadow:var(--shadow);z-index:30;max-width:94vw;
+}
+.drawbar .db-info{font-size:12.5px;font-weight:600;color:var(--ink-2);padding:0 6px 0 4px;white-space:nowrap}
+.drawbar .db-info b{color:var(--ink)}
+.drawbar .tb{height:42px;font-size:13.5px;padding:0 14px;border:1px solid var(--line);background:var(--surface)}
+.drawbar .tb.done{background:#12805c;border-color:#12805c;color:#fff;min-width:104px}
+.drawbar .tb.close2{background:var(--accent-soft);color:var(--accent);border-color:#c3d9ff}
+.drawbar .tb.cancel{color:var(--ink-3)}
+
 .hintbar{
   position:absolute;left:0;right:0;bottom:0;padding:8px 14px;
   background:linear-gradient(to top,rgba(236,239,243,.96),rgba(236,239,243,0));
@@ -320,6 +334,7 @@ body{
       </g>
     </svg>
 
+    <div class="drawbar hidden" id="drawbar"></div>
     <div class="hintbar"><span id="hint"></span></div>
   </main>
 
@@ -610,6 +625,29 @@ function doRender(){
   $('#layerUI').innerHTML     = uiMarkup();
   renderInspector();
   updateStatus();
+  updateDrawbar();
+}
+
+/** Lišta s tlačítky pro dokončení rozkreslené zdi – dvojklik není nutný. */
+function updateDrawbar(){
+  const bar = $('#drawbar');
+  if(!bar) return;
+  const d = S.draft;
+  if(!d || d.kind !== 'wall' || d.pts.length < 1){ bar.classList.add('hidden'); bar.innerHTML=''; return; }
+  const n = d.pts.length;
+  let len = 0;
+  for(let i=1;i<n;i++) len += Math.hypot(d.pts[i].x-d.pts[i-1].x, d.pts[i].y-d.pts[i-1].y);
+  bar.classList.remove('hidden');
+  bar.innerHTML = `
+    <span class="db-info">Zeď · <b>${n}</b> ${n===1?'bod':(n<5?'body':'bodů')} · <b>${fmt(len)}</b> mm</span>
+    <button class="tb" id="dbUndo" ${n<2?'disabled style="opacity:.4"':''}>↩ Zpět</button>
+    ${n>=3 ? '<button class="tb close2" id="dbClose">⌐ Uzavřít</button>' : ''}
+    <button class="tb done" id="dbDone" ${n<2?'disabled style="opacity:.4"':''}>✓ Hotovo</button>
+    <button class="tb cancel" id="dbCancel">✕</button>`;
+  $('#dbUndo').onclick   = undoWallPoint;
+  $('#dbDone').onclick   = () => finishWall(false);
+  $('#dbCancel').onclick = () => { S.draft = null; render(); toast('Kresba zdi zrušena'); };
+  const c = $('#dbClose'); if(c) c.onclick = () => finishWall(true);
 }
 
 function gridMarkup(){
@@ -1143,13 +1181,69 @@ function startWallPoint(w){
   const s = snapPoint(w, true);
   if(!S.draft || S.draft.kind!=='wall'){
     S.draft = { kind:'wall', pts:[{x:R(s.x), y:R(s.y)}], cursor:{x:R(s.x), y:R(s.y)}, t:WALL_T_DEFAULT };
-  } else {
-    // dvojklik dorazí jako dva body na stejném místě → ber to jako dokončení
-    const last = S.draft.pts[S.draft.pts.length-1];
-    if(Math.hypot(last.x-s.x, last.y-s.y) < 1){ finishWall(false); return; }
-    S.draft.pts.push({ x:R(s.x), y:R(s.y) });
+    render();
+    return;
   }
+  const pts = S.draft.pts;
+  const last = pts[pts.length-1];
+
+  /* Stejné místo jako poslední bod → ignorovat. Dřív se to bralo jako
+     „dvojklik = hotovo“, jenže přichytávání na mřížku stáhne na stejné místo
+     i dva různé kliky a zeď pak končila, kdy nechtěla. */
+  if(Math.hypot(last.x-s.x, last.y-s.y) < 1) return;
+
+  /* Klik na první bod zeď uzavře (obvod místnosti). */
+  const first = pts[0];
+  if(pts.length >= 3 && Math.hypot(first.x-s.x, first.y-s.y) <= Math.max(S.snapMm, 50)){
+    finishWall(true);
+    return;
+  }
+  pts.push({ x:R(s.x), y:R(s.y) });
   render();
+}
+
+/** Poslední bod rozkreslené zdi zpátky. */
+function undoWallPoint(){
+  if(S.draft?.kind !== 'wall') return;
+  S.draft.pts.pop();
+  if(S.draft.pts.length === 0) S.draft = null;
+  render();
+}
+
+/**
+ * Rozkreslenou kresbu VŽDY dokončí a uloží – nikdy ji nezahodí.
+ * Volá se při přepnutí nástroje, takže zeď nemůže zmizet.
+ */
+function commitDraft(){
+  const d = S.draft;
+  if(!d) return false;
+  if(d.kind === 'wall'){
+    if(d.pts.length >= 2){ finishWall(!!d.closed); return true; }
+    S.draft = null; render(); return false;
+  }
+  if(d.kind === 'rect'){
+    const r = normRect(d.a, d.b);
+    S.draft = null;
+    if(r.w >= MIN_SIZE && r.h >= MIN_SIZE){
+      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:R(r.h) });
+      select('el', e.id); pushHistory();
+      return true;
+    }
+    render(); return false;
+  }
+  if(d.kind === 'guide'){
+    const L = Math.hypot(d.b.x-d.a.x, d.b.y-d.a.y);
+    S.draft = null;
+    if(L >= 50){
+      const g = { id:uid('g'), a:{...d.a}, b:{...d.b}, print:true, name:'Odstup' };
+      S.project.guides.push(g);
+      select('guide', g.id); pushHistory();
+      return true;
+    }
+    render(); return false;
+  }
+  S.draft = null; render();          // measure – není co ukládat
+  return false;
 }
 
 function finishWall(closed){
@@ -1864,8 +1958,8 @@ function doExportPdf(){
 /* ─────────────────────────── 16. NÁSTROJE / LIŠTA ─────────────────────────── */
 
 function setTool(t){
+  commitDraft();                       // rozdělaná zeď se uloží, ne zahodí
   S.tool = t;
-  S.draft = null;
   $$('.tool-btn').forEach(b => {
     const on = b.dataset.tool === t;
     b.classList.toggle('on', on);
@@ -1877,7 +1971,7 @@ function setTool(t){
 const HINTS = {
   select: 'Klepni na prvek, zeď nebo odstupovou čáru a uprav ji vpravo. Táhnout = přesun, bílé body = změna velikosti.',
   rect:   'Táhni a nakresli obdélník – rozměry pak přepíšeš vpravo. Krátké klepnutí vloží obdélník 600 × 600.',
-  wall:   'Klikej body zdi, dvojklik dokončí. Délky úseků pak přepíšeš vpravo na přesné hodnoty.',
+  wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   measure:'Táhni pro změření vzdálenosti – nic se neukládá.'
 };
@@ -1907,6 +2001,9 @@ function buildTools(){
      </button>`).join('');
   $('#tools').addEventListener('click', ev => {
     const b = ev.target.closest('.tool-btn'); if(!b) return;
+    /* Klik na nástroj, kterým právě kreslím, kresbu dokončí a nechá nástroj
+       aktivní – další klik začne novou zeď. */
+    if(b.dataset.tool === S.tool && S.draft){ commitDraft(); return; }
     setTool(b.dataset.tool);
   });
   // krátké klepnutí nástrojem Obdélník (bez tažení) vloží výchozí obdélník
@@ -1994,8 +2091,9 @@ function bindUi(){
     if(meta && k==='p'){ ev.preventDefault(); doExportPdf(); return; }
     if(meta && k==='d'){ ev.preventDefault(); duplicateSelection(); return; }
     if(ev.key==='Delete' || ev.key==='Backspace'){ ev.preventDefault(); deleteSelection(); return; }
+    if(ev.key==='Enter'){ if(S.draft?.kind==='wall'){ ev.preventDefault(); finishWall(false); } return; }
+    if(ev.key==='Backspace' && S.draft?.kind==='wall'){ ev.preventDefault(); undoWallPoint(); return; }
     if(ev.key==='Escape'){
-      if(S.draft?.kind==='wall') finishWall(false);
       S.draft = null; S.measure = null; select(null,null); setTool('select'); return;
     }
     if(k==='v'){ setTool('select'); }
