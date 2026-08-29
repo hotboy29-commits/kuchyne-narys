@@ -367,6 +367,10 @@ body{
   .pr-page{margin:0;box-shadow:none}
 }
 
+/* označená stěna v seznamu úseků */
+.seg-item.active { border-color:#2563eb; background:#eff6ff; }
+.seg-item.active .seg-n { background:#2563eb; color:#fff; }
+
 </style>
 </head>
 <body>
@@ -412,7 +416,7 @@ body{
         <g id="layerWalls"></g>
         <g id="layerElems"></g>
         <g id="layerGuides"></g>
-        <g id="layerDims"></g>
+        <g id="layerDims" style="pointer-events:none"></g>
         <g id="layerUI"></g>
       </g>
     </svg>
@@ -713,7 +717,8 @@ function doRender(){
   $('#layerWalls').innerHTML  = wallsMarkup();
   $('#layerElems').innerHTML  = elementsMarkup() + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
-  $('#layerDims').innerHTML   = S.showDims ? dimsMarkup() : '';
+  /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
+  $('#layerDims').innerHTML   = dimsMarkup();
   $('#layerUI').innerHTML     = uiMarkup();
   renderInspector();
   updateStatus();
@@ -767,12 +772,26 @@ function wallsMarkup(){
   const z = S.view.zoom;
   return S.project.walls.map(w => {
     if(w.pts.length < 2) return '';
+    const t = w.t || WALL_T_DEFAULT;
     const d = w.pts.map((p,i)=>(i?'L':'M')+p.x+' '+p.y).join(' ') + (w.closed?' Z':'');
     const sel = S.sel?.kind==='wall' && S.sel.id===w.id;
+    /* označená jednotlivá stěna (úsek) se zvýrazní modrým pásem */
+    let hl = '';
+    if(sel && S.sel.seg != null && w.pts[S.sel.seg] && w.pts[S.sel.seg+1]){
+      const a = w.pts[S.sel.seg], b = w.pts[S.sel.seg+1];
+      hl = `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" fill="none" stroke="#2563eb"
+            stroke-width="${t + 10/z}" stroke-linecap="square" opacity="0.5"/>`;
+    }
+    /* každá stěna má vlastní klikací pás → označíš ji jednotlivě */
+    const hits = wallSegments(w).map((sg,i)=>`<path d="M${sg.a.x} ${sg.a.y} L${sg.b.x} ${sg.b.y}"
+      fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}"
+      data-wallseg="${w.id}:${i}" style="cursor:pointer"/>`).join('');
     return `<g data-wall="${w.id}">
       <path d="${d}" fill="${w.closed?'#f8fafc':'none'}" stroke="${sel?'#2563eb':'#2b3138'}"
-            stroke-width="${w.t||WALL_T_DEFAULT}" stroke-linejoin="miter" stroke-linecap="square"/>
-      <path d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max((w.t||WALL_T_DEFAULT), 24/z)}" data-wallhit="${w.id}" style="cursor:pointer"/>
+            stroke-width="${t}" stroke-linejoin="miter" stroke-linecap="square"/>
+      ${hl}
+      <path d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}" data-wallhit="${w.id}" style="cursor:pointer"/>
+      ${hits}
     </g>`;
   }).join('');
 }
@@ -872,18 +891,20 @@ function dimText(x, y, str, color, px, rot=0){
     style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.28}px">${str}</text>`;
 }
 
-function dimLine(x1,y1,x2,y2,axis,px,color='#0d6b5f',mul=1){
+function dimLine(x1,y1,x2,y2,axis,color='#0d6b5f'){
+  /* všechno kreslíme v „obrazových“ tloušťkách dělených zoomem, takže kóta
+     je na displeji vždy stejně velká a při oddálení se nepromění v obra */
   const z = S.view.zoom;
   const len = axis==='x' ? Math.abs(x2-x1) : Math.abs(y2-y1);
   if(len < 20) return '';
-  const sw = px*mul/z, tick = 70*mul;
-  const a1 = axis==='x' ? `M${x1} ${y1-tick} l${tick*1.4} ${tick} l${-tick*1.4} ${tick}`
-                        : `M${x1-tick} ${y1} l${tick} ${tick*1.4} l${tick} ${-tick*1.4}`;
-  const a2 = axis==='x' ? `M${x2} ${y2-tick} l${-tick*1.4} ${tick} l${tick*1.4} ${tick}`
-                        : `M${x2+tick} ${y2} l${-tick} ${-tick*1.4} l${-tick} ${tick*1.4}`;
+  const sw = 1.2/z, tick = 5/z;
+  const a1 = axis==='x' ? `M${x1} ${y1-tick} l${tick} ${tick} l${-tick} ${tick}`
+                        : `M${x1-tick} ${y1} l${tick} ${tick} l${tick} ${-tick}`;
+  const a2 = axis==='x' ? `M${x2} ${y2-tick} l${-tick} ${tick} l${tick} ${tick}`
+                        : `M${x2+tick} ${y2} l${-tick} ${-tick} l${-tick} ${tick}`;
   return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-width="${sw}"/>
     <path d="${a1}" fill="${color}"/><path d="${a2}" fill="${color}"/>`
-    + dimText((x1+x2)/2, (y1+y2)/2, fmt(len), color, 150*mul, axis==='y'?-90:0);
+    + dimText((x1+x2)/2, (y1+y2)/2, fmt(len), color, 12, axis==='y'?-90:0);
 }
 
 function centroid(pts){
@@ -892,56 +913,68 @@ function centroid(pts){
   return { x:x/pts.length, y:y/pts.length };
 }
 
-/** Kóta podél úsečky – funguje i pro šikmé zdi, text je otočený podle úsečky. */
-function dimAlongSeg(s, wall, px=1.6, color='#0f62fe'){
+/** Kóta podél úsečky – délka zdi přímo ve výkresu. U uzavřeného obvodu
+ * sedí UVNITŘ místnosti těsně pod vnitřním lícem, aby se nikde nepletla;
+ * text se otočí podél i šikmé úsečky. Vše v konstantní velikosti na displeji. */
+function dimAlongSeg(sgm, wall, opts={}){
   const z = S.view.zoom;
-  const len = segLength(s);
+  const len = segLength(sgm);
   if(len < 20) return '';
-  const n = segNormal(s);
+  const n = segNormal(sgm);
   const t = wall.t || WALL_T_DEFAULT;
-  let sgn = 1;
-  if(wall.closed){                                  // u uzavřené zdi kótujeme ven
+  let sgn = opts.sgn != null ? opts.sgn : 1;
+  if(wall.closed && opts.sgn == null){
     const c = centroid(wall.pts);
-    const mx = (s.a.x+s.b.x)/2, my = (s.a.y+s.b.y)/2;
-    sgn = (n.nx*(c.x-mx) + n.ny*(c.y-my)) > 0 ? -1 : 1;
+    const mx = (sgm.a.x+sgm.b.x)/2, my = (sgm.a.y+sgm.b.y)/2;
+    sgn = (n.nx*(c.x-mx) + n.ny*(c.y-my)) > 0 ? 1 : -1;   // směrem dovnitř
   }
-  const off = t/2 + 320;
-  const a = { x:s.a.x + n.nx*off*sgn, y:s.a.y + n.ny*off*sgn };
-  const b = { x:s.b.x + n.nx*off*sgn, y:s.b.y + n.ny*off*sgn };
-
+  const off = (opts.off != null ? opts.off : t/2 + 150) * sgn;
+  const a = { x:sgm.a.x + n.nx*off, y:sgm.a.y + n.ny*off };
+  const b = { x:sgm.b.x + n.nx*off, y:sgm.b.y + n.ny*off };
   const ang = Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
   const rot = (ang > 90 || ang < -90) ? ang + 180 : ang;
-  const sw = px/z, tick = 80;
+  const sw = (opts.w || 1.1)/z, tick = 5/z, fs = (opts.fs || 12.5)/z;
   const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;
-  const px_ = -uy, py_ = ux;                        // kolmice na úsečku
-  const ar = (p, dir) => `M${p.x + px_*tick} ${p.y + py_*tick}
-     l${(-px_*tick*1.4 + ux*tick*dir)} ${(-py_*tick*1.4 + uy*tick*dir)}
-     l${(px_*2.8)} ${py_*2.8} Z`;
+  const qx = -uy, qy = ux;
+  const ar = (pt,dir) => `M${pt.x+qx*tick} ${pt.y+qy*tick}
+     l${-qx*tick + ux*tick*dir} ${-qy*tick + uy*tick*dir}
+     l${qx*2*tick} ${qy*2*tick} Z`;
+  const color = opts.color || '#0f62fe';
   return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="${sw}"/>`
     + `<path d="${ar(a,1)}" fill="${color}"/><path d="${ar(b,-1)}" fill="${color}"/>`
     + `<text x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${clamp(190/z,120,460)}" font-weight="700" fill="${color}" transform="rotate(${rot} ${(a.x+b.x)/2} ${(a.y+b.y)/2})"
-        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${50/z}px">${fmt(len)}</text>`;
+        font-size="${fs}" font-weight="700" fill="${color}" transform="rotate(${rot} ${(a.x+b.x)/2} ${(a.y+b.y)/2})"
+        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.3}px">${fmt(len)}</text>`;
 }
 
 function dimsMarkup(){
   const parts = [];
-  const els = S.project.elements;
-  for(const e of els){
-    parts.push(dimLine(e.x, e.y+e.d+220, e.x+e.w, e.y+e.d+220, 'x', 1.2));
+  /* celkové kóty obvodu a souvislých řad jen se zapnutým tlačítkem Kóty */
+  if(S.showDims){
+    for(const run of computeRuns())
+      parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#64748b'));
+    const wb = wallsBBox();
+    if(wb){
+      parts.push(dimLine(wb.x, wb.y-420, wb.x+wb.w, wb.y-420, 'x', '#334155'));
+      parts.push(dimLine(wb.x-420, wb.y, wb.x-420, wb.y+wb.h, 'y', '#334155'));
+    }
   }
-  for(const run of computeRuns()){
-    parts.push(dimLine(run.x1, run.y+620, run.x2, run.y+620, 'x', 1.8));
+  /* šířka skříně jen u vybrané – při kreslení nic nepřekáží */
+  if(S.sel?.kind === 'el'){
+    const e = getEl(S.sel.id);
+    if(e) parts.push(dimLine(e.x, e.y+e.d+160, e.x+e.w, e.y+e.d+160, 'x', '#0d6b5f'));
   }
-  const wb = wallsBBox();
-  if(wb){
-    parts.push(dimLine(wb.x, wb.y-700, wb.x+wb.w, wb.y-700, 'x', 1.8, '#334155'));
-    parts.push(dimLine(wb.x-700, wb.y, wb.x-700, wb.y+wb.h, 'y', 1.8, '#334155'));
-  }
-  /* Vybraná zeď má své délky vypsané přímo ve výkresu. */
+  /* vybraná zeď: délky úseků UVNITŘ obvodu; označená stěna svítí */
   if(S.sel?.kind === 'wall'){
     const w = S.project.walls.find(x => x.id === S.sel.id);
-    if(w) for(const sg of wallSegments(w)) parts.push(dimAlongSeg(sg, w));
+    if(w) wallSegments(w).forEach((sg,i)=>{
+      const selSeg = S.sel.seg == null ? null : S.sel.seg;
+      parts.push(dimAlongSeg(sg, w, {
+        color: selSeg === i ? '#0f62fe' : (selSeg == null ? '#0f62fe' : '#94a3b8'),
+        w: selSeg === i ? 2 : 1.1,
+        fs: selSeg === i ? 14 : 12
+      }));
+    });
   }
   return parts.join('');
 }
@@ -1210,6 +1243,13 @@ function onDown(ev){
     drag = { mode:'move', id:elId, start:{x:e.x, y:e.y}, at:w, moved:false };
     return;
   }
+  const segHit = t.dataset?.wallseg;
+  if(segHit){
+    const [wid, si] = segHit.split(':');
+    S.sel = { kind:'wall', id:wid, seg:+si };
+    render();
+    return;
+  }
   const wallHit = t.dataset?.wallhit;
   if(wallHit){ select('wall', wallHit); return; }
   const guideHit = t.dataset?.guidehit;
@@ -1352,6 +1392,12 @@ function onDblClick(ev){
   const t = ev.target;
   const elId = t.closest?.('[data-el]')?.dataset.el;
   if(elId){ select('el', elId); setTimeout(()=>$('#iName')?.focus(), 50); return; }
+  if(t.dataset?.wallseg){
+    const [wid, si] = t.dataset.wallseg.split(':');
+    S.sel = { kind:'wall', id:wid, seg:+si };
+    render();
+    return;
+  }
   if(t.dataset?.wallhit){ select('wall', t.dataset.wallhit); return; }
 }
 
@@ -1864,12 +1910,12 @@ function renderInspector(){
       <div class="insp-sec">
         <h4>Délky úseků</h4>
         <div class="seg-list">${segs.map((sg,i)=>`
-          <label class="seg-item">
+          <label class="seg-item${S.sel?.seg === i ? ' active':''}">
             <span class="seg-n">${i+1}</span>
             <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segLength(sg))}">
             <span class="seg-u">mm</span>
           </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}</div>
-        <p class="hint">Délky jsou napsané i ve výkresu. Přepsáním čísla se posune koncový bod ve směru úsečky.</p>
+        <p class="hint">Klepni přímo na stěnu ve výkresu – označí se jen ona a její délka. Přepsáním čísla se posune koncový bod ve směru úsečky.</p>
       </div>
 
       <div class="insp-sec">
@@ -1902,6 +1948,11 @@ function renderInspector(){
       setSegmentLength(w, +inp.dataset.seg, Math.max(10, +ev.target.value||10));
       pushHistory();
     }));
+    /* označená stěna → rovnou aktivní pole s délkou */
+    if(S.sel?.seg != null){
+      const act = $(`[data-seg="${S.sel.seg}"]`);
+      if(act) setTimeout(()=>{ act.focus(); act.select?.(); }, 40);
+    }
     $('#gMake').onclick = () => guideFromWall(w, Math.max(0, +$('#gDist').value||0), $('#gSide').value);
     $('#wOrtho').onclick = () => {
       const gap = orthogonalizeWall(w);
