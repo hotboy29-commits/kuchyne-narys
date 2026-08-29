@@ -370,6 +370,7 @@ body{
 /* označená stěna v seznamu úseků */
 .seg-item.active { border-color:#2563eb; background:#eff6ff; }
 .seg-item.active .seg-n { background:#2563eb; color:#fff; }
+.statusbar #appVer { opacity:.45; font-size:11px; margin-left:10px; white-space:nowrap; }
 
 </style>
 </head>
@@ -440,6 +441,7 @@ body{
   <!-- ── stavová lišta ── -->
   <footer class="statusbar">
     <span id="statusText">—</span>
+    <span id="appVer"></span>
     <div class="spacer"></div>
     <label class="snapctl">
       <span>Dosah magnetu</span>
@@ -512,6 +514,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
+const APP_VERSION = '2026-08-29b'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -2033,6 +2036,7 @@ function updateStatus(){
   el.textContent = `${p.walls.length} zdí · ${p.elements.length} prvků · ${p.guides.length} odstupů`
     + (S.sel ? ` · vybráno: ${S.sel.kind==='el' ? (getEl(S.sel.id)?.name || 'obdélník') : S.sel.kind==='wall' ? 'zeď' : 'odstup'}` : '');
   const so = $('#snapOut'); if(so) so.textContent = S.snapMm + ' mm';
+  const av = $('#appVer'); if(av) av.textContent = 'v' + APP_VERSION;
 }
 
 /* ─────────────────────────── 13. ULOŽENÍ ─────────────────────────── */
