@@ -518,7 +518,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29c'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29d'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -951,7 +951,7 @@ function dimAlongSeg(sgm, wall, opts={}){
     + `<path d="${ar(a,1)}" fill="${color}"/><path d="${ar(b,-1)}" fill="${color}"/>`
     + `<text x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fs}" font-weight="700" fill="${color}" transform="rotate(${rot} ${(a.x+b.x)/2} ${(a.y+b.y)/2})"
-        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.3}px">${fmt(len)}</text>`;
+        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.3}px">${opts.text || fmt(len)}</text>`;
 }
 
 function dimsMarkup(){
@@ -959,11 +959,23 @@ function dimsMarkup(){
   /* celkové kóty obvodu a souvislých řad jen se zapnutým tlačítkem Kóty */
   if(S.showDims){
     for(const run of computeRuns())
-      parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#64748b'));
-    const wb = wallsBBox();
-    if(wb){
-      parts.push(dimLine(wb.x, wb.y-420, wb.x+wb.w, wb.y-420, 'x', '#334155'));
-      parts.push(dimLine(wb.x-420, wb.y, wb.x-420, wb.y+wb.h, 'y', '#334155'));
+      if(run.ids.length > 1)   // jednu skříň nekótujeme dvakrát
+        parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#64748b'));
+    const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
+    if(closedWalls.length){
+      /* světlá míra místnosti – čisté vnitřní rozměry, to co změříš */
+      for(const w of closedWalls){
+        const t = w.t || WALL_T_DEFAULT;
+        const bb = wallBBox(w);
+        parts.push(dimLine(bb.x+t/2, bb.y+t/2+250, bb.x+bb.w-t/2, bb.y+t/2+250, 'x', '#334155'));
+        parts.push(dimLine(bb.x+t/2+250, bb.y+t/2, bb.x+t/2+250, bb.y+bb.h-t/2, 'y', '#334155'));
+      }
+    } else {
+      const wb = wallsBBox();
+      if(wb){
+        parts.push(dimLine(wb.x, wb.y-420, wb.x+wb.w, wb.y-420, 'x', '#334155'));
+        parts.push(dimLine(wb.x-420, wb.y, wb.x-420, wb.y+wb.h, 'y', '#334155'));
+      }
     }
   }
   /* šířka skříně jen u vybrané – při kreslení nic nepřekáží */
@@ -979,7 +991,8 @@ function dimsMarkup(){
       parts.push(dimAlongSeg(sg, w, {
         color: selSeg === i ? '#0f62fe' : (selSeg == null ? '#0f62fe' : '#94a3b8'),
         w: selSeg === i ? 2 : 1.1,
-        fs: selSeg === i ? 14 : 12
+        fs: selSeg === i ? 14 : 12,
+        text: fmt(Math.round(segClearLength(w,i)))
       }));
     });
   }
@@ -998,6 +1011,12 @@ function projectOrigin(){
     x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); any=true;
   }
   return any ? { x:Math.round(x0), y:Math.round(y0) } : { x:0, y:0 };
+}
+
+function wallBBox(w){
+  let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+  for(const p of w.pts){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); }
+  return { x:x0, y:y0, w:x1-x0, h:y1-y0 };
 }
 
 function wallsBBox(){
@@ -1563,7 +1582,28 @@ function createRoom(w, h, t){
 }
 
 /** Přepíše délku i-tého úseku; bod B se posune po směru úsečky. */
+/** Které konce úseku navazují na další stěnu (roh) – tam se měří od vnitřního líce. */
+function segEnds(wall, i){
+  const n = wall.pts.length;
+  const count = wall.closed ? n : n-1;
+  return { connA: wall.closed || i > 0, connB: wall.closed || i < count-1 };
+}
+
+/** Světlá (čistá) délka stěny – to, co fyzicky změříš metrem/laserem mezi
+ * vnitřními líci. Od středové osy se na každém napojeném konci odečte půlka
+ * tloušťky zdi. */
+function segClearLength(wall, i){
+  const t = wall.t || WALL_T_DEFAULT;
+  const { connA, connB } = segEnds(wall, i);
+  const L = segLength(wallSegments(wall)[i]);
+  return Math.max(1, L - (connA ? t/2 : 0) - (connB ? t/2 : 0));
+}
+
 function setSegmentLength(wall, i, len){
+  /* zadané číslo je světlá míra – středová osa je o půlky tloušťky delší */
+  const t = wall.t || WALL_T_DEFAULT;
+  const { connA, connB } = segEnds(wall, i);
+  len = len + (connA ? t/2 : 0) + (connB ? t/2 : 0);
   const a = wall.pts[i], b = wall.pts[(i+1) % wall.pts.length];
   const dx = b.x-a.x, dy = b.y-a.y, L = Math.hypot(dx,dy) || 1;
   const nx = R(a.x + dx/L*len), ny = R(a.y + dy/L*len);
@@ -1913,7 +1953,7 @@ function renderInspector(){
     const w = S.project.walls.find(x=>x.id===S.sel.id);
     if(!w){ S.sel = null; return renderInspector(); }
     const segs = wallSegments(w);
-    const total = segs.reduce((a,sg)=> a + segLength(sg), 0);
+    const total = segs.reduce((a,sg,i)=> a + segClearLength(w,i), 0);
     box.innerHTML = `
       <div class="insp-head">
         <input class="insp-name" id="wName" maxlength="40" value="${esc(w.name||'')}" placeholder="Název zdi">
@@ -1930,10 +1970,10 @@ function renderInspector(){
         <div class="seg-list">${segs.map((sg,i)=>`
           <label class="seg-item${S.sel?.seg === i ? ' active':''}">
             <span class="seg-n">${i+1}</span>
-            <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segLength(sg))}">
+            <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segClearLength(w,i))}">
             <span class="seg-u">mm</span>
           </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}</div>
-        <p class="hint">Klepni přímo na stěnu ve výkresu – označí se jen ona a její délka. Přepsáním čísla se posune koncový bod ve směru úsečky.</p>
+        <p class="hint">Délky jsou <b>světlé (čisté)</b> – měřené mezi vnitřními líci, přesně to, co změříš metrem nebo laserem. Klepni přímo na stěnu ve výkresu – označí se jen ona.</p>
       </div>
 
       ${S.sel?.seg != null ? `
@@ -2282,31 +2322,61 @@ function drawingSvg(P){
   }
 
   // kóty
-  const wb = wallsBBox();
-  if(wb){
-    parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k));
-    parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k));
+  const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
+  if(closedWalls.length){
+    for(const w of closedWalls){
+      const t = w.t || WALL_T_DEFAULT, bb = wallBBox(w);
+      parts.push(dimPrint(bb.x+t/2, bb.y+t/2+300, bb.x+bb.w-t/2, bb.y+t/2+300, 'x', k));
+      parts.push(dimPrint(bb.x+t/2+300, bb.y+t/2, bb.x+t/2+300, bb.y+bb.h-t/2, 'y', k));
+    }
+  } else {
+    const wb = wallsBBox();
+    if(wb){
+      parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k));
+      parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k));
+    }
   }
   for(const e of S.project.elements){
     parts.push(dimPrint(e.x, e.y+e.d+220, e.x+e.w, e.y+e.d+220, 'x', k, 0.8));
   }
   for(const run of computeRuns()){
-    parts.push(dimPrint(run.x1, run.y+620, run.x2, run.y+620, 'x', k, 1.1));
+    if(run.ids.length > 1)   // šířku jedné skříně netiskneme dvakrát
+      parts.push(dimPrint(run.x1, run.y+620, run.x2, run.y+620, 'x', k, 1.1));
   }
   for(const g of S.project.guides){
     if(!g.print) continue;
-    const horiz = Math.abs(g.a.y-g.b.y) <= Math.abs(g.a.x-g.b.x);
-    if(horiz) parts.push(dimPrint(g.a.x, g.a.y-180, g.b.x, g.b.y-180, 'x', k, 0.7, '#c2410c'));
-    else      parts.push(dimPrint(g.a.x-180, g.a.y, g.b.x-180, g.b.y, 'y', k, 0.7, '#c2410c'));
+    /* krátká kolmá kóta: o kolik mm je čára odsazená od vnitřního líce zdi,
+       měřeno ve středu čáry, aby to vyšlo na tu zeď, se kterou je rovnoběžná */
+    const gm = { x:(g.a.x+g.b.x)/2, y:(g.a.y+g.b.y)/2 };
+    let best = null;
+    for(const w of S.project.walls) for(const sg of wallSegments(w)){
+      const dx = sg.b.x-sg.a.x, dy = sg.b.y-sg.a.y, L2 = dx*dx+dy*dy || 1;
+      let u = ((gm.x-sg.a.x)*dx + (gm.y-sg.a.y)*dy) / L2; u = Math.max(0, Math.min(1, u));
+      const px = sg.a.x+dx*u, py = sg.a.y+dy*u;
+      const d = Math.hypot(gm.x-px, gm.y-py);
+      if(!best || d < best.d) best = { d, px, py, t: w.t||WALL_T_DEFAULT };
+    }
+    if(best && best.d > 1){
+      const dist = Math.round(best.d - best.t/2);
+      if(dist > 0){
+        const ux = (gm.x-best.px)/best.d, uy = (gm.y-best.py)/best.d;
+        const ix = best.px+ux*best.t/2, iy = best.py+uy*best.t/2;
+        parts.push(`<line x1="${R(ix)}" y1="${R(iy)}" x2="${R(gm.x)}" y2="${R(gm.y)}"
+          stroke="#c2410c" stroke-width="${sw(PEN.dim)}"/>`
+          + `<text x="${R((ix+gm.x)/2)}" y="${R((iy+gm.y)/2 - 60)}" text-anchor="middle"
+             font-size="${fs(2.4)}" fill="#c2410c" style="font-family:Helvetica,Arial,sans-serif">${fmt(dist)}</text>`);
+      }
+    }
   }
 
   // měřítko
-  const bx = b.x + 500, by = b.y + b.h - 300;
+  /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
+  const bx = b.x + b.w - 1000, by = b.y + b.h + 700;
   parts.push(`<line x1="${bx}" y1="${by}" x2="${bx+1000}" y2="${by}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
   parts.push(`<line x1="${bx}" y1="${by-60}" x2="${bx}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
   parts.push(`<line x1="${bx+1000}" y1="${by-60}" x2="${bx+1000}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
   parts.push(`<text x="${bx+500}" y="${by-110}" text-anchor="middle" font-size="${fs(2.6)}" fill="#111"
-    style="font-family:Helvetica,Arial,sans-serif">1 000 mm</text>`);
+    style="font-family:Helvetica,Arial,sans-serif">MĚŘÍTKO · úsečka = 1 000 mm</text>`);
 
   parts.push(`</g>`);
   return `<svg viewBox="0 0 ${P.w} ${P.h}" width="${P.w}mm" height="${P.h}mm" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
