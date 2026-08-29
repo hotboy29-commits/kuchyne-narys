@@ -518,7 +518,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29e'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29f'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1589,21 +1589,21 @@ function segEnds(wall, i){
   return { connA: wall.closed || i > 0, connB: wall.closed || i < count-1 };
 }
 
-/** Světlá (čistá) délka stěny – to, co fyzicky změříš metrem/laserem mezi
- * vnitřními líci. Od středové osy se na každém napojeném konci odečte půlka
- * tloušťky zdi. */
+/** Délka stěny tak, jak ji naměříš metrem/laserem.
+ * – OTEVŘENÁ zeď (příčka, kuchyňská stěna): žádná matematika – zadané i
+ *   zobrazené číslo je přesně délka té stěny, konec ke konci.
+ * – UZAVŘENÝ obvod: světlá míra místnosti – od délky se odečte celá tloušťka
+ *   zdi (půlka na každém rohu), protože laser měří mezi vnitřními líci. */
 function segClearLength(wall, i){
-  const t = wall.t || WALL_T_DEFAULT;
-  const { connA, connB } = segEnds(wall, i);
   const L = segLength(wallSegments(wall)[i]);
-  return Math.max(1, L - (connA ? t/2 : 0) - (connB ? t/2 : 0));
+  if(!wall.closed) return L;
+  return Math.max(1, L - (wall.t || WALL_T_DEFAULT));
 }
 
 function setSegmentLength(wall, i, len){
-  /* zadané číslo je světlá míra – středová osa je o půlky tloušťky delší */
-  const t = wall.t || WALL_T_DEFAULT;
-  const { connA, connB } = segEnds(wall, i);
-  len = len + (connA ? t/2 : 0) + (connB ? t/2 : 0);
+  /* uzavřený obvod: zadáváš světlou míru, osa je o tloušťku delší;
+     otevřená zeď: zadáváš přesnou délku stěny, nic se nepřipočítává */
+  if(wall.closed) len = len + (wall.t || WALL_T_DEFAULT);
   const a = wall.pts[i], b = wall.pts[(i+1) % wall.pts.length];
   const dx = b.x-a.x, dy = b.y-a.y, L = Math.hypot(dx,dy) || 1;
   const nx = R(a.x + dx/L*len), ny = R(a.y + dy/L*len);
@@ -1980,7 +1980,7 @@ function renderInspector(){
             <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segClearLength(w,i))}">
             <span class="seg-u">mm</span>
           </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}</div>
-        <p class="hint">Délky jsou <b>světlé (čisté)</b> – měřené mezi vnitřními líci, přesně to, co změříš metrem nebo laserem. Klepni přímo na stěnu ve výkresu – označí se jen ona.</p>
+        <p class="hint">U <b>otevřené zdi</b> je číslo přesná délka stěny, jak jsi ji naměřil. U <b>uzavřeného obvodu</b> je to světlá míra mezi vnitřními líci. Klepni přímo na stěnu ve výkresu – označí se jen ona.</p>
       </div>
 
       ${S.sel?.seg != null ? `
