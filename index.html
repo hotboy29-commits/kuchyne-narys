@@ -518,7 +518,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29f'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29g'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -639,12 +639,11 @@ function segIntersect(p1,p2,p3,p4){
 }
 /** Leží prvek v překryvu se zdí (středová osa + půl tloušťky)? */
 function elementHitsWall(e, wall){
-  /* -1 mm: prvek, který přesně dosedá na líc, se dotýká středové osy jen
-     „na hraně“ a nesmí být vyhodnocen jako překryv – jinak magnet ke zdi
-     nikdy neprojde. */
-  const half = Math.max(0, (wall.t || WALL_T_DEFAULT)/2 - 1);
-  const r = { x:e.x-half, y:e.y-half, w:e.w+half*2, h:e.d+half*2 };
-  return wallSegments(wall).some(s => segHitsRect(s.a, s.b, r));
+  /* prvek dosedající přesně na líc se pásu jen dotýká – nesmí být vyhodnocen
+     jako překryv, jinak magnet ke zdi nikdy neprojde. Proto obdélník o 1 mm
+     ztenčíme: do zdi se počítá jen to, co skutečně proniklo DOVNTŘ pásu. */
+  const r = { x:e.x+1, y:e.y+1, w:Math.max(0,e.w-2), h:Math.max(0,e.d-2) };
+  return wallBandOutline(wall).some(([a,b]) => segHitsRect(a, b, r));
 }
 
 /* ─────────────────────────── 4. SOUŘADNICE / POHLED ─────────────────────────── */
@@ -790,14 +789,19 @@ function wallsMarkup(){
             stroke="#2563eb" stroke-width="${t + 8/z}" stroke-linecap="square" data-seghl="${S.sel.seg}"/>`;
     }
     /* každá stěna má vlastní klikací pás → označíš ji jednotlivě */
-    const hits = wallSegments(w).map((sg,i)=>`<path d="M${sg.a.x} ${sg.a.y} L${sg.b.x} ${sg.b.y}"
-      fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}"
-      data-wallseg="${w.id}:${i}" style="cursor:pointer"/>`).join('');
+    const side = wallSide(w);
+    const hits = wallSegments(w).map((sg,i)=>{
+      const nn = segNormal(sg), ox = nn.nx*side*t/2, oy = nn.ny*side*t/2;
+      return `<path d="M${sg.a.x+ox} ${sg.a.y+oy} L${sg.b.x+ox} ${sg.b.y+oy}"
+        fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}"
+        data-wallseg="${w.id}:${i}" style="cursor:pointer"/>`;
+    }).join('');
+    const col = sel && S.sel.seg == null ? '#2563eb' : '#2b3138';
     return `<g data-wall="${w.id}">
-      <path d="${d}" fill="${w.closed?'#f8fafc':'none'}" stroke="${sel && S.sel.seg == null ? '#2563eb' : '#2b3138'}"
-            stroke-width="${t}" stroke-linejoin="miter" stroke-linecap="square"/>
+      ${w.closed ? `<path d="${d}" fill="#f8fafc" stroke="none"/>` : ''}
+      <path d="${wallBandPath(w)}" fill="${col}" fill-rule="evenodd" stroke="${col}" stroke-width="${1.5/z}" stroke-linejoin="miter"/>
       ${hl}
-      <path d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}" data-wallhit="${w.id}" style="cursor:pointer"/>
+      <path d="${wallBandPath(w)}" fill="transparent" stroke="transparent" stroke-width="${2/z}" data-wallhit="${w.id}" style="cursor:pointer"/>
       ${hits}
     </g>`;
   }).join('');
@@ -935,7 +939,7 @@ function dimAlongSeg(sgm, wall, opts={}){
     const mx = (sgm.a.x+sgm.b.x)/2, my = (sgm.a.y+sgm.b.y)/2;
     sgn = (n.nx*(c.x-mx) + n.ny*(c.y-my)) > 0 ? 1 : -1;   // směrem dovnitř
   }
-  const off = (opts.off != null ? opts.off : t/2 + 150) * sgn;
+  const off = (opts.off != null ? opts.off : 150) * sgn;
   const a = { x:sgm.a.x + n.nx*off, y:sgm.a.y + n.ny*off };
   const b = { x:sgm.b.x + n.nx*off, y:sgm.b.y + n.ny*off };
   const ang = Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
@@ -963,12 +967,11 @@ function dimsMarkup(){
         parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#64748b'));
     const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
     if(closedWalls.length){
-      /* světlá míra místnosti – čisté vnitřní rozměry, to co změříš */
+      /* čára je vnitřní líc → bbox je přímo světlá míra místnosti */
       for(const w of closedWalls){
-        const t = w.t || WALL_T_DEFAULT;
         const bb = wallBBox(w);
-        parts.push(dimLine(bb.x+t/2, bb.y+t/2+250, bb.x+bb.w-t/2, bb.y+t/2+250, 'x', '#334155'));
-        parts.push(dimLine(bb.x+t/2+250, bb.y+t/2, bb.x+t/2+250, bb.y+bb.h-t/2, 'y', '#334155'));
+        parts.push(dimLine(bb.x, bb.y+250, bb.x+bb.w, bb.y+250, 'x', '#334155'));
+        parts.push(dimLine(bb.x+250, bb.y, bb.x+250, bb.y+bb.h, 'y', '#334155'));
       }
     } else {
       const wb = wallsBBox();
@@ -1011,6 +1014,81 @@ function projectOrigin(){
     x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); any=true;
   }
   return any ? { x:Math.round(x0), y:Math.round(y0) } : { x:0, y:0 };
+}
+
+/** Směr, kam se přidává tloušťka zdi (1 / -1). U uzavřeného obvodu vždy ven,
+ * aby nakreslená čára zůstala přesně naměřeným vnitřním lícem. */
+function wallSide(w){
+  if(w.side != null) return w.side;
+  if(w.closed && w.pts.length > 2){
+    const t = w.t || WALL_T_DEFAULT;
+    const n0 = segNormal(wallSegments(w)[0]);
+    const out1 = w.pts.map(q => ({ x:q.x+n0.nx*t, y:q.y+n0.ny*t }));
+    return Math.abs(polygonArea(out1)) > Math.abs(polygonArea(w.pts)) ? 1 : -1;
+  }
+  return -1;
+}
+
+/** Obrys pásu zdi jako seznam úseček (pro kolize) – čára + rub + čela. */
+function wallBandOutline(w){
+  const t = w.t || WALL_T_DEFAULT, side = wallSide(w);
+  const pts = w.pts, n = pts.length, count = w.closed ? n : n-1;
+  const off = bandOffsets(w);
+  const edges = [];
+  for(let i=0;i<count;i++){
+    const a=pts[i], b=pts[(i+1)%n];
+    edges.push([a,b]);
+    edges.push([{x:a.x+off[i].x,y:a.y+off[i].y},{x:b.x+off[(i+1)%n].x,y:b.y+off[(i+1)%n].y}]);
+  }
+  if(!w.closed){
+    edges.push([pts[0],{x:pts[0].x+off[0].x,y:pts[0].y+off[0].y}]);
+    edges.push([pts[n-1],{x:pts[n-1].x+off[n-1].x,y:pts[n-1].y+off[n-1].y}]);
+  }
+  return edges;
+  function bandOffsets(w){
+    const N=[]; for(let i=0;i<count;i++){ const a=pts[i],b=pts[(i+1)%n];
+      const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1; N.push({x:-dy/L*t*side,y:dx/L*t*side}); }
+    const O=[];
+    for(let i=0;i<n;i++){
+      if(!w.closed && i===0){ O.push(N[0]); continue; }
+      if(!w.closed && i===n-1){ O.push(N[count-1]); continue; }
+      const n0=N[((i-1)+count)%count], n1=N[i%count];
+      let mx=n0.x+n1.x,my=n0.y+n1.y; const ml=Math.hypot(mx,my);
+      if(ml<1e-9){ O.push(n0); continue; }
+      mx/=ml;my/=ml;
+      const cos=(n0.x*mx+n0.y*my)/t;
+      const k=cos>0.25?t/cos:t/0.25;
+      O.push({x:mx*k,y:my*k});
+    }
+    return O;
+  }
+}
+
+/** SVG path pásu zdi – vyplní přesně to, co zabírá skutečná zeď. */
+function wallBandPath(w){
+  const pts=w.pts, n=pts.length;
+  if(n<2) return '';
+  const off = wallBandOutline(w); // jen pro výpočet offsetů níže
+  const t=w.t||WALL_T_DEFAULT, side=wallSide(w), count=w.closed?n:n-1;
+  const N=[]; for(let i=0;i<count;i++){ const a=pts[i],b=pts[(i+1)%n];
+    const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1; N.push({x:-dy/L*t*side,y:dx/L*t*side}); }
+  const O=[];
+  for(let i=0;i<n;i++){
+    if(!w.closed&&i===0){O.push(N[0]);continue;}
+    if(!w.closed&&i===n-1){O.push(N[count-1]);continue;}
+    const n0=N[((i-1)+count)%count],n1=N[i%count];
+    let mx=n0.x+n1.x,my=n0.y+n1.y;const ml=Math.hypot(mx,my);
+    if(ml<1e-9){O.push(n0);continue;}
+    mx/=ml;my/=ml;const cos=(n0.x*mx+n0.y*my)/t;const k=cos>0.25?t/cos:t/0.25;
+    O.push({x:mx*k,y:my*k});
+  }
+  if(w.closed){
+    const ring=a=>a.map((q,i)=>(i?'L':'M')+R(q.x)+' '+R(q.y)).join(' ')+' Z';
+    return ring(pts)+ring(pts.map((q,i)=>({x:q.x+O[i].x,y:q.y+O[i].y})));
+  }
+  let d=pts.map((q,i)=>(i?'L':'M')+R(q.x)+' '+R(q.y)).join(' ');
+  for(let i=n-1;i>=0;i--) d+=' L'+R(pts[i].x+O[i].x)+' '+R(pts[i].y+O[i].y);
+  return d+' Z';
 }
 
 function wallBBox(w){
@@ -1078,14 +1156,14 @@ const KIND_RANK = { wall:0, guide:1, el:2 };
 function snapCandidates(excludeId){
   const out = [];
   for(const w of S.project.walls){
-    const half = (w.t || WALL_T_DEFAULT)/2;
+    const t = w.t || WALL_T_DEFAULT, side = wallSide(w);
     for(const s of wallSegments(w)){
       const n = segNormal(s);
-      for(const sgn of [1,-1]){
-        const ax = s.a.x + n.nx*half*sgn, ay = s.a.y + n.ny*half*sgn;
-        const bx = s.b.x + n.nx*half*sgn, by = s.b.y + n.ny*half*sgn;
-        if(Math.abs(ax-bx) < 1e-6)      out.push({ axis:'x', pos:ax, from:Math.min(ay,by), to:Math.max(ay,by), kind:'wall', id:w.id, n, sgn });
-        else if(Math.abs(ay-by) < 1e-6) out.push({ axis:'y', pos:ay, from:Math.min(ax,bx), to:Math.max(ax,bx), kind:'wall', id:w.id, n, sgn });
+      for(const offv of [0, t*side]){
+        const ax = s.a.x + n.nx*offv, ay = s.a.y + n.ny*offv;
+        const bx = s.b.x + n.nx*offv, by = s.b.y + n.ny*offv;
+        if(Math.abs(ax-bx) < 1e-6)      out.push({ axis:'x', pos:ax, from:Math.min(ay,by), to:Math.max(ay,by), kind:'wall', id:w.id, n });
+        else if(Math.abs(ay-by) < 1e-6) out.push({ axis:'y', pos:ay, from:Math.min(ax,bx), to:Math.max(ax,bx), kind:'wall', id:w.id, n });
       }
     }
   }
@@ -1595,15 +1673,12 @@ function segEnds(wall, i){
  * – UZAVŘENÝ obvod: světlá míra místnosti – od délky se odečte celá tloušťka
  *   zdi (půlka na každém rohu), protože laser měří mezi vnitřními líci. */
 function segClearLength(wall, i){
-  const L = segLength(wallSegments(wall)[i]);
-  if(!wall.closed) return L;
-  return Math.max(1, L - (wall.t || WALL_T_DEFAULT));
+  /* nakreslená čára JE naměřená stěna – číslo je vždy přesně její délka */
+  return segLength(wallSegments(wall)[i]);
 }
 
 function setSegmentLength(wall, i, len){
-  /* uzavřený obvod: zadáváš světlou míru, osa je o tloušťku delší;
-     otevřená zeď: zadáváš přesnou délku stěny, nic se nepřipočítává */
-  if(wall.closed) len = len + (wall.t || WALL_T_DEFAULT);
+  /* zadané číslo je přesně délka stěny – čára je naměřená hrana */
   const a = wall.pts[i], b = wall.pts[(i+1) % wall.pts.length];
   const dx = b.x-a.x, dy = b.y-a.y, L = Math.hypot(dx,dy) || 1;
   const nx = R(a.x + dx/L*len), ny = R(a.y + dy/L*len);
@@ -1698,8 +1773,8 @@ function guideFromWall(wall, dist, side){
   for(const s of segs){
     const n = segNormal(s);
     const sgn = side === 'auto' ? pickSide(wall, s, n) : (side==='left' ? 1 : -1);
-    /* odstup se měří od vnitřního líce zdi, tedy od středové osy je to t/2 + dist */
-    const off = (wall.t || WALL_T_DEFAULT)/2 + dist;
+    /* odstup se měří přímo od naměřené čáry (líce) */
+    const off = dist;
     const a = { x:R(s.a.x + n.nx*off*sgn), y:R(s.a.y + n.ny*off*sgn) };
     const b = { x:R(s.b.x + n.nx*off*sgn), y:R(s.b.y + n.ny*off*sgn) };
     const g = { id:uid('g'), a, b, print:true, name:`Odstup ${fmt(dist)}` };
@@ -1980,7 +2055,7 @@ function renderInspector(){
             <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segClearLength(w,i))}">
             <span class="seg-u">mm</span>
           </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}</div>
-        <p class="hint">U <b>otevřené zdi</b> je číslo přesná délka stěny, jak jsi ji naměřil. U <b>uzavřeného obvodu</b> je to světlá míra mezi vnitřními líci. Klepni přímo na stěnu ve výkresu – označí se jen ona.</p>
+        <p class="hint">Číslo je <b>přesně délka stěny, jak jsi ji naměřil</b> – nakreslená čára je skutečná hrana, žádný střed. Klepni přímo na stěnu ve výkresu – označí se jen ona.</p>
       </div>
 
       ${S.sel?.seg != null ? `
@@ -1999,6 +2074,7 @@ function renderInspector(){
       <div class="insp-sec">
         <h4>Tloušťka zdi</h4>
         <label class="inline-fld"><input id="wT" type="number" step="5" min="20" max="1000" value="${w.t||WALL_T_DEFAULT}"><span>mm</span></label>
+        <p class="hint">Nakreslená čára je přesně naměřená stěna; tloušťka se přidává dozadu. Když roste špatným směrem, přepni ji tlačítkem ⇄.</p>
       </div>
 
       <div class="insp-sec">
@@ -2015,6 +2091,7 @@ function renderInspector(){
       </div>
 
       <div class="insp-actions">
+        <button class="tb" id="wFlip">⇄ Tloušťka na druhou stranu</button>
         <button class="tb" id="wOrtho">⌐ Pravé úhly</button>
         <button class="tb" id="wClose">${w.closed?'Otevřít':'Uzavřít'}</button>
         <button class="tb danger full" id="wDel">🗑 Smazat zeď</button>
@@ -2039,6 +2116,7 @@ function renderInspector(){
       if(act) setTimeout(()=>{ act.focus(); act.select?.(); }, 40);
     }
     $('#gMake').onclick = () => guideFromWall(w, Math.max(0, +$('#gDist').value||0), $('#gSide').value);
+    $('#wFlip').onclick = () => { w.side = -wallSide(w); pushHistory(); render(); };
     $('#wOrtho').onclick = () => {
       const gap = orthogonalizeWall(w);
       pushHistory();
@@ -2302,8 +2380,9 @@ function drawingSvg(P){
   for(const w of S.project.walls){
     if(w.pts.length < 2) continue;
     const d = w.pts.map((p,i)=>(i?'L':'M')+p.x+' '+p.y).join(' ') + (w.closed?' Z':'');
-    parts.push(`<path d="${d}" fill="${w.closed?'#fafafa':'none'}" stroke="#22262b"
-      stroke-width="${w.t||WALL_T_DEFAULT}" stroke-linejoin="miter" stroke-linecap="square"/>`);
+    if(w.closed) parts.push(`<path d="${d}" fill="#fafafa" stroke="none"/>`);
+    parts.push(`<path d="${wallBandPath(w)}" fill="#22262b" fill-rule="evenodd"
+      stroke="#22262b" stroke-width="${sw(0.18)}" stroke-linejoin="miter"/>`);
   }
 
   // prvky – tenká linka, žádná výplň přes sousedy
@@ -2332,9 +2411,9 @@ function drawingSvg(P){
   const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
   if(closedWalls.length){
     for(const w of closedWalls){
-      const t = w.t || WALL_T_DEFAULT, bb = wallBBox(w);
-      parts.push(dimPrint(bb.x+t/2, bb.y+t/2+300, bb.x+bb.w-t/2, bb.y+t/2+300, 'x', k));
-      parts.push(dimPrint(bb.x+t/2+300, bb.y+t/2, bb.x+t/2+300, bb.y+bb.h-t/2, 'y', k));
+      const bb = wallBBox(w);
+      parts.push(dimPrint(bb.x, bb.y+300, bb.x+bb.w, bb.y+300, 'x', k));
+      parts.push(dimPrint(bb.x+300, bb.y, bb.x+300, bb.y+bb.h, 'y', k));
     }
   } else {
     const wb = wallsBBox();
@@ -2364,10 +2443,10 @@ function drawingSvg(P){
       if(!best || d < best.d) best = { d, px, py, t: w.t||WALL_T_DEFAULT };
     }
     if(best && best.d > 1){
-      const dist = Math.round(best.d - best.t/2);
+      /* čára JE líc – vzdálenost od ní je přímo odsazení */
+      const dist = Math.round(best.d);
       if(dist > 0){
-        const ux = (gm.x-best.px)/best.d, uy = (gm.y-best.py)/best.d;
-        const ix = best.px+ux*best.t/2, iy = best.py+uy*best.t/2;
+        const ix = best.px, iy = best.py;
         parts.push(`<line x1="${R(ix)}" y1="${R(iy)}" x2="${R(gm.x)}" y2="${R(gm.y)}"
           stroke="#c2410c" stroke-width="${sw(PEN.dim)}"/>`
           + `<text x="${R((ix+gm.x)/2)}" y="${R((iy+gm.y)/2 - 60)}" text-anchor="middle"
