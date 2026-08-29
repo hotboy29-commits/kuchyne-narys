@@ -684,8 +684,11 @@ function updateDrawbar(){
   let len = 0;
   for(let i=1;i<n;i++) len += Math.hypot(d.pts[i].x-d.pts[i-1].x, d.pts[i].y-d.pts[i-1].y);
   bar.classList.remove('hidden');
+  const info = n === 0
+    ? 'Klikni první bod zdi'
+    : `Zeď · <b>${n}</b> ${n===1?'bod':(n<5?'body':'bodů')} · <b>${fmt(len)}</b> mm`;
   bar.innerHTML = `
-    <span class="db-info">Zeď · <b>${n}</b> ${n===1?'bod':(n<5?'body':'bodů')} · <b>${fmt(len)}</b> mm</span>
+    <span class="db-info">${info}</span>
     <button class="tb" id="dbUndo" ${n<2?'disabled style="opacity:.4"':''}>↩ Zpět</button>
     ${n>=3 ? '<button class="tb close2" id="dbClose">⌐ Uzavřít</button>' : ''}
     <button class="tb done" id="dbDone" ${n<2?'disabled style="opacity:.4"':''}>✓ Hotovo</button>
@@ -786,10 +789,21 @@ function draftMarkup(){
   if(!d) return '';
   if(d.kind==='wall'){
     const pts = d.pts;
-    if(!pts.length) return '';
+    if(!pts.length){
+      return `<circle cx="${d.cursor.x}" cy="${d.cursor.y}" r="${9/z}" fill="none"
+        stroke="#2563eb" stroke-width="${2.5/z}"/>`;
+    }
+    const last = pts[pts.length-1];
+    const segLen = Math.hypot(d.cursor.x-last.x, d.cursor.y-last.y);
     const path = pts.map((p,i)=>(i?'L':'M')+p.x+' '+p.y).join(' ') + ` L${d.cursor.x} ${d.cursor.y}`;
     return `<path d="${path}" fill="none" stroke="#2563eb" stroke-width="${d.t}" opacity=".55" stroke-linejoin="miter"/>`
-      + pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="${10/z}" fill="#2563eb"/>`).join('');
+      + pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="${10/z}" fill="#2563eb"/>`).join('')
+      + `<circle cx="${d.cursor.x}" cy="${d.cursor.y}" r="${8/z}" fill="#2563eb" opacity=".5"/>`
+      + (segLen > 20
+          ? `<text x="${(last.x+d.cursor.x)/2}" y="${(last.y+d.cursor.y)/2 - 90/z}" text-anchor="middle"
+               font-size="${clamp(170/z,110,400)}" font-weight="700" fill="#1d4ed8"
+               style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${45/z}px">${fmt(segLen)}</text>`
+          : '');
   }
   if(d.kind==='rect'){
     const r = normRect(d.a, d.b);
@@ -1034,7 +1048,19 @@ function onDown(ev){
   const t = ev.target;
   const w = screenToWorld(ev.clientX, ev.clientY);
 
-  if(S.tool==='wall'){ startWallPoint(w); return; }
+  if(S.tool==='wall'){
+    /* Bod se zapíše až při ZVEDNUTÍ prstu. Během stisknutí běží náhled, takže
+       úsek vidíš táhnout za prstem dřív, než ho potvrdíš. */
+    const sp = snapPoint(w, true);
+    if(!S.draft || S.draft.kind !== 'wall'){
+      S.draft = { kind:'wall', pts:[], cursor:{x:R(sp.x), y:R(sp.y)}, t:WALL_T_DEFAULT };
+    } else {
+      S.draft.cursor = { x:R(sp.x), y:R(sp.y) };
+    }
+    drag = { mode:'wallDraw' };
+    render();
+    return;
+  }
   if(S.tool==='rect'){
     S.draft = { kind:'rect', a:w, b:w };
     drag = { mode:'rect' };
@@ -1099,6 +1125,16 @@ function onMove(ev){
     S.view.tx = drag.tx + (ev.clientX - drag.sx);
     S.view.ty = drag.ty + (ev.clientY - drag.sy);
     render();
+    return;
+  }
+  if(drag.mode==='wallDraw'){
+    /* Náhledová čára musí Following prst. Dřív se S.draft.cursor nastavil jen
+       jednou u prvního bodu, takže guma pořád mířila zpátky na začátek. */
+    if(S.draft?.kind === 'wall'){
+      const sp = snapPoint(w, true);
+      S.draft.cursor = { x:R(sp.x), y:R(sp.y) };
+      render();
+    }
     return;
   }
   if(drag.mode==='rect' || drag.mode==='measure'){
@@ -1191,6 +1227,7 @@ function onUp(ev){
     S.draft = null;
   }
   if(drag?.mode==='measure'){ S.draft = null; }
+  if(drag?.mode==='wallDraw'){ commitWallPoint(); }
   if(drag?.mode==='move'){
     S.guides = [];
     if(drag.moved) commitPreDrag();
@@ -1275,28 +1312,25 @@ function ptrUp(ev){
 
 /* ─────────────────────────── 8. ZDI ─────────────────────────── */
 
-function startWallPoint(w){
-  const s = snapPoint(w, true);
-  if(!S.draft || S.draft.kind!=='wall'){
-    S.draft = { kind:'wall', pts:[{x:R(s.x), y:R(s.y)}], cursor:{x:R(s.x), y:R(s.y)}, t:WALL_T_DEFAULT };
-    render();
-    return;
-  }
-  const pts = S.draft.pts;
-  const last = pts[pts.length-1];
+/** Zapíše bod, na kterém se zvedl prst. */
+function commitWallPoint(){
+  if(S.draft?.kind !== 'wall') return;
+  const c = S.draft.cursor, pts = S.draft.pts;
+  if(pts.length === 0){ pts.push({ x:c.x, y:c.y }); render(); return; }
 
+  const last = pts[pts.length-1];
   /* Stejné místo jako poslední bod → ignorovat. Dřív se to bralo jako
      „dvojklik = hotovo“, jenže přichytávání na mřížku stáhne na stejné místo
      i dva různé kliky a zeď pak končila, kdy nechtěla. */
-  if(Math.hypot(last.x-s.x, last.y-s.y) < 1) return;
+  if(Math.hypot(last.x-c.x, last.y-c.y) < 1) return;
 
   /* Klik na první bod zeď uzavře (obvod místnosti). */
   const first = pts[0];
-  if(pts.length >= 3 && Math.hypot(first.x-s.x, first.y-s.y) <= Math.max(S.snapMm, 50)){
+  if(pts.length >= 3 && Math.hypot(first.x-c.x, first.y-c.y) <= Math.max(S.snapMm, 50)){
     finishWall(true);
     return;
   }
-  pts.push({ x:R(s.x), y:R(s.y) });
+  pts.push({ x:c.x, y:c.y });
   render();
 }
 
