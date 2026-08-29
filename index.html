@@ -518,7 +518,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29d'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29e'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1931,7 +1931,14 @@ function renderInspector(){
       </div>`;
 
     const bind = (id, fn, ev='change') => { const el = $(id); if(el) el.addEventListener(ev, fn); };
-    bind('#iName', ev => { e.name = ev.target.value; pushHistory(); render(); }, 'input');
+    /* název nesmí při psaní přestavět panel – jinak po každém písmenu
+       vypadne fokus a musíš klikat znovu */
+    bind('#iName', ev => {
+      e.name = ev.target.value;
+      $('#layerElems').innerHTML = elementsMarkup() + guidesMarkup();
+      updateStatus();
+    }, 'input');
+    bind('#iName', () => pushHistory(), 'change');
     bind('#iNote', ev => { e.note = ev.target.value; pushHistory(); }, 'input');
     bind('#iW', ev => { e.w = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
     bind('#iD', ev => { e.d = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
