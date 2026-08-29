@@ -371,6 +371,10 @@ body{
 .seg-item.active { border-color:#2563eb; background:#eff6ff; }
 .seg-item.active .seg-n { background:#2563eb; color:#fff; }
 .statusbar #appVer { opacity:.45; font-size:11px; margin-left:10px; white-space:nowrap; }
+.seg-move { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:6px 0 8px; }
+.seg-move .tb { font-size:15px; padding:8px 0; }
+.seg-move { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:6px 0 8px; }
+.seg-move .tb { font-size:15px; padding:8px 0; }
 
 </style>
 </head>
@@ -778,19 +782,19 @@ function wallsMarkup(){
     const t = w.t || WALL_T_DEFAULT;
     const d = w.pts.map((p,i)=>(i?'L':'M')+p.x+' '+p.y).join(' ') + (w.closed?' Z':'');
     const sel = S.sel?.kind==='wall' && S.sel.id===w.id;
-    /* označená jednotlivá stěna (úsek) se zvýrazní modrým pásem */
+    /* označíš-li JEDNU stěnu, zbytek zdi zůstane tmavý – modrá je jen ona */
     let hl = '';
-    if(sel && S.sel.seg != null && w.pts[S.sel.seg] && w.pts[S.sel.seg+1]){
-      const a = w.pts[S.sel.seg], b = w.pts[S.sel.seg+1];
-      hl = `<path d="M${a.x} ${a.y} L${b.x} ${b.y}" fill="none" stroke="#2563eb"
-            stroke-width="${t + 10/z}" stroke-linecap="square" opacity="0.5"/>`;
+    if(sel && S.sel.seg != null){
+      const sgm = wallSegments(w)[S.sel.seg];
+      if(sgm) hl = `<path d="M${sgm.a.x} ${sgm.a.y} L${sgm.b.x} ${sgm.b.y}" fill="none"
+            stroke="#2563eb" stroke-width="${t + 8/z}" stroke-linecap="square" data-seghl="${S.sel.seg}"/>`;
     }
     /* každá stěna má vlastní klikací pás → označíš ji jednotlivě */
     const hits = wallSegments(w).map((sg,i)=>`<path d="M${sg.a.x} ${sg.a.y} L${sg.b.x} ${sg.b.y}"
       fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}"
       data-wallseg="${w.id}:${i}" style="cursor:pointer"/>`).join('');
     return `<g data-wall="${w.id}">
-      <path d="${d}" fill="${w.closed?'#f8fafc':'none'}" stroke="${sel?'#2563eb':'#2b3138'}"
+      <path d="${d}" fill="${w.closed?'#f8fafc':'none'}" stroke="${sel && S.sel.seg == null ? '#2563eb' : '#2b3138'}"
             stroke-width="${t}" stroke-linejoin="miter" stroke-linecap="square"/>
       ${hl}
       <path d="${d}" fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}" data-wallhit="${w.id}" style="cursor:pointer"/>
@@ -1568,6 +1572,17 @@ function setSegmentLength(wall, i, len){
   render();
 }
 
+/** Posune jen označenou stěnu (úsek) o dx/dy mm – společné body vtáhne s sebou,
+ * sousední stěny se napojí. */
+function moveSegment(wall, i, dx, dy){
+  const n = wall.pts.length;
+  if(i == null || i < 0 || i >= n) return;
+  const a = wall.pts[i], b = wall.pts[(i+1) % n];
+  a.x = R(a.x + dx); a.y = R(a.y + dy);
+  if(b !== a){ b.x = R(b.x + dx); b.y = R(b.y + dy); }
+  render();
+}
+
 /**
  * Srovná zeď do pravých úhlů BEZ ZMĚNY DÉLEK.
  *
@@ -1921,6 +1936,19 @@ function renderInspector(){
         <p class="hint">Klepni přímo na stěnu ve výkresu – označí se jen ona a její délka. Přepsáním čísla se posune koncový bod ve směru úsečky.</p>
       </div>
 
+      ${S.sel?.seg != null ? `
+      <div class="insp-sec">
+        <h4>Posun označené stěny</h4>
+        <div class="seg-move">
+          <button class="tb" data-mv="0,-1" title="o krok nahoru">▲</button>
+          <button class="tb" data-mv="-1,0" title="o krok doleva">◀</button>
+          <button class="tb" data-mv="0,1" title="o krok dolů">▼</button>
+          <button class="tb" data-mv="1,0" title="o krok doprava">▶</button>
+        </div>
+        <label class="inline-fld"><input id="segStep" type="number" step="5" min="1" value="${S.segStep||50}"><span>mm / krok</span></label>
+        <p class="hint">Šipky posunou jen označenou stěnu o krok; sousední stěny se napojí.</p>
+      </div>` : ''}
+
       <div class="insp-sec">
         <h4>Tloušťka zdi</h4>
         <label class="inline-fld"><input id="wT" type="number" step="5" min="20" max="1000" value="${w.t||WALL_T_DEFAULT}"><span>mm</span></label>
@@ -1949,6 +1977,13 @@ function renderInspector(){
     const wT = $('#wT'); if(wT) wT.addEventListener('change', ev => { w.t = clamp(+ev.target.value||WALL_T_DEFAULT,20,1000); pushHistory(); render(); });
     $$('[data-seg]').forEach(inp => inp.addEventListener('change', ev => {
       setSegmentLength(w, +inp.dataset.seg, Math.max(10, +ev.target.value||10));
+      pushHistory();
+    }));
+    $$('[data-mv]').forEach(btn => btn.addEventListener('click', () => {
+      const [dx, dy] = btn.dataset.mv.split(',').map(Number);
+      const step = Math.max(1, +$('#segStep')?.value || 50);
+      S.segStep = step;
+      moveSegment(w, S.sel.seg, dx*step, dy*step);
       pushHistory();
     }));
     /* označená stěna → rovnou aktivní pole s délkou */
