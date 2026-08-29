@@ -702,6 +702,8 @@ function render(){
 }
 
 function doRender(){
+  /* dokud netáhneš, držíme celý nákres ukotvený v počátku (0,0) */
+  if(!drag) rebaseProject();
   const v = S.view;
   $('#zoomLabel').textContent = Math.round(v.zoom*100) + ' %';
   const el = $('#svg');
@@ -948,7 +950,14 @@ function dimsMarkup(){
     souřadnice v inspektoru, aby to nebyla nesmyslně velká čísla. */
 function projectOrigin(){
   const b = wallsBBox();
-  return b ? { x: Math.round(b.x), y: Math.round(b.y) } : { x:0, y:0 };
+  if(b) return { x: Math.round(b.x), y: Math.round(b.y) };
+  /* ještě žádné zdi – vezmeme za roh první obdélník, ať už od začátku
+     nepracujeme s obrovskými souřadnicemi */
+  let x0=Infinity, y0=Infinity, any=false;
+  for(const e of S.project.elements){
+    x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); any=true;
+  }
+  return any ? { x:Math.round(x0), y:Math.round(y0) } : { x:0, y:0 };
 }
 
 function wallsBBox(){
@@ -1510,17 +1519,69 @@ function setSegmentLength(wall, i, len){
   render();
 }
 
-/** Sjednotí zeď na pravé úhly (úseky srovná do osy X/Y). */
+/**
+ * Srovná zeď do pravých úhlů BEZ ZMĚNY DÉLEK.
+ *
+ * Každý úsek si nechá svou naměřenou délku, změní se jen jeho směr —
+ * a to vždy na nejbližší násobek 90° počítaný od směru PRVNÍHO úseku.
+ * Díky společné referenci jsou sousední úseky buď rovnoběžné, nebo kolmé,
+ * nikdy ne „téměř". Celý nákres se přitom neotáčí.
+ *
+ * Vrátí rozdíl v mm, o který se uzavřený obvod po srovnání nezavře
+ * (0 = zavřel se přesně). Délky nikdy nepřepisujeme — nesedí-li protilehlé
+ * strany, řekneme to uživateli a on si délky upraví sám.
+ */
 function orthogonalizeWall(wall){
-  for(let i=1;i<wall.pts.length;i++){
-    const a = wall.pts[i-1], b = wall.pts[i];
-    if(Math.abs(b.x-a.x) > Math.abs(b.y-a.y)) b.y = a.y; else b.x = a.x;
+  const n = wall.pts.length;
+  if(n < 2) return 0;
+  const Q = Math.PI/2;
+  const segs = [];
+  for(let i=0;i<n-1;i++){
+    const a = wall.pts[i], b = wall.pts[i+1];
+    const dx = b.x-a.x, dy = b.y-a.y;
+    segs.push({ len:Math.hypot(dx,dy), ang:Math.atan2(dy,dx) });
   }
-  if(wall.closed && wall.pts.length>2){
-    const f = wall.pts[0], l = wall.pts[wall.pts.length-1];
-    if(Math.abs(f.x-l.x) > Math.abs(f.y-l.y)) f.y = l.y; else f.x = l.x;
+  /* společná reference = první úsek, ať se zeď neotočí do jiné polohy */
+  const base = segs[0].ang;
+  for(const sg of segs) sg.dir = base + Math.round((sg.ang - base)/Q)*Q;
+
+  /* délky bereme z původních úseků a přenášíme je do nových směrů */
+  const p0 = wall.pts[0];
+  let x = p0.x, y = p0.y;
+  for(let i=0;i<segs.length;i++){
+    x = R(x + Math.cos(segs[i].dir)*segs[i].len);
+    y = R(y + Math.sin(segs[i].dir)*segs[i].len);
+    wall.pts[i+1] = { x, y };
+  }
+
+  /* u uzavřeného obvodu změříme, o kolik se konec rozešel se začátkem */
+  let gap = 0;
+  if(wall.closed && n > 2){
+    const last = wall.pts[n-1];
+    gap = Math.round(Math.hypot(p0.x-last.x, p0.y-last.y));
   }
   render();
+  return gap;
+}
+
+/**
+ * Posune celý nákres tak, aby jeho levý horní roh seděl v (0,0).
+ * Proto v celém projektu — u zdí, prvků, odstupů i v kótách — vidíš
+ * malá čísla od rohu obvodu místo obrovských souřadnic „odněkud z pohledu".
+ * Pohled posuneme o stejný rozdíl, takže se obrázek na obrazovce nehne.
+ */
+function rebaseProject(){
+  const OR = projectOrigin();
+  const ox = OR.x, oy = OR.y;
+  if(!ox && !oy) return false;
+  const move = o => { o.x = R(o.x - ox); o.y = R(o.y - oy); };
+  for(const w of S.project.walls) for(const p of w.pts) move(p);
+  for(const e of S.project.elements){ e.x = R(e.x - ox); e.y = R(e.y - oy); }
+  for(const g of S.project.guides){ move(g.a); move(g.b); }
+  if(S.draft){ for(const p of S.draft.pts) move(p); if(S.draft.cursor) move(S.draft.cursor); }
+  S.view.tx += ox*S.view.zoom;
+  S.view.ty += oy*S.view.zoom;
+  return true;
 }
 
 /* ─────────────────────────── 9. ODSTUPOVÉ ČÁRY ─────────────────────────── */
@@ -1842,7 +1903,13 @@ function renderInspector(){
       pushHistory();
     }));
     $('#gMake').onclick = () => guideFromWall(w, Math.max(0, +$('#gDist').value||0), $('#gSide').value);
-    $('#wOrtho').onclick = () => { orthogonalizeWall(w); pushHistory(); };
+    $('#wOrtho').onclick = () => {
+      const gap = orthogonalizeWall(w);
+      pushHistory();
+      toast(gap > 1
+        ? `Srovnáno do pravých úhlů. Délky jsem nechal být, ale obvod se nezavírá – chybí ${fmt(gap)} mm. Uprav délky protilehlých stran.`
+        : 'Srovnáno do pravých úhlů, délky zůstaly stejné');
+    };
     $('#wClose').onclick = () => { w.closed = !w.closed; pushHistory(); render(); };
     $('#wDel').onclick = deleteSelection;
     return;
@@ -2363,6 +2430,9 @@ function loadProject(p, {resetHistory=true}={}){
     created: p.created || new Date().toISOString()
   };
   S.sel = null;
+  /* starší uložené nákresy mají souřadnice od bývalého středu pohledu –
+     hned je ukotvíme do počátku, ať v nich nejsou obrovská čísla */
+  rebaseProject();
   $('#projTitle').textContent = S.project.info.name || 'Nový nárys';
   if(resetHistory){ history = [snapshot()]; historyIndex = 0; }
   fitView();
