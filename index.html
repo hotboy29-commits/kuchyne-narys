@@ -192,6 +192,50 @@ body{
 .seg-len{display:flex;align-items:center;gap:4px;font-size:11.5px;color:var(--ink-3)}
 .seg-len input{width:88px;padding:6px 8px;text-align:right}
 
+/* hlavička inspektoru s editovatelným názvem rovnou v titulku */
+.insp-head{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.insp-name{
+  font-size:16px;font-weight:700;color:var(--ink);border:1px solid transparent;
+  border-radius:8px;padding:5px 7px;background:transparent;width:100%;font-family:var(--font);
+}
+.insp-name:hover{border-color:var(--line)}
+.insp-name:focus{outline:2px solid var(--accent);outline-offset:-1px;background:var(--surface);border-color:var(--accent)}
+.insp-kind{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);
+  padding-left:7px;border-left:3px solid var(--k,var(--line-2))}
+
+.big-stat{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:var(--radius-s);
+  padding:11px 13px;margin-bottom:16px;
+}
+.big-stat span{font-size:11.5px;font-weight:600;color:var(--ink-2)}
+.big-stat b{font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.big-stat i{font-size:12px;font-style:normal;color:var(--ink-3);margin-left:4px;font-weight:600}
+
+/* seznam úseků */
+.seg-list{display:flex;flex-direction:column;gap:6px}
+.seg-item{display:flex;align-items:center;gap:8px;margin:0}
+.seg-n{
+  width:22px;height:22px;flex:0 0 22px;border-radius:6px;background:var(--surface-2);
+  border:1px solid var(--line);display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;color:var(--ink-2);
+}
+.seg-item input{
+  flex:1;min-width:0;text-align:right;padding:8px 9px;border:1px solid var(--line-2);
+  border-radius:8px;font-size:14px;font-variant-numeric:tabular-nums;font-family:var(--font);
+}
+.seg-item input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.seg-u{font-size:11.5px;color:var(--ink-3);flex:0 0 auto}
+
+.inline-row{display:flex;gap:8px;align-items:stretch}
+.inline-row .tb{border:1px solid var(--line);background:var(--surface);flex:0 0 auto}
+.inline-fld{display:flex;align-items:center;gap:6px;margin:0}
+.inline-fld input{width:88px;text-align:right;padding:8px 9px;border:1px solid var(--line-2);
+  border-radius:8px;font-size:14px;font-variant-numeric:tabular-nums;font-family:var(--font)}
+.inline-fld span{font-size:11.5px;color:var(--ink-3)}
+.mini-select{margin-top:8px;width:100%;padding:7px 9px;border:1px solid var(--line-2);
+  border-radius:8px;font-size:12.5px;color:var(--ink-2);background:var(--surface);font-family:var(--font)}
+
 .swatches{display:flex;flex-wrap:wrap;gap:8px}
 .sw-btn{width:30px;height:30px;border-radius:8px;border:2px solid transparent;cursor:pointer;padding:0}
 .sw-btn.on{border-color:var(--ink);box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ink)}
@@ -840,6 +884,44 @@ function dimLine(x1,y1,x2,y2,axis,px,color='#0d6b5f',mul=1){
     + dimText((x1+x2)/2, (y1+y2)/2, fmt(len), color, 150*mul, axis==='y'?-90:0);
 }
 
+function centroid(pts){
+  let x=0, y=0;
+  for(const p of pts){ x+=p.x; y+=p.y; }
+  return { x:x/pts.length, y:y/pts.length };
+}
+
+/** Kóta podél úsečky – funguje i pro šikmé zdi, text je otočený podle úsečky. */
+function dimAlongSeg(s, wall, px=1.6, color='#0f62fe'){
+  const z = S.view.zoom;
+  const len = segLength(s);
+  if(len < 20) return '';
+  const n = segNormal(s);
+  const t = wall.t || WALL_T_DEFAULT;
+  let sgn = 1;
+  if(wall.closed){                                  // u uzavřené zdi kótujeme ven
+    const c = centroid(wall.pts);
+    const mx = (s.a.x+s.b.x)/2, my = (s.a.y+s.b.y)/2;
+    sgn = (n.nx*(c.x-mx) + n.ny*(c.y-my)) > 0 ? -1 : 1;
+  }
+  const off = t/2 + 320;
+  const a = { x:s.a.x + n.nx*off*sgn, y:s.a.y + n.ny*off*sgn };
+  const b = { x:s.b.x + n.nx*off*sgn, y:s.b.y + n.ny*off*sgn };
+
+  const ang = Math.atan2(b.y-a.y, b.x-a.x) * 180/Math.PI;
+  const rot = (ang > 90 || ang < -90) ? ang + 180 : ang;
+  const sw = px/z, tick = 80;
+  const ux = (b.x-a.x)/len, uy = (b.y-a.y)/len;
+  const px_ = -uy, py_ = ux;                        // kolmice na úsečku
+  const ar = (p, dir) => `M${p.x + px_*tick} ${p.y + py_*tick}
+     l${(-px_*tick*1.4 + ux*tick*dir)} ${(-py_*tick*1.4 + uy*tick*dir)}
+     l${(px_*2.8)} ${py_*2.8} Z`;
+  return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${color}" stroke-width="${sw}"/>`
+    + `<path d="${ar(a,1)}" fill="${color}"/><path d="${ar(b,-1)}" fill="${color}"/>`
+    + `<text x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${clamp(190/z,120,460)}" font-weight="700" fill="${color}" transform="rotate(${rot} ${(a.x+b.x)/2} ${(a.y+b.y)/2})"
+        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${50/z}px">${fmt(len)}</text>`;
+}
+
 function dimsMarkup(){
   const parts = [];
   const els = S.project.elements;
@@ -854,7 +936,19 @@ function dimsMarkup(){
     parts.push(dimLine(wb.x, wb.y-700, wb.x+wb.w, wb.y-700, 'x', 1.8, '#334155'));
     parts.push(dimLine(wb.x-700, wb.y, wb.x-700, wb.y+wb.h, 'y', 1.8, '#334155'));
   }
+  /* Vybraná zeď má své délky vypsané přímo ve výkresu. */
+  if(S.sel?.kind === 'wall'){
+    const w = S.project.walls.find(x => x.id === S.sel.id);
+    if(w) for(const sg of wallSegments(w)) parts.push(dimAlongSeg(sg, w));
+  }
   return parts.join('');
+}
+
+/** Počátek projektu – levý horní roh vnějšího líce obvodu. Od něj se počítají
+    souřadnice v inspektoru, aby to nebyla nesmyslně velká čísla. */
+function projectOrigin(){
+  const b = wallsBBox();
+  return b ? { x: Math.round(b.x), y: Math.round(b.y) } : { x:0, y:0 };
 }
 
 function wallsBBox(){
@@ -1393,8 +1487,11 @@ function finishWall(closed){
 }
 
 function createRoom(w, h, t){
-  const c = viewCenter();
-  const x = R(c.x - w/2), y = R(c.y - h/2);
+  /* První místnost patří do počátku souřadnic – jinak by X/Y byly obrovská
+     čísla podle toho, kam zrovna mířil pohled. Další místnosti jdou do pohledu. */
+  let x, y;
+  if(S.project.walls.length === 0){ x = 0; y = 0; }
+  else { const c = viewCenter(); x = R(c.x - w/2); y = R(c.y - h/2); }
   const wall = { id:uid('w'), t:t||WALL_T_DEFAULT, closed:true, name:'Místnost',
     pts:[{x, y}, {x:R(x+w), y}, {x:R(x+w), y:R(y+h)}, {x, y:R(y+h)}] };
   S.project.walls.push(wall);
@@ -1622,6 +1719,7 @@ function renderInspector(){
   if(S.sel?.kind==='el'){
     const e = getEl(S.sel.id);
     if(!e){ S.sel = null; return renderInspector(); }
+    const OR = projectOrigin();
     box.innerHTML = `
       <div class="insp-title"><i class="tool-dot" style="background:${e.color}"></i><strong>${esc(e.name || 'Obdélník')}</strong></div>
       <div class="insp-sec">
@@ -1636,9 +1734,10 @@ function renderInspector(){
           <label class="fld"><span>Hloubka</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${e.d}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
-          <label class="fld"><span>Pozice X</span><input id="iX" type="number" step="5" value="${e.x}"></label>
-          <label class="fld"><span>Pozice Y</span><input id="iY" type="number" step="5" value="${e.y}"></label>
+          <label class="fld"><span>X od rohu obvodu</span><input id="iX" type="number" step="5" value="${Math.round(e.x - OR.x)}"></label>
+          <label class="fld"><span>Y od rohu obvodu</span><input id="iY" type="number" step="5" value="${Math.round(e.y - OR.y)}"></label>
         </div>
+        <p class="hint">Nula je v levém horním rohu vnějšího líce obvodu.</p>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Počet kusů</span><input id="iQty" type="number" min="1" max="99" value="${e.qty||1}"></label>
           <label class="fld"><span>Dvířka / čelo</span>
@@ -1671,8 +1770,8 @@ function renderInspector(){
     bind('#iNote', ev => { e.note = ev.target.value; pushHistory(); }, 'input');
     bind('#iW', ev => { e.w = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
     bind('#iD', ev => { e.d = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
-    bind('#iX', ev => { e.x = +ev.target.value||0; pushHistory(); render(); });
-    bind('#iY', ev => { e.y = +ev.target.value||0; pushHistory(); render(); });
+    bind('#iX', ev => { e.x = R(OR.x + (+ev.target.value||0)); pushHistory(); render(); });
+    bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistory(); render(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistory(); render(); });
     bind('#iFront', ev => { e.front = ev.target.value; pushHistory(); render(); });
     $('#iRot').onclick = rotateSelection;
@@ -1689,43 +1788,51 @@ function renderInspector(){
     const w = S.project.walls.find(x=>x.id===S.sel.id);
     if(!w){ S.sel = null; return renderInspector(); }
     const segs = wallSegments(w);
+    const total = segs.reduce((a,sg)=> a + segLength(sg), 0);
     box.innerHTML = `
-      <div class="insp-title"><i class="tool-dot" style="background:#2b3138"></i><strong>${esc(w.name||'Zeď')}</strong></div>
-      <div class="insp-sec">
-        <h4>Název</h4>
-        <label class="fld"><input id="wName" maxlength="40" value="${esc(w.name||'')}" placeholder="např. Příčka, Komín"></label>
+      <div class="insp-head">
+        <input class="insp-name" id="wName" maxlength="40" value="${esc(w.name||'')}" placeholder="Název zdi">
+        <span class="insp-kind" style="--k:#2b3138">${w.closed?'uzavřený obvod':'otevřená zeď'}</span>
       </div>
-      <div class="insp-sec">
-        <h4>Tloušťka (mm)</h4>
-        <label class="fld"><input id="wT" type="number" step="5" min="20" max="1000" value="${w.t||WALL_T_DEFAULT}"></label>
+
+      <div class="big-stat">
+        <span>Délka celkem</span>
+        <b>${fmt(total)}<i>mm</i></b>
       </div>
+
       <div class="insp-sec">
-        <h4>Úseky – uprav délku</h4>
-        ${segs.map((s,i)=>`
-          <label class="fld seg-row"><span>Úsek ${i+1}</span>
-            <span class="seg-len">
-              <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segLength(s))}"> mm
-            </span>
-          </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}
-        <p class="hint">Body táhni přímo ve výkresu. Délka přepíše polohu koncového bodu ve směru úsečky.</p>
+        <h4>Délky úseků</h4>
+        <div class="seg-list">${segs.map((sg,i)=>`
+          <label class="seg-item">
+            <span class="seg-n">${i+1}</span>
+            <input data-seg="${i}" type="number" step="5" min="10" value="${Math.round(segLength(sg))}">
+            <span class="seg-u">mm</span>
+          </label>`).join('') || '<p class="hint">Zeď nemá žádný úsek.</p>'}</div>
+        <p class="hint">Délky jsou napsané i ve výkresu. Přepsáním čísla se posune koncový bod ve směru úsečky.</p>
       </div>
+
+      <div class="insp-sec">
+        <h4>Tloušťka zdi</h4>
+        <label class="inline-fld"><input id="wT" type="number" step="5" min="20" max="1000" value="${w.t||WALL_T_DEFAULT}"><span>mm</span></label>
+      </div>
+
       <div class="insp-sec">
         <h4>Odstupová čára</h4>
-        <div class="row2">
-          <label class="fld"><span>Vzdálenost (mm)</span><input id="gDist" type="number" step="5" min="0" value="50"></label>
-          <label class="fld"><span>Strana</span>
-            <select id="gSide"><option value="auto">dovnitř místnosti</option><option value="left">strana A</option><option value="right">strana B</option></select>
-          </label>
+        <div class="inline-row">
+          <label class="inline-fld"><input id="gDist" type="number" step="5" min="0" value="50"><span>mm</span></label>
+          <button class="tb" id="gMake">⇢ Vytvořit</button>
         </div>
-        <button class="tb primary full" id="gMake" style="margin-top:8px">⤳ Vytvořit odstup podél zdi</button>
+        <select id="gSide" class="mini-select">
+          <option value="auto">dovnitř místnosti</option>
+          <option value="left">strana A</option>
+          <option value="right">strana B</option>
+        </select>
       </div>
-      <div class="insp-sec">
-        <h4>Úpravy</h4>
-        <div class="insp-actions">
-          <button class="tb full" id="wOrtho">⌐ Srovnat do pravých úhlů</button>
-          <button class="tb" id="wClose">${w.closed?'Otevřít':'Uzavřít'}</button>
-          <button class="tb danger" id="wDel">🗑 Smazat</button>
-        </div>
+
+      <div class="insp-actions">
+        <button class="tb" id="wOrtho">⌐ Pravé úhly</button>
+        <button class="tb" id="wClose">${w.closed?'Otevřít':'Uzavřít'}</button>
+        <button class="tb danger full" id="wDel">🗑 Smazat zeď</button>
       </div>`;
 
     const wName = $('#wName'); if(wName) wName.addEventListener('input', ev => { w.name = ev.target.value; pushHistory(); });
