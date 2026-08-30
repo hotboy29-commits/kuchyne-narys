@@ -375,6 +375,8 @@ body{
 .seg-move .tb { font-size:15px; padding:8px 0; }
 .seg-move { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:6px 0 8px; }
 .seg-move .tb { font-size:15px; padding:8px 0; }
+.pr-sub td { color:#5b6472; }
+.pr-sub td.num { color:#5b6472; }
 
 </style>
 </head>
@@ -518,7 +520,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29g'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29h'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -2302,7 +2304,10 @@ function buildPrint(){
 
   /* 3) výpis prvků */
   if(els.length){
-    const rows = els.map((e,i) => `<tr>
+    const LAM = 18;   // síla lamina – půda je o dvě síly užší
+    const rows = els.map((e,i) => {
+      const pw = e.w - 2*LAM;             // šířka půdy i latí
+      let out = `<tr>
         <td class="num">${i+1}</td>
         <td><span class="pr-tdot" style="background:${e.color}"></span>${esc(e.name || '—')}</td>
         <td class="num">${fmt(e.w)}</td>
@@ -2310,7 +2315,27 @@ function buildPrint(){
         <td class="num">${e.qty||1}</td>
         <td class="num">${fmt(e.w*(e.qty||1))}</td>
         <td>${esc(e.note || '')}</td>
-      </tr>`).join('');
+      </tr>`;
+      if(pw >= 1){
+        out += `<tr class="pr-sub"><td class="num"></td>
+          <td>└ půda</td>
+          <td class="num">${fmt(pw)}</td>
+          <td class="num">${fmt(e.d)}</td>
+          <td class="num">1</td>
+          <td class="num">${fmt(pw)}</td>
+          <td>šířka skříně − 2× ${LAM} mm</td>
+        </tr>
+        <tr class="pr-sub"><td class="num"></td>
+          <td>└ lať</td>
+          <td class="num">${fmt(pw)}</td>
+          <td class="num">120</td>
+          <td class="num">2</td>
+          <td class="num">${fmt(pw*2)}</td>
+          <td>2 ks, hloubka 120 mm</td>
+        </tr>`;
+      }
+      return out;
+    }).join('');
     pages.push(`
     <section class="pr-page">
       <div class="pr-head">
