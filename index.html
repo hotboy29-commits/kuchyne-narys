@@ -378,6 +378,11 @@ body{
 .pr-sub td { color:#5b6472; }
 .pr-sub td.num { color:#5b6472; }
 
+.sympal{ position:absolute; left:12px; bottom:56px; display:flex; flex-wrap:wrap; gap:6px; max-width:70vw; background:#fff; border:1px solid #d3d9e0; border-radius:12px; padding:8px; box-shadow:0 4px 14px rgba(15,23,42,.14); z-index:6; }
+.sympal .tb{ border:1px solid #d3d9e0; background:#f8fafc; border-radius:9px; padding:6px 10px; font-size:12px; }
+.sympal .tb.on{ background:#2563eb; border-color:#2563eb; color:#fff; }
+.sympal .tb.on b{ color:#fff; }
+
 </style>
 </head>
 <body>
@@ -436,6 +441,7 @@ body{
     </div>
 
     <div class="drawbar hidden" id="drawbar"></div>
+    <div class="sympal hidden" id="symPal"></div>
     <div class="hintbar"><span id="hint"></span></div>
   </main>
 
@@ -520,7 +526,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29k'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29l'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -568,6 +574,7 @@ function newProject(){
       name:'', client:'', clientPhone:'', address:'', designer:'', designerContact:'',
       date: new Date().toISOString().slice(0,10), paper:'A3L', notes:''
     },
+    windows: [], symbols: [],
     walls: [],
     elements: [],
     guides: [],
@@ -613,6 +620,96 @@ function polygonArea(pts){
     a += p.x*q.y - q.x*p.y;
   }
   return a/2;
+}
+
+/* ─────────────── OKNA A ZNAČKY INSTALACÍ ───────────────
+   Okno = výřez ve zdi (bílá mezera + tři linky skla), drží se úseku zdi.
+   Značka = kroužek s kódem (V/O/Z/VD/P) + volná poznámka („myčka“, „trouba“).
+   Obojí jde do výkresu, legendy i tabulek v PDF. */
+const SYMBOL_TYPES = [
+  { id:'voda',    code:'V',  label:'Voda – přívod',        color:'#2563eb' },
+  { id:'odpad',   code:'O',  label:'Odpad',                color:'#475569' },
+  { id:'zasuvka', code:'Z',  label:'Zásuvka 230 V',        color:'#ea580c' },
+  { id:'vd',      code:'VD', label:'Varná deska – 400 V',  color:'#dc2626' },
+  { id:'spot',    code:'P',  label:'Připojení spotřebiče', color:'#16a34a' },
+];
+const symType = id => SYMBOL_TYPES.find(t=>t.id===id) || SYMBOL_TYPES[2];
+const SYM_R = 140;   // poloměr značky [mm světa]
+
+/** Nejbližší úsek zdi k bodu: index, poměr u, vzdálenost, offset od začátku. */
+function wallSegAt(wall, p){
+  let best = null;
+  wallSegments(wall).forEach((sg,i)=>{
+    const dx=sg.b.x-sg.a.x, dy=sg.b.y-sg.a.y, L2=dx*dx+dy*dy||1;
+    let u=((p.x-sg.a.x)*dx+(p.y-sg.a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+    const d=Math.hypot(p.x-(sg.a.x+dx*u), p.y-(sg.a.y+dy*u));
+    if(!best||d<best.d) best={ i, u, d, off:Math.sqrt(L2)*u, L:Math.sqrt(L2) };
+  });
+  return best;
+}
+/** Zeď + úsek pod bodem (uvnitř pásu + malá rezerva), jinak null. */
+function wallAt(p){
+  let best=null;
+  for(const w of S.project.walls){
+    const h=wallSegAt(w,p), t=w.t||WALL_T_DEFAULT;
+    if(h && h.L > 1 && h.d <= t + 60 && (!best || h.d < best.d)) best={ ...h, wall:w };
+  }
+  return best;
+}
+/** Geometrie okna: koncové body líce, směr, normála a ofsazení rubu. */
+function windowGeom(win){
+  const wall=S.project.walls.find(x=>x.id===win.wallId); if(!wall) return null;
+  const sg=wallSegments(wall)[win.seg]; if(!sg) return null;
+  const L=segLength(sg)||1, ux=(sg.b.x-sg.a.x)/L, uy=(sg.b.y-sg.a.y)/L;
+  const half=Math.min(win.w,L)/2, c=Math.max(half,Math.min(win.off,L-half));
+  const n=segNormal(sg), side=wallSide(wall), t=wall.t||WALL_T_DEFAULT;
+  return { a:{x:sg.a.x+ux*(c-half), y:sg.a.y+uy*(c-half)},
+           b:{x:sg.a.x+ux*(c+half), y:sg.a.y+uy*(c+half)},
+           nx:n.nx, ny:n.ny, o:side*t, L };
+}
+function windowsSvg(pen, hits, lw=2){
+  return S.project.windows.map(win=>{
+    const g=windowGeom(win); if(!g) return '';
+    const sel=S.sel?.kind==='win'&&S.sel.id===win.id;
+    const a2={x:g.a.x+g.nx*g.o, y:g.a.y+g.ny*g.o}, b2={x:g.b.x+g.nx*g.o, y:g.b.y+g.ny*g.o};
+    const gl=f=>`<line x1="${R(g.a.x+g.nx*g.o*f)}" y1="${R(g.a.y+g.ny*g.o*f)}" x2="${R(g.b.x+g.nx*g.o*f)}" y2="${R(g.b.y+g.ny*g.o*f)}"/>`;
+    return `<g>
+      <polygon points="${R(g.a.x)},${R(g.a.y)} ${R(g.b.x)},${R(g.b.y)} ${R(b2.x)},${R(b2.y)} ${R(a2.x)},${R(a2.y)}" fill="#ffffff" stroke="none"/>
+      <g stroke="${sel?'#2563eb':'#0f172a'}" stroke-width="${pen(lw)}" fill="none">
+        ${gl(0)}${gl(0.5)}${gl(1)}
+        <line x1="${R(g.a.x)}" y1="${R(g.a.y)}" x2="${R(a2.x)}" y2="${R(a2.y)}"/>
+        <line x1="${R(g.b.x)}" y1="${R(g.b.y)}" x2="${R(b2.x)}" y2="${R(b2.y)}"/>
+      </g>
+      ${hits?`<line x1="${R((g.a.x+a2.x)/2)}" y1="${R((g.a.y+a2.y)/2)}" x2="${R((g.b.x+b2.x)/2)}" y2="${R((g.b.y+b2.y)/2)}"
+        stroke="transparent" stroke-width="${pen(24)+Math.abs(g.o)}" data-winhit="${win.id}" style="cursor:pointer"/>`:''}
+    </g>`;
+  }).join('');
+}
+function symbolsSvg(pen, hits, fsz, halo, lw=3.5){
+  return S.project.symbols.map(sm=>{
+    const t=symType(sm.type); const sel=S.sel?.kind==='sym'&&S.sel.id===sm.id;
+    const hs=halo?`paint-order:stroke;stroke:#fff;stroke-width:${fsz(36)}px;`:'';
+    return `<g>
+      <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
+      <text x="${sm.x}" y="${sm.y}" text-anchor="middle" dominant-baseline="central" font-size="${fsz(140)}"
+        font-weight="700" fill="${t.color}" style="font-family:Helvetica,Arial,sans-serif;${hs}">${t.code}</text>
+      ${sm.note?`<text x="${sm.x}" y="${sm.y+SYM_R+fsz(130)}" text-anchor="middle" font-size="${fsz(120)}" fill="#334155"
+        style="font-family:Helvetica,Arial,sans-serif;${hs}">${esc(sm.note)}</text>`:''}
+      ${hits?`<circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R+40}" fill="transparent" data-symhit="${sm.id}" style="cursor:pointer"/>`:''}
+    </g>`;
+  }).join('');
+}
+function addWindowAt(p){
+  const h=wallAt(p); if(!h){ toast('Klepni přímo na zeď – okno se vloží do ní'); return; }
+  const half=Math.min(600,h.L)/2;
+  const win={ id:uid('o'), wallId:h.wall.id, seg:h.i, off:R(Math.max(half,Math.min(h.off,h.L-half))), w:600 };
+  S.project.windows.push(win);
+  select('win',win.id); pushHistory();
+}
+function addSymbolAt(p){
+  const sm={ id:uid('s'), x:R(p.x), y:R(p.y), type:S.symType||'zasuvka', note:'' };
+  S.project.symbols.push(sm);
+  select('sym',sm.id); pushHistory();
 }
 /** Nejbližší bod úsečky + vzdálenost. */
 function closestOnSeg(px,py,a,b){
@@ -678,6 +775,9 @@ function contentBBox(){
   for(const g of S.project.guides){
     for(const p of [g.a,g.b]){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); any=true; }
   }
+  for(const sm of S.project.symbols){
+    x0=Math.min(x0,sm.x-SYM_R); y0=Math.min(y0,sm.y-SYM_R); x1=Math.max(x1,sm.x+SYM_R); y1=Math.max(y1,sm.y+SYM_R); any=true;
+  }
   return any ? { x:x0, y:y0, w:x1-x0, h:y1-y0 } : null;
 }
 function fitView(padMm=400){
@@ -723,7 +823,7 @@ function doRender(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -731,6 +831,16 @@ function doRender(){
   renderInspector();
   updateStatus();
   updateDrawbar();
+  updateSymPal();
+}
+
+/** Plovoucí paleta typů značek instalací – viditelná jen s nástrojem Značky. */
+function updateSymPal(){
+  const pal = $('#symPal'); if(!pal) return;
+  if(S.tool !== 'sym'){ pal.classList.add('hidden'); return; }
+  pal.classList.remove('hidden');
+  pal.innerHTML = SYMBOL_TYPES.map(t=>`<button class="tb${(S.symType||'zasuvka')===t.id?' on':''}"
+    data-symtype="${t.id}" title="${t.label}"><b style="color:${t.color}">${t.code}</b>&nbsp;${t.label}</button>`).join('');
 }
 
 /** Lišta s tlačítky pro dokončení rozkreslené zdi – dvojklik není nutný. */
@@ -1338,6 +1448,13 @@ function onDown(ev){
     return;
   }
 
+  if(S.tool==='window'){ addWindowAt(w); return; }
+  if(S.tool==='sym'){
+    const sp = snapPoint(w, false);
+    addSymbolAt(sp);
+    return;
+  }
+
   // nástroj select
   const handle = t.dataset?.handle;
   if(handle && S.sel?.kind==='el'){
@@ -1356,6 +1473,20 @@ function onDown(ev){
   if(gpt && S.sel?.kind==='guide'){
     hist.preDrag = snapshot();
     drag = { mode:'gpt', k:gpt };
+    return;
+  }
+  const winHit = t.dataset?.winhit;
+  if(winHit){
+    select('win', winHit);
+    hist.preDrag = snapshot();
+    drag = { mode:'winMove', id:winHit, moved:false };
+    return;
+  }
+  const symHit = t.dataset?.symhit;
+  if(symHit){
+    select('sym', symHit);
+    hist.preDrag = snapshot();
+    drag = { mode:'symMove', id:symHit, moved:false };
     return;
   }
   const elId = t.closest?.('[data-el]')?.dataset.el;
@@ -1409,6 +1540,22 @@ function onMove(ev){
   if(drag.mode==='guide'){
     const s = snapPoint(w, true);
     S.draft.b = { x:s.x, y:s.y }; render(); return;
+  }
+  if(drag.mode==='winMove'){
+    const win=S.project.windows.find(x=>x.id===drag.id); if(!win) return;
+    const wall=S.project.walls.find(x=>x.id===win.wallId); if(!wall) return;
+    const sg=wallSegments(wall)[win.seg]; if(!sg) return;
+    const dx=sg.b.x-sg.a.x, dy=sg.b.y-sg.a.y, L2=dx*dx+dy*dy||1;
+    let u=((w.x-sg.a.x)*dx+(w.y-sg.a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+    const L=Math.sqrt(L2), half=Math.min(win.w,L)/2;
+    win.off=R(Math.max(half,Math.min(u*L,L-half)));
+    drag.moved=true; render(); return;
+  }
+  if(drag.mode==='symMove'){
+    const sm=S.project.symbols.find(x=>x.id===drag.id); if(!sm) return;
+    const sp=snapPoint(w, ev.shiftKey);
+    sm.x=R(sp.x); sm.y=R(sp.y);
+    drag.moved=true; render(); return;
   }
   if(drag.mode==='move'){
     const e = getEl(drag.id);
@@ -1499,7 +1646,7 @@ function onUp(ev){
     if(drag.moved) commitPreDrag();
     else hist.preDrag = null;
   }
-  if(drag && ['resize','vtx','gpt'].includes(drag.mode)) commitPreDrag();
+  if(drag && ['resize','vtx','gpt','winMove','symMove'].includes(drag.mode)) commitPreDrag();
   drag = null;
   render();
 }
@@ -1867,6 +2014,8 @@ function deleteSelection(){
   if(S.sel.kind==='el') S.project.elements = S.project.elements.filter(e=>e.id!==S.sel.id);
   if(S.sel.kind==='wall') S.project.walls = S.project.walls.filter(w=>w.id!==S.sel.id);
   if(S.sel.kind==='guide') S.project.guides = S.project.guides.filter(g=>g.id!==S.sel.id);
+  if(S.sel.kind==='win') S.project.windows = S.project.windows.filter(x=>x.id!==S.sel.id);
+  if(S.sel.kind==='sym') S.project.symbols = S.project.symbols.filter(x=>x.id!==S.sel.id);
   S.sel = null;
   pushHistory(); render();
 }
@@ -1946,7 +2095,8 @@ let history = [], historyIndex = -1;
 const hist = { preDrag: null };
 
 function snapshot(){ return JSON.stringify({
-  walls:S.project.walls, elements:S.project.elements, guides:S.project.guides, info:S.project.info }); }
+  walls:S.project.walls, elements:S.project.elements, guides:S.project.guides,
+  windows:S.project.windows, symbols:S.project.symbols, info:S.project.info }); }
 function pushHistory(){
   const s = snapshot();
   if(history[historyIndex] === s){ save(); return; }
@@ -1972,6 +2122,8 @@ function restore(s){
   S.project.walls = o.walls || [];
   S.project.elements = o.elements || [];
   S.project.guides = o.guides || [];
+  S.project.windows = o.windows || [];
+  S.project.symbols = o.symbols || [];
   if(o.info) S.project.info = { ...S.project.info, ...o.info };
   if(S.sel){
     const k = S.sel.kind;
@@ -2043,7 +2195,7 @@ function renderInspector(){
        vypadne fokus a musíš klikat znovu */
     bind('#iName', ev => {
       e.name = ev.target.value;
-      $('#layerElems').innerHTML = elementsMarkup() + guidesMarkup();
+      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
       updateStatus();
     }, 'input');
     bind('#iName', () => pushHistory(), 'change');
@@ -2225,6 +2377,60 @@ function renderInspector(){
     return;
   }
 
+  if(S.sel?.kind==='win'){
+    const win = S.project.windows.find(x=>x.id===S.sel.id);
+    if(!win){ S.sel = null; return renderInspector(); }
+    const wall = S.project.walls.find(x=>x.id===win.wallId);
+    const sg = wall ? wallSegments(wall)[win.seg] : null;
+    const L = sg ? Math.round(segLength(sg)) : 0;
+    const half = Math.round(Math.min(win.w,L)/2);
+    box.innerHTML = `
+      <div class="insp-title"><i class="tool-dot" style="background:#0ea5e9"></i><strong>Okno</strong></div>
+      <div class="insp-sec">
+        <h4>Šířka a poloha</h4>
+        <label class="fld"><span>Šířka okna (mm)</span><input id="winW" type="number" step="50" min="100" value="${win.w}"></label>
+        <label class="fld"><span>Střed od začátku úseku (mm)</span><input id="winOff" type="number" step="10" min="${half}" max="${L-half}" value="${Math.round(win.off)}"></label>
+        <p class="hint">Zeď ${esc(wall?.name||'')} · úsek ${win.seg+1} (${fmt(L)} mm). Oknem můžeš táhnout podél zdi přímo ve výkresu.</p>
+      </div>
+      <div class="insp-actions"><button class="tb danger full" id="winDel">🗑 Smazat okno</button></div>`;
+    $('#winW').addEventListener('change', ev => {
+      win.w = Math.max(100, +ev.target.value||100);
+      const s2 = wall ? wallSegments(wall)[win.seg] : null;
+      if(s2){ const h2=Math.min(win.w,segLength(s2))/2; win.off=R(Math.max(h2,Math.min(win.off,segLength(s2)-h2))); }
+      pushHistory();
+    });
+    $('#winOff').addEventListener('change', ev => {
+      win.off = R(Math.max(half, Math.min(+ev.target.value||0, L-half)));
+      pushHistory();
+    });
+    $('#winDel').onclick = deleteSelection;
+    return;
+  }
+
+  if(S.sel?.kind==='sym'){
+    const sm = S.project.symbols.find(x=>x.id===S.sel.id);
+    if(!sm){ S.sel = null; return renderInspector(); }
+    const OR = projectOrigin();
+    box.innerHTML = `
+      <div class="insp-title"><i class="tool-dot" style="background:${symType(sm.type).color}"></i><strong>${symType(sm.type).label}</strong></div>
+      <div class="insp-sec">
+        <h4>Značka instalace</h4>
+        <label class="fld"><span>Typ</span><select id="symType">${SYMBOL_TYPES.map(t=>`<option value="${t.id}" ${t.id===sm.type?'selected':''}>${t.code} – ${t.label}</option>`).join('')}</select></label>
+        <label class="fld"><span>Poznámka (myčka, trouba, výška…)</span><input id="symNote" maxlength="40" value="${esc(sm.note)}" placeholder="např. myčka +1200"></label>
+        <p class="hint">Poloha: ${fmt(Math.round(sm.x-OR.x))} / ${fmt(Math.round(sm.y-OR.y))} mm od rohu obvodu. Značkou lze táhnout.</p>
+      </div>
+      <div class="insp-actions"><button class="tb danger full" id="symDel">🗑 Smazat značku</button></div>`;
+    $('#symType').addEventListener('change', ev => { sm.type = symType(ev.target.value).id; pushHistory(); });
+    /* poznámka nesmí při psaní přijít o fokus – přepíše se jen vrstva výkresu */
+    $('#symNote').addEventListener('input', ev => {
+      sm.note = ev.target.value;
+      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
+    });
+    $('#symNote').addEventListener('change', () => pushHistory());
+    $('#symDel').onclick = deleteSelection;
+    return;
+  }
+
   box.innerHTML = `
     <div class="insp-empty">
       <h3>Nic vybraného</h3>
@@ -2243,7 +2449,7 @@ function renderInspector(){
 function updateStatus(){
   const el = $('#statusText'); if(!el) return;
   const p = S.project;
-  el.textContent = `${p.walls.length} zdí · ${p.elements.length} prvků · ${p.guides.length} odstupů`
+  el.textContent = `${p.walls.length} zdí · ${p.elements.length} prvků · ${p.guides.length} odstupů · ${p.windows.length} oken · ${p.symbols.length} značek`
     + (S.sel ? ` · vybráno: ${S.sel.kind==='el' ? (getEl(S.sel.id)?.name || 'obdélník') : S.sel.kind==='wall' ? 'zeď' : 'odstup'}` : '');
   const so = $('#snapOut'); if(so) so.textContent = S.snapMm + ' mm';
   const av = $('#appVer'); if(av) av.textContent = 'v' + APP_VERSION;
@@ -2350,8 +2556,9 @@ function buildPrint(){
     <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – půdorys</span><span>Strana 2 / ${2 + (els.length?1:0)}</span></div>
   </section>`);
 
-  /* 3) výpis prvků */
-  if(els.length){
+  /* 3) výpis prvků + oken + instalací */
+  const wins = S.project.windows, syms = S.project.symbols;
+  if(els.length || wins.length || syms.length){
     const LAM = 18;   // síla lamina – půda je o dvě síly užší
     const rows = els.map((e,i) => {
       const pw = e.w - 2*LAM;             // šířka půdy i latí
@@ -2399,6 +2606,22 @@ function buildPrint(){
         <tbody>${rows}</tbody>
         <tfoot><tr><td colspan="5">Celková šířka prvků</td><td class="num">${fmt(totalLen)}</td><td></td></tr></tfoot>
       </table>
+      ${wins.length ? `
+      <table class="pr-table" style="margin-top:5mm">
+        <thead><tr><th>Zeď</th><th class="num">Úsek</th><th class="num">Šířka okna (mm)</th><th class="num">Střed od začátku úseku (mm)</th></tr></thead>
+        <tbody>${wins.map(win => {
+          const wl = S.project.walls.find(x=>x.id===win.wallId);
+          return `<tr><td>${esc(wl?.name||'zeď')}</td><td class="num">${win.seg+1}</td><td class="num">${fmt(win.w)}</td><td class="num">${fmt(win.off)}</td></tr>`;
+        }).join('')}</tbody>
+      </table>` : ''}
+      ${syms.length ? `
+      <table class="pr-table" style="margin-top:5mm">
+        <thead><tr><th>Značka</th><th>Význam</th><th>Poznámka</th><th class="num">X (mm)</th><th class="num">Y (mm)</th></tr></thead>
+        <tbody>${syms.map(sm => {
+          const t = symType(sm.type), ORp = projectOrigin();
+          return `<tr><td><b style="color:${t.color}">${t.code}</b></td><td>${t.label}</td><td>${esc(sm.note||'')}</td><td class="num">${fmt(Math.round(sm.x-ORp.x))}</td><td class="num">${fmt(Math.round(sm.y-ORp.y))}</td></tr>`;
+        }).join('')}</tbody>
+      </table>` : ''}
       ${info.notes ? `<div class="pr-notes-inline" style="white-space:pre-wrap">${esc(info.notes)}</div>` : ''}
       <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – výpis prvků</span><span>Strana 3 / 3</span></div>
     </section>`);
@@ -2416,8 +2639,11 @@ function buildPrint(){
 
 function legendHtml(){
   const used = [...new Map(S.project.elements.map(e=>[e.name||'bez názvu', e])).values()];
+  const symUsed = [...new Map(S.project.symbols.map(sm=>[sm.type, symType(sm.type)])).values()];
   return used.map(e => `<span class="lg"><i class="sw" style="background:${e.color}"></i>${esc(e.name||'bez názvu')}</span>`).join('')
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
+    + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
+    + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
     + (S.project.guides.some(g=>g.print) ? `<span class="lg"><i class="sw" style="background:#c2410c;height:0;border-top:2px dashed #c2410c"></i>Odstupová čára</span>` : '');
 }
 
@@ -2458,6 +2684,9 @@ function drawingSvg(P){
       stroke="#22262b" stroke-width="${sw(0.18)}" stroke-linejoin="miter"/>`);
   }
 
+  // okna ve zdech
+  parts.push(windowsSvg(sw, false, 0.25));
+
   // prvky – tenká linka, žádná výplň přes sousedy
   for(const e of S.project.elements){
     parts.push(`<rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
@@ -2479,6 +2708,9 @@ function drawingSvg(P){
         style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
     }
   }
+
+  // značky instalací
+  parts.push(symbolsSvg(sw, false, mm => fs(mm), false, 0.35));
 
   // kóty
   const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
@@ -2598,6 +2830,8 @@ const HINTS = {
   rect:   'Táhni a nakresli obdélník – rozměry pak přepíšeš vpravo. Krátké klepnutí vloží obdélník 600 × 600.',
   wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
+  window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
+  sym:    'Dole vyber značku a klepej do půdorysu. Poznámku (myčka, trouba, výška…) doplníš vpravo.',
   measure:'Táhni pro změření vzdálenosti – nic se neukládá.'
 };
 
@@ -2618,6 +2852,8 @@ function buildTools(){
     ['rect','▭','Obdélník'],
     ['wall','▬','Zeď / příčka'],
     ['guide','⇢','Odstupová čára'],
+    ['window','◫','Okno'],
+    ['sym','⌁','Značky instalací'],
     ['measure','↔','Změřit']
   ];
   $('#tools').innerHTML = tools.map(([id,ic,label]) =>
@@ -2740,12 +2976,16 @@ function loadProject(p, {resetHistory=true}={}){
     id: p.id || uid('p'),
     info: { ...newProject().info, ...(p.info||{}) },
     walls: (p.walls||[]).map(w => ({ id:w.id||uid('w'), pts:(w.pts||[]).map(q=>({x:+q.x||0,y:+q.y||0})),
-                                    t:w.t||WALL_T_DEFAULT, closed:!!w.closed, name:w.name||'Zeď' })),
+                                    t:w.t||WALL_T_DEFAULT, closed:!!w.closed, name:w.name||'Zeď', side:w.side ?? null })),
     elements: (p.elements||[]).map(e => ({ id:e.id||uid('e'), x:+e.x||0, y:+e.y||0,
       w:+e.w||600, d:+e.d||600, name:e.name||'', note:e.note||'', qty:e.qty||1,
       color:e.color||COLORS[0], front:e.front||'jih' })),
     guides: (p.guides||[]).map(g => ({ id:g.id||uid('g'), a:{x:+g.a?.x||0,y:+g.a?.y||0},
       b:{x:+g.b?.x||0,y:+g.b?.y||0}, print:g.print!==false, name:g.name||'Odstup' })),
+    windows: (p.windows||[]).map(o => ({ id:o.id||uid('o'), wallId:o.wallId, seg:+o.seg||0,
+      off:+o.off||0, w:Math.max(100,+o.w||600) })),
+    symbols: (p.symbols||[]).map(o => ({ id:o.id||uid('s'), x:+o.x||0, y:+o.y||0,
+      type:symType(o.type).id, note:o.note||'' })),
     created: p.created || new Date().toISOString()
   };
   S.sel = null;
@@ -2760,6 +3000,11 @@ function loadProject(p, {resetHistory=true}={}){
 
 function init(){
   buildTools();
+  $('#symPal')?.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-symtype]'); if(!b) return;
+    S.symType = b.dataset.symtype;
+    render();
+  });
   bindUi();
   setTool('select');
   $('#snapRange').value = S.snapMm;
