@@ -520,7 +520,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29h'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29i'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1706,7 +1706,11 @@ function moveSegment(wall, i, dx, dy){
  * Každý úsek si nechá svou naměřenou délku, změní se jen jeho směr —
  * a to vždy na nejbližší násobek 90° počítaný od směru PRVNÍHO úseku.
  * Díky společné referenci jsou sousední úseky buď rovnoběžné, nebo kolmé,
- * nikdy ne „téměř". Celý nákres se přitom neotáčí.
+ * nikdy ne „téměř".
+ *
+ * Celý nákres se navíc otočí tak, aby NEJDELŠÍ stěna ležela přesně
+ * vodorovně — rovnoběžně s dlouhou stranou papíru. Půdorys tak není
+ * pootočený a dá se s ním pohodlně pracovat i tisknout.
  *
  * Vrátí rozdíl v mm, o který se uzavřený obvod po srovnání nezavře
  * (0 = zavřel se přesně). Délky nikdy nepřepisujeme — nesedí-li protilehlé
@@ -1722,9 +1726,19 @@ function orthogonalizeWall(wall){
     const dx = b.x-a.x, dy = b.y-a.y;
     segs.push({ len:Math.hypot(dx,dy), ang:Math.atan2(dy,dx) });
   }
-  /* společná reference = první úsek, ať se zeď neotočí do jiné polohy */
+  /* společná reference = první úsek – sousední úseky pak vycházejí
+     buď rovnoběžné, nebo kolmé */
   const base = segs[0].ang;
   for(const sg of segs) sg.dir = base + Math.round((sg.ang - base)/Q)*Q;
+
+  /* otoč celý nákres, aby NEJDELŠÍ stěna ležela přesně vodorovně
+     (rovnoběžně s papírem) – pootočený půdorys se špatně kótuje i tiskne */
+  let m = 0;
+  for(let i=1;i<segs.length;i++) if(segs[i].len > segs[m].len) m = i;
+  let rot = segs[m].dir % Math.PI;
+  if(rot > Q) rot -= Math.PI;
+  if(rot < -Q) rot += Math.PI;
+  for(const sg of segs) sg.dir -= rot;
 
   /* délky bereme z původních úseků a přenášíme je do nových směrů */
   const p0 = wall.pts[0];
@@ -2124,7 +2138,7 @@ function renderInspector(){
       pushHistory();
       toast(gap > 1
         ? `Srovnáno do pravých úhlů. Délky jsem nechal být, ale obvod se nezavírá – chybí ${fmt(gap)} mm. Uprav délky protilehlých stran.`
-        : 'Srovnáno do pravých úhlů, délky zůstaly stejné');
+        : 'Srovnáno do pravých úhlů a otočeno rovnoběžně s papírem, délky zůstaly stejné');
     };
     $('#wClose').onclick = () => { w.closed = !w.closed; pushHistory(); render(); };
     $('#wDel').onclick = deleteSelection;
