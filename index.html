@@ -520,7 +520,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29j'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29k'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1027,6 +1027,23 @@ function wallSide(w){
     const n0 = segNormal(wallSegments(w)[0]);
     const out1 = w.pts.map(q => ({ x:q.x+n0.nx*t, y:q.y+n0.ny*t }));
     return Math.abs(polygonArea(out1)) > Math.abs(polygonArea(w.pts)) ? 1 : -1;
+  }
+  /* Otevřený obvod nakreslený kolem místnosti (U, L, C…): tloušťka musí jít
+     VEN z půdorysu, jinak pás ukousne z vnitřního prostoru a skříň o stejné
+     délce, jako je stěna, se dovnitř nevejde. Poznám směr podle toho, na které
+     straně je těžiště bodů – pás patří na stranu od něj. Rovná zeď (1 úsek)
+     drží dosavadní výchozí stranu. */
+  const segs = wallSegments(w).filter(sg => segLength(sg) > 1);
+  if(segs.length >= 2){
+    let cx = 0, cy = 0;
+    for(const p of w.pts){ cx += p.x; cy += p.y; }
+    cx /= w.pts.length; cy /= w.pts.length;
+    let score = 0;
+    for(const sg of segs){
+      const n = segNormal(sg);
+      score += (n.nx*((sg.a.x+sg.b.x)/2 - cx) + n.ny*((sg.a.y+sg.b.y)/2 - cy)) * segLength(sg);
+    }
+    if(Math.abs(score) > 1) return score > 0 ? 1 : -1;
   }
   return -1;
 }
