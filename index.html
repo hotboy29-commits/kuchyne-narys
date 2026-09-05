@@ -520,7 +520,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29i'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29j'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -2115,10 +2115,27 @@ function renderInspector(){
 
     const wName = $('#wName'); if(wName) wName.addEventListener('input', ev => { w.name = ev.target.value; pushHistory(); });
     const wT = $('#wT'); if(wT) wT.addEventListener('change', ev => { w.t = clamp(+ev.target.value||WALL_T_DEFAULT,20,1000); pushHistory(); render(); });
-    $$('[data-seg]').forEach(inp => inp.addEventListener('change', ev => {
-      setSegmentLength(w, +inp.dataset.seg, Math.max(10, +ev.target.value||10));
-      pushHistory();
-    }));
+    /* Délky úseků: Tab potvrdí číslo a skočí na další řádek, Shift+Tab zpět,
+       Enter potvrdí a kurzor nechá na místě. render() přepisuje panel až
+       v requestAnimationFrame – fokus proto NEVRACÍME hned (starý input by
+       vzápětí zmizel), ale přes S.sel.seg: po přepsání panelu se příslušný
+       řádek sám zaměří a označí. Jinak by „psaní zhaslo“ po každém čísle. */
+    $$('[data-seg]').forEach(inp => {
+      inp.addEventListener('keydown', ev => {
+        if(ev.key !== 'Tab') return;
+        ev.preventDefault();
+        const i = +inp.dataset.seg, n = $$('[data-seg]').length;
+        S.sel.seg = ev.shiftKey ? (i - 1 + n) % n : (i + 1) % n;
+        setSegmentLength(w, i, Math.max(10, +inp.value||10));
+        pushHistory();
+      });
+      inp.addEventListener('change', ev => {
+        const i = +inp.dataset.seg;
+        if(document.activeElement === inp) S.sel.seg = i;  // Enter – kurzor zůstane
+        setSegmentLength(w, i, Math.max(10, +ev.target.value||10));
+        pushHistory();
+      });
+    });
     $$('[data-mv]').forEach(btn => btn.addEventListener('click', () => {
       const [dx, dy] = btn.dataset.mv.split(',').map(Number);
       const step = Math.max(1, +$('#segStep')?.value || 50);
