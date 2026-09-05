@@ -526,7 +526,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29l'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29m'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -689,7 +689,20 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5){
   return S.project.symbols.map(sm=>{
     const t=symType(sm.type); const sel=S.sel?.kind==='sym'&&S.sel.id===sm.id;
     const hs=halo?`paint-order:stroke;stroke:#fff;stroke-width:${fsz(36)}px;`:'';
-    return `<g>
+    const a=symbolAnchor(sm);
+    let dim='';
+    if(a){
+      const mx=(a.foot.x+sm.x)/2, my=(a.foot.y+sm.y)/2;
+      const ax=(a.sg.a.x+a.foot.x)/2, ay=(a.sg.a.y+a.foot.y)/2;
+      const ths=halo?'paint-order:stroke;stroke:#fff;stroke-width:'+pen(3)+'px;':'';
+      dim=`<g stroke="#0d9488" stroke-width="${pen(1.2)}" stroke-dasharray="${pen(6)} ${pen(4)}" fill="none">
+        <line x1="${R(a.sg.a.x)}" y1="${R(a.sg.a.y)}" x2="${R(a.foot.x)}" y2="${R(a.foot.y)}"/>
+        <line x1="${R(a.foot.x)}" y1="${R(a.foot.y)}" x2="${sm.x}" y2="${sm.y}"/>
+      </g>
+      <text x="${R(ax - a.rx*200)}" y="${R(ay - a.ry*200)}" text-anchor="middle" font-size="${pen(11)}" fill="#0d9488" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
+      <text x="${R(mx + a.ry*160)}" y="${R(my - a.rx*160)}" text-anchor="middle" font-size="${pen(11)}" fill="#0d9488" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.off)}</text>`;
+    }
+    return `<g>${dim}
       <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
       <text x="${sm.x}" y="${sm.y}" text-anchor="middle" dominant-baseline="central" font-size="${fsz(140)}"
         font-weight="700" fill="${t.color}" style="font-family:Helvetica,Arial,sans-serif;${hs}">${t.code}</text>
@@ -710,6 +723,39 @@ function addSymbolAt(p){
   const sm={ id:uid('s'), x:R(p.x), y:R(p.y), type:S.symType||'zasuvka', note:'' };
   S.project.symbols.push(sm);
   select('sym',sm.id); pushHistory();
+}
+/* Přesná poloha značky: přichycení ke zdi = dva rozměry v mm –
+   „od začátku úseku" (podél zdi) a „od líce zdi" (kolmo do místnosti). */
+function symbolAnchor(sm){
+  if(sm.wallId == null) return null;
+  const wall=S.project.walls.find(x=>x.id===sm.wallId); if(!wall) return null;
+  const segs=wallSegments(wall); let si=+sm.seg||0; if(!segs[si]) si=0;
+  const sg=segs[si], L=segLength(sg)||1, n=segNormal(sg), side=wallSide(wall);
+  const rx=-n.nx*side, ry=-n.ny*side;                 // směr dovnitř místnosti
+  const along=Math.max(0, Math.min(+sm.along||0, L));
+  const foot={ x:sg.a.x+(sg.b.x-sg.a.x)*(along/L), y:sg.a.y+(sg.b.y-sg.a.y)*(along/L) };
+  return { wall, si, L, sg, foot, rx, ry, along, off:+sm.off||0 };
+}
+function applySymbolAnchor(sm){
+  const a=symbolAnchor(sm); if(!a) return;
+  sm.x=R(a.foot.x+a.rx*a.off); sm.y=R(a.foot.y+a.ry*a.off);
+}
+function attachSymbolToWall(sm){
+  let best=null;
+  for(const wl of S.project.walls){
+    const h=wallSegAt(wl,sm);
+    if(h && h.L>1 && (!best || h.d<best.h.d)) best={ wl, h };
+  }
+  if(!best) return false;
+  const n=segNormal(best.h.seg ?? wallSegments(best.wl)[best.h.i]);
+  const sg=wallSegments(best.wl)[best.h.i], side=wallSide(best.wl);
+  const rx=-n.nx*side, ry=-n.ny*side;
+  const fx=sg.a.x+(sg.b.x-sg.a.x)*best.h.u, fy=sg.a.y+(sg.b.y-sg.a.y)*best.h.u;
+  sm.wallId=best.wl.id; sm.seg=best.h.i;
+  sm.along=R(best.h.off);
+  sm.off=R((sm.x-fx)*rx + (sm.y-fy)*ry);
+  applySymbolAnchor(sm);
+  return true;
 }
 /** Nejbližší bod úsečky + vzdálenost. */
 function closestOnSeg(px,py,a,b){
@@ -816,6 +862,7 @@ function render(){
 function doRender(){
   /* dokud netáhneš, držíme celý nákres ukotvený v počátku (0,0) */
   if(!drag) rebaseProject();
+  for(const sm of S.project.symbols) if(sm.wallId != null) applySymbolAnchor(sm);
   const v = S.view;
   $('#zoomLabel').textContent = Math.round(v.zoom*100) + ' %';
   const el = $('#svg');
@@ -1553,6 +1600,20 @@ function onMove(ev){
   }
   if(drag.mode==='symMove'){
     const sm=S.project.symbols.find(x=>x.id===drag.id); if(!sm) return;
+    if(sm.wallId != null){
+      const wall=S.project.walls.find(x=>x.id===sm.wallId);
+      const sg=wall ? wallSegments(wall)[sm.seg] : null;
+      if(sg){
+        const dx=sg.b.x-sg.a.x, dy=sg.b.y-sg.a.y, L2=dx*dx+dy*dy||1, L=Math.sqrt(L2);
+        let u=((w.x-sg.a.x)*dx+(w.y-sg.a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
+        const n=segNormal(sg), side=wallSide(wall);
+        const fx=sg.a.x+dx*u, fy=sg.a.y+dy*u;
+        sm.along=R(u*L);
+        sm.off=R((w.x-fx)*(-n.nx*side) + (w.y-fy)*(-n.ny*side));
+        applySymbolAnchor(sm);
+        drag.moved=true; render(); return;
+      }
+    }
     const sp=snapPoint(w, ev.shiftKey);
     sm.x=R(sp.x); sm.y=R(sp.y);
     drag.moved=true; render(); return;
@@ -2419,6 +2480,20 @@ function renderInspector(){
         <label class="fld"><span>Poznámka (myčka, trouba, výška…)</span><input id="symNote" maxlength="40" value="${esc(sm.note)}" placeholder="např. myčka +1200"></label>
         <p class="hint">Poloha: ${fmt(Math.round(sm.x-OR.x))} / ${fmt(Math.round(sm.y-OR.y))} mm od rohu obvodu. Značkou lze táhnout.</p>
       </div>
+      <div class="insp-sec">
+        <h4>Přesná poloha od zdi</h4>
+        ${sm.wallId != null ? (()=>{ const wa=S.project.walls.find(x=>x.id===sm.wallId);
+          const nSeg=wa?wallSegments(wa).length:0; return `
+          <label class="fld"><span>Zeď</span><select id="symWall">${S.project.walls.map(w2=>`<option value="${w2.id}" ${w2.id===sm.wallId?'selected':''}>${esc(w2.name||'zeď')}</option>`).join('')}</select></label>
+          <label class="fld"><span>Úsek</span><select id="symSeg">${Array.from({length:nSeg},(_,i)=>`<option value="${i}" ${i===(+sm.seg||0)?'selected':''}>${i+1}</option>`).join('')}</select></label>
+          <div class="row2">
+            <label class="fld"><span>Od začátku úseku (mm)</span><input id="symAlong" type="number" step="10" min="0" value="${Math.round(sm.along||0)}"></label>
+            <label class="fld"><span>Od líce zdi (mm)</span><input id="symOff" type="number" step="10" value="${Math.round(sm.off||0)}"></label>
+          </div>
+          <button class="tb full" id="symUnanchor">✕ Zrušit přichycení k zdi</button>`; })()
+        : `<button class="tb full" id="symAttach">📐 Přichytit k nejbližší zdi</button>`}
+        <p class="hint">Po přichycení zadáš přesné mm od rohu úseku a od líce zdi – ve výkresu se nakreslí pomocné kóty.</p>
+      </div>
       <div class="insp-actions"><button class="tb danger full" id="symDel">🗑 Smazat značku</button></div>`;
     $('#symType').addEventListener('change', ev => { sm.type = symType(ev.target.value).id; pushHistory(); });
     /* poznámka nesmí při psaní přijít o fokus – přepíše se jen vrstva výkresu */
@@ -2427,6 +2502,13 @@ function renderInspector(){
       $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
     });
     $('#symNote').addEventListener('change', () => pushHistory());
+    const reanchor = () => { applySymbolAnchor(sm); pushHistory(); };
+    $('#symAttach')?.addEventListener('click', () => { if(attachSymbolToWall(sm)) pushHistory(); else toast('Nablízku není žádná zeď'); });
+    $('#symUnanchor')?.addEventListener('click', () => { sm.wallId=null; pushHistory(); });
+    $('#symWall')?.addEventListener('change', ev => { sm.wallId=ev.target.value; sm.seg=0; sm.along=0; reanchor(); });
+    $('#symSeg')?.addEventListener('change', ev => { sm.seg=+ev.target.value||0; reanchor(); });
+    $('#symAlong')?.addEventListener('change', ev => { sm.along=Math.max(0,+ev.target.value||0); reanchor(); });
+    $('#symOff')?.addEventListener('change', ev => { sm.off=+ev.target.value||0; reanchor(); });
     $('#symDel').onclick = deleteSelection;
     return;
   }
@@ -2616,10 +2698,11 @@ function buildPrint(){
       </table>` : ''}
       ${syms.length ? `
       <table class="pr-table" style="margin-top:5mm">
-        <thead><tr><th>Značka</th><th>Význam</th><th>Poznámka</th><th class="num">X (mm)</th><th class="num">Y (mm)</th></tr></thead>
+        <thead><tr><th>Značka</th><th>Význam</th><th>Poznámka</th><th class="num">X (mm)</th><th class="num">Y (mm)</th><th>Zeď·úsek</th><th class="num">Od začátku (mm)</th><th class="num">Od líce (mm)</th></tr></thead>
         <tbody>${syms.map(sm => {
           const t = symType(sm.type), ORp = projectOrigin();
-          return `<tr><td><b style="color:${t.color}">${t.code}</b></td><td>${t.label}</td><td>${esc(sm.note||'')}</td><td class="num">${fmt(Math.round(sm.x-ORp.x))}</td><td class="num">${fmt(Math.round(sm.y-ORp.y))}</td></tr>`;
+          const wa = sm.wallId!=null ? S.project.walls.find(x=>x.id===sm.wallId) : null;
+          return `<tr><td><b style="color:${t.color}">${t.code}</b></td><td>${t.label}</td><td>${esc(sm.note||'')}</td><td class="num">${fmt(Math.round(sm.x-ORp.x))}</td><td class="num">${fmt(Math.round(sm.y-ORp.y))}</td><td>${wa?esc(wa.name||'zeď')+'·'+((+sm.seg||0)+1):'—'}</td><td class="num">${wa?fmt(Math.round(sm.along||0)):'—'}</td><td class="num">${wa?fmt(Math.round(sm.off||0)):'—'}</td></tr>`;
         }).join('')}</tbody>
       </table>` : ''}
       ${info.notes ? `<div class="pr-notes-inline" style="white-space:pre-wrap">${esc(info.notes)}</div>` : ''}
@@ -2831,7 +2914,7 @@ const HINTS = {
   wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
-  sym:    'Dole vyber značku a klepej do půdorysu. Poznámku (myčka, trouba, výška…) doplníš vpravo.',
+  sym:    'Dole vyber značku a klepej do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
   measure:'Táhni pro změření vzdálenosti – nic se neukládá.'
 };
 
@@ -2985,7 +3068,8 @@ function loadProject(p, {resetHistory=true}={}){
     windows: (p.windows||[]).map(o => ({ id:o.id||uid('o'), wallId:o.wallId, seg:+o.seg||0,
       off:+o.off||0, w:Math.max(100,+o.w||600) })),
     symbols: (p.symbols||[]).map(o => ({ id:o.id||uid('s'), x:+o.x||0, y:+o.y||0,
-      type:symType(o.type).id, note:o.note||'' })),
+      type:symType(o.type).id, note:o.note||'', wallId:o.wallId ?? null,
+      seg:+o.seg||0, along:+o.along||0, off:+o.off||0 })),
     created: p.created || new Date().toISOString()
   };
   S.sel = null;
