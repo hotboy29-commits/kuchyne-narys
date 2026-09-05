@@ -526,7 +526,7 @@ body{
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-08-29n'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-08-29o'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -714,26 +714,38 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5){
 }
 /** Zarovná střed nejbližší skříně a střed okna na značku – varná deska
     pak sedí přesně ve středu obojího. Vrací, co se povedlo zarovnat. */
-function alignToSymbol(sm){
-  const done={ el:false, win:false };
+function alignElementToWindow(e){
+  /* skříň se posune PODÉL ZDI na střed okna; dosednutí (kolmá vzdálenost) zůstává */
+  let best=null;
+  for(const win of S.project.windows){
+    const wall=S.project.walls.find(x=>x.id===win.wallId); if(!wall) continue;
+    const sg=wallSegments(wall)[win.seg]; if(!sg) continue;
+    const L=segLength(sg)||1, dx=(sg.b.x-sg.a.x)/L, dy=(sg.b.y-sg.a.y)/L;
+    const cx=e.x+e.w/2, cy=e.y+e.d/2;
+    const u=(cx-sg.a.x)*dx+(cy-sg.a.y)*dy;
+    const d=Math.hypot(cx-(sg.a.x+dx*u), cy-(sg.a.y+dy*u));
+    if(!best||d<best.d) best={ win, dx, dy, u, d };
+  }
+  if(!best) return false;
+  const delta=best.win.off-best.u;
+  e.x=R(e.x+best.dx*delta); e.y=R(e.y+best.dy*delta);
+  return true;
+}
+function alignSymbolToElementAlong(sm){
+  /* značka PODÉL ZDI na střed nejbližší skříně; „od líce" se nemění */
+  if(sm.wallId==null && !attachSymbolToWall(sm)) return false;
+  const a=symbolAnchor(sm); if(!a) return false;
   let be=null;
   for(const e of S.project.elements){
     const d=Math.hypot(e.x+e.w/2-sm.x, e.y+e.d/2-sm.y);
     if(!be||d<be.d) be={e,d};
   }
-  if(be){ be.e.x=R(sm.x-be.e.w/2); be.e.y=R(sm.y-be.e.d/2); done.el=true; }
-  let bw=null;
-  for(const win of S.project.windows){
-    const wall=S.project.walls.find(x=>x.id===win.wallId); if(!wall) continue;
-    const h=wallSegAt(wall,sm); if(!h||h.L<1) continue;
-    if(!bw||h.d<bw.h.d) bw={win,h};
-  }
-  if(bw){
-    const half=Math.min(bw.win.w,bw.h.L)/2;
-    bw.win.off=R(Math.max(half,Math.min(bw.h.off,bw.h.L-half)));
-    done.win=true;
-  }
-  return done;
+  if(!be) return false;
+  const sg=a.sg, L=a.L, dx=(sg.b.x-sg.a.x)/L, dy=(sg.b.y-sg.a.y)/L;
+  const u=((be.e.x+be.e.w/2-sg.a.x)*dx + (be.e.y+be.e.d/2-sg.a.y)*dy);
+  sm.along=R(Math.max(0,Math.min(u,L)));
+  applySymbolAnchor(sm);
+  return true;
 }
 function addWindowAt(p){
   const h=wallAt(p); if(!h){ toast('Klepni přímo na zeď – okno se vloží do ní'); return; }
@@ -2270,6 +2282,7 @@ function renderInspector(){
           <button class="tb full" id="iWall">⤒ Přitáhnout ke zdi</button>
           <button class="tb" id="iGapL">◀ Dovřít</button>
           <button class="tb" id="iGapR">Dovřít ▶</button>
+          <button class="tb full" id="elWinAlign">⌖ Střed na střed okna</button>
           <button class="tb danger full" id="iDel">🗑 Smazat</button>
         </div>
       </div>`;
@@ -2295,6 +2308,10 @@ function renderInspector(){
     $('#iWall').onclick = snapToWall;
     $('#iGapL').onclick = () => closeGap('right');
     $('#iGapR').onclick = () => closeGap('left');
+    $('#elWinAlign')?.addEventListener('click', () => {
+      if(alignElementToWindow(e)){ pushHistory(); toast('Skříň zarovnána podél zdi na střed okna'); }
+      else toast('Nakresli nejdřív okno do zdi');
+    });
     $('#iDel').onclick = deleteSelection;
     $$('.sw-btn').forEach(b => b.onclick = () => { e.color = b.dataset.color; pushHistory(); render(); });
     return;
@@ -2518,7 +2535,7 @@ function renderInspector(){
         <p class="hint">Po přichycení zadáš přesné mm od rohu úseku a od líce zdi – ve výkresu se nakreslí pomocné kóty.</p>
       </div>
       <div class="insp-actions">
-        <button class="tb full" id="symAlign">⌖ Střed skříně a okna na tuto značku</button>
+        <button class="tb full" id="symAlign">⌖ Podél zdi na střed skříně</button>
         <button class="tb danger full" id="symDel">🗑 Smazat značku</button>
       </div>`;
     $('#symType').addEventListener('change', ev => { sm.type = symType(ev.target.value).id; pushHistory(); });
@@ -2530,10 +2547,8 @@ function renderInspector(){
     $('#symNote').addEventListener('change', () => pushHistory());
     const reanchor = () => { applySymbolAnchor(sm); pushHistory(); };
     $('#symAlign')?.addEventListener('click', () => {
-      const r = alignToSymbol(sm);
-      if(!r.el && !r.win){ toast('Nakresli nejdřív skříň a okno, pak je zarovnej na značku'); return; }
-      pushHistory();
-      toast(`Zarovnáno na značku: skříň ${r.el?'✓':'—'} · okno ${r.win?'✓':'—'}`);
+      if(alignSymbolToElementAlong(sm)){ pushHistory(); toast('Značka zarovnána podél zdi na střed skříně, od líce zůstává'); }
+      else toast('Nakresli nejdřív skříň');
     });
     $('#symAttach')?.addEventListener('click', () => { if(attachSymbolToWall(sm)) pushHistory(); else toast('Nablízku není žádná zeď'); });
     $('#symUnanchor')?.addEventListener('click', () => { sm.wallId=null; pushHistory(); });
