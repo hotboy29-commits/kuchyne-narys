@@ -702,16 +702,21 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
     let dim='';
     if(a && S.showDimInst !== false){
       const dc = t.color;                         // barva = barva značky
-      /* popisek: za zdí směrem ven z výkresu (do okraje papíru) */
-      const lx = a.foot.x - a.rx*out, ly = a.foot.y - a.ry*out;
-      const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.6)+'px;';
-      const fs1 = dimF(2.6), fs2 = dimF(2.0);
-      const sep = dimF(3.4);
-      dim=`<g stroke="${dc}" stroke-width="${pen(1.0)}" stroke-dasharray="${pen(4)} ${pen(3)}" fill="none">
-        <line x1="${R(sm.x)}" y1="${R(sm.y)}" x2="${R(a.foot.x)}" y2="${R(a.foot.y)}"/>
-        <line x1="${R(a.foot.x)}" y1="${R(a.foot.y)}" x2="${R(lx)}" y2="${R(ly)}"/>
+      /* Kóta instalace: MĚŘENÁ ČÁRA vede po zdi od ZAČÁTKU ÚSEKU (roh)
+         až k patce značky; z patky pak čára pokračuje ven z výkresu
+         k číslům (vzdálenost od rohu a odsazení od líce). */
+      const st = a.sg.a, ft = a.foot;
+      const lx = ft.x - a.rx*out, ly = ft.y - a.ry*out;
+      const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.7)+'px;';
+      const fs1 = dimF(2.8), fs2 = dimF(2.1), sep = dimF(3.6);
+      dim=`<g stroke="${dc}" fill="none">
+        <line x1="${R(st.x)}" y1="${R(st.y)}" x2="${R(ft.x)}" y2="${R(ft.y)}" stroke-width="${pen(1.6)}" stroke-dasharray="${pen(2.2)} ${pen(2.2)}"/>
+        <line x1="${R(ft.x)}" y1="${R(ft.y)}" x2="${R(lx)}" y2="${R(ly)}" stroke-width="${pen(1.0)}" stroke-dasharray="${pen(4)} ${pen(3)}"/>
+        <line x1="${R(sm.x)}" y1="${R(sm.y)}" x2="${R(ft.x)}" y2="${R(ft.y)}" stroke-width="${pen(0.9)}" stroke-dasharray="${pen(3)} ${pen(3)}"/>
+        <line x1="${R(st.x - a.rx*90)}" y1="${R(st.y - a.ry*90)}" x2="${R(st.x + a.rx*90)}" y2="${R(st.y + a.ry*90)}" stroke-width="${pen(1.4)}"/>
+        <circle cx="${R(ft.x)}" cy="${R(ft.y)}" r="${dimF(1.7)}" fill="${dc}" stroke="#fff" stroke-width="${pen(0.5)}"/>
       </g>
-      <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
+      <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">od rohu ${fmt(a.along)}</text>
       <text x="${R(lx)}" y="${R(ly + sep)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs2}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">líce ${fmt(a.off)}</text>`;
     }
     return `<g>${dim}
@@ -2837,7 +2842,7 @@ function legendHtml(){
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
-    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Šířka skříně – tyrkysová čísla uvnitř skříněk</span>` : '')
+    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Šířka skříně – tyrkysová kóta pod čelem skříně</span>` : '')
     + `<span class="lg"><i class="sw" style="background:#334155;height:0;border-top:1.6px solid #334155"></i>Rozměr místnosti</span>`
     + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:${symUsed[0]?.color || '#2563eb'};border-radius:50%"></i>Kóty instalací = barva značky (mimo výkres)</span>` : '');
 }
@@ -2893,36 +2898,31 @@ function drawingSvg(P){
       parts.push(`<text x="${R(cx)}" y="${R(cy)}" text-anchor="middle" dominant-baseline="middle"
         font-size="${size}" font-weight="700" fill="#0d1117"
         style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
-      /* šířka skříně podél čela – malá tyrkysová kóta uvnitř skříně.
-         Otočená skříň (čelo svislé) ukáže stále správnou šířku (600),
-         ne osový rozměr. */
-      const horiz = isHorizFront(e.front || 'jih');
-      const wLabel = elFrontW(e);
-      if(capPx*k >= 12 && wLabel > 0){
-        const wSize = fs(clamp(capPx*k*0.20, 1.6, 2.6));
-        if(horiz){
-          parts.push(`<text x="${R(cx)}" y="${R(cy + e.d*0.18)}" text-anchor="middle" dominant-baseline="middle"
-            font-size="${wSize}" font-weight="700" fill="#0d6b5f"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw(0.35)}px">${fmt(wLabel)}</text>`);
-        } else {
-          parts.push(`<text x="${R(cx)}" y="${R(cy + e.d*0.18)}" text-anchor="middle" dominant-baseline="middle"
-            transform="rotate(-90 ${R(cx)} ${R(cy + e.d*0.18)})"
-            font-size="${wSize}" font-weight="700" fill="#0d6b5f"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw(0.35)}px">${fmt(wLabel)}</text>`);
-        }
-      }
     }
   }
 
   // značky instalací
   parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
 
-  // kóty – jen čisté vnější kóty celé místnosti (mimo výkres);
-  // rozměry skříněk jsou uvnitř skříněk, odstupové čáry se netisknou
+  // kóty šířek skříní – KAŽDÁ skříň dostane kótu POD SVÝM ČELEM (venku, ne uvnitř)
+  const OFF_EL = 300;                        // odsazení kóty před čelo skříně [mm]
+  for(const e of S.project.elements){
+    const front = e.front || 'jih';
+    const wF = elFrontW(e);
+    if(wF < 40) continue;
+    if(front==='jih' || front==='sever'){
+      const fy = (front==='jih') ? e.y+e.d+OFF_EL : e.y-OFF_EL;
+      parts.push(dimPrint(e.x, fy, e.x+e.w, fy, 'x', k, 0.85, '#0d6b5f'));
+    } else {
+      const fx = (front==='východ') ? e.x+e.w+OFF_EL : e.x-OFF_EL;
+      parts.push(dimPrint(fx, e.y, fx, e.y+e.d, 'y', k, 0.85, '#0d6b5f'));
+    }
+  }
+  // čisté vnější kóty celé místnosti
   const wb = wallsBBox();
   if(wb){
-    parts.push(dimPrint(wb.x, wb.y-560, wb.x+wb.w, wb.y-560, 'x', k, 1.1, '#334155'));
-    parts.push(dimPrint(wb.x-560, wb.y, wb.x-560, wb.y+wb.h, 'y', k, 1.1, '#334155'));
+    parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k, 1.05, '#334155'));
+    parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k, 1.05, '#334155'));
   }
   // měřítko
   /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
