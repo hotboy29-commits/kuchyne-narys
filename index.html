@@ -406,7 +406,8 @@ body{
 
     <div class="group">
       <button class="tb toggle" id="btnGrid" aria-pressed="true" title="Mřížka 50 / 500 mm">▦</button>
-      <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty">↔</button>
+      <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
+      <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
     </div>
 
@@ -562,6 +563,7 @@ const S = {
   magnet: true,
   showGrid: true,
   showDims: true,
+  showDimInst: true,      // kóty instalací (voda/elektro…) – barva = typ značky
   guides: [],                // dočasná magnetická vodítka během tažení
   draft: null,               // rozkreslená zeď / obdélník / odstup
   measure: null
@@ -685,22 +687,27 @@ function windowsSvg(pen, hits, lw=2){
     </g>`;
   }).join('');
 }
-function symbolsSvg(pen, hits, fsz, halo, lw=3.5){
+function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs){
+  /* Kóty instalací mají barvu PODLE TYPU ZNAČKY (V/O/Z/VD/P), aby se daly
+     odlišit od tyrkysových kót skříní. dimFs přepočítá velikost písma kóty:
+     na plátně ~11 px (default), v tisku mm papíru. */
+  const dimF = (typeof dimFs === 'function') ? dimFs : (mm => pen(mm*4.5833));
   return S.project.symbols.map(sm=>{
     const t=symType(sm.type); const sel=S.sel?.kind==='sym'&&S.sel.id===sm.id;
     const hs=halo?`paint-order:stroke;stroke:#fff;stroke-width:${fsz(36)}px;`:'';
     const a=symbolAnchor(sm);
     let dim='';
-    if(a){
+    if(a && S.showDimInst !== false){
       const mx=(a.foot.x+sm.x)/2, my=(a.foot.y+sm.y)/2;
       const ax=(a.sg.a.x+a.foot.x)/2, ay=(a.sg.a.y+a.foot.y)/2;
-      const ths=halo?'paint-order:stroke;stroke:#fff;stroke-width:'+pen(3)+'px;':'';
-      dim=`<g stroke="#0d9488" stroke-width="${pen(1.2)}" stroke-dasharray="${pen(6)} ${pen(4)}" fill="none">
+      const dc = t.color;                         // barva = barva značky
+      const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.5)+'px;';
+      dim=`<g stroke="${dc}" stroke-width="${pen(1.1)}" stroke-dasharray="${pen(5)} ${pen(3.4)}" fill="none">
         <line x1="${R(a.sg.a.x)}" y1="${R(a.sg.a.y)}" x2="${R(a.foot.x)}" y2="${R(a.foot.y)}"/>
         <line x1="${R(a.foot.x)}" y1="${R(a.foot.y)}" x2="${sm.x}" y2="${sm.y}"/>
       </g>
-      <text x="${R(ax - a.rx*200)}" y="${R(ay - a.ry*200)}" text-anchor="middle" font-size="${pen(11)}" fill="#0d9488" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
-      <text x="${R(mx + a.ry*160)}" y="${R(my - a.rx*160)}" text-anchor="middle" font-size="${pen(11)}" fill="#0d9488" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.off)}</text>`;
+      <text x="${R(ax - a.rx*220)}" y="${R(ay - a.ry*220)}" text-anchor="middle" font-size="${dimF(2.4)}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
+      <text x="${R(mx + a.ry*180)}" y="${R(my - a.rx*180)}" text-anchor="middle" font-size="${dimF(2.4)}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.off)}</text>`;
     }
     return `<g>${dim}
       <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
@@ -1166,7 +1173,7 @@ function dimsMarkup(){
   if(S.showDims){
     for(const run of computeRuns())
       if(run.ids.length > 1)   // jednu skříň nekótujeme dvakrát
-        parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#64748b'));
+        parts.push(dimLine(run.x1, run.y+520, run.x2, run.y+520, 'x', '#0d6b5f'));
     const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
     if(closedWalls.length){
       /* čára je vnitřní líc → bbox je přímo světlá míra místnosti */
@@ -2816,7 +2823,10 @@ function legendHtml(){
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
-    + (S.project.guides.some(g=>g.print) ? `<span class="lg"><i class="sw" style="background:#c2410c;height:0;border-top:2px dashed #c2410c"></i>Odstupová čára</span>` : '');
+    + (S.project.guides.some(g=>g.print) ? `<span class="lg"><i class="sw" style="background:#c2410c;height:0;border-top:2px dashed #c2410c"></i>Odstupová čára</span>` : '')
+    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Kóta skříně / řady</span>
+       <span class="lg"><i class="sw" style="background:#334155"></i>Kóta obvodu místnosti</span>
+       <span class="lg"><i class="sw" style="background:${symUsed[0]?.color || '#2563eb'};border-radius:50%"></i>Kóty instalací = barva značky</span>` : '');
 }
 
 /**
@@ -2882,21 +2892,21 @@ function drawingSvg(P){
   }
 
   // značky instalací
-  parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35)); // oprava: velikost pisma znaciek v PDF (jednotky sveta, jako na obrazovce)
+  parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k))); // písmo kót instalací v mm papíru
 
   // kóty
   const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
   if(closedWalls.length){
     for(const w of closedWalls){
       const bb = wallBBox(w);
-      parts.push(dimPrint(bb.x, bb.y+300, bb.x+bb.w, bb.y+300, 'x', k));
-      parts.push(dimPrint(bb.x+300, bb.y, bb.x+300, bb.y+bb.h, 'y', k));
+      parts.push(dimPrint(bb.x, bb.y+300, bb.x+bb.w, bb.y+300, 'x', k, 1, '#334155'));
+      parts.push(dimPrint(bb.x+300, bb.y, bb.x+300, bb.y+bb.h, 'y', k, 1, '#334155'));
     }
   } else {
     const wb = wallsBBox();
     if(wb){
-      parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k));
-      parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k));
+      parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k, 1, '#334155'));
+      parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k, 1, '#334155'));
     }
   }
   for(const e of S.project.elements){
@@ -3077,6 +3087,11 @@ function bindUi(){
   $('#btnDims').onclick = () => {
     S.showDims = !S.showDims;
     $('#btnDims').setAttribute('aria-pressed', S.showDims?'true':'false');
+    render();
+  };
+  $('#btnDimInst').onclick = () => {
+    S.showDimInst = !S.showDimInst;
+    $('#btnDimInst').setAttribute('aria-pressed', S.showDimInst?'true':'false');
     render();
   };
   $('#btnMagnet').onclick = () => {
