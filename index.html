@@ -887,14 +887,23 @@ function viewCenter(){
 
 /* ─────────────────────────── 5. RENDER ─────────────────────────── */
 
-let renderQueued = false;
-function render(){
-  if(renderQueued) return;
-  renderQueued = true;
-  requestAnimationFrame(() => { renderQueued = false; doRender(); });
+let renderQueued = false, renderKind = 'full';
+function requestRender(kind){
+  if(renderQueued){ if(kind === 'full') renderKind = 'full'; return; }
+  renderQueued = true; renderKind = kind;
+  requestAnimationFrame(() => {
+    const k = renderKind; renderQueued = false; renderKind = 'full';
+    if(k === 'canvas') doRenderCanvas(); else doRender();
+  });
 }
+function render(){ requestRender('full'); }
+/* Překreslí jen výkres; panel vpravo zůstane stát, takže psaní a Tab
+   v polích nepřijdou o fokus. */
+function renderCanvas(){ requestRender('canvas'); }
 
-function doRender(){
+function doRender(){ doRenderCanvas(); renderInspector(); }
+
+function doRenderCanvas(){
   /* dokud netáhneš, držíme celý nákres ukotvený v počátku (0,0) */
   if(!drag) rebaseProject();
   for(const sm of S.project.symbols) if(sm.wallId != null) applySymbolAnchor(sm);
@@ -910,7 +919,6 @@ function doRender(){
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
   $('#layerUI').innerHTML     = uiMarkup();
-  renderInspector();
   updateStatus();
   updateDrawbar();
   updateSymPal();
@@ -2124,15 +2132,35 @@ function duplicateSelection(){
   select('el', n.id); pushHistory(); render();
 }
 
+/* Šířka prvku se měří podél jeho čela (čelo je otočené do místnosti, pryč
+   od zdi). U čel k jihu/severu leží čelo v ose X, u východu/západu v ose Y.
+   Šířka a hloubka se proto odvozují z osových rozměrů podle směru čela –
+   po otočení o 90° zůstanou stejné (600 × 510 zůstává 600 × 510). */
+const isHorizFront = f => (f === 'jih' || f === 'sever');
+function elFrontW(e){ return isHorizFront(e.front || 'jih') ? e.w : e.d; }
+function elFrontD(e){ return isHorizFront(e.front || 'jih') ? e.d : e.w; }
+function setElFrontW(e, v){ if(isHorizFront(e.front || 'jih')) e.w = v; else e.d = v; }
+function setElFrontD(e, v){ if(isHorizFront(e.front || 'jih')) e.d = v; else e.w = v; }
+
+/* Přeorientuje prvek na daný směr čela. Když se osa čela změní
+   (vodorovná ↔ svislá), prvek se o 90° otočí kolem středu; šířka a
+   hloubka prvku se přitom nemění. */
+function orientElement(e, newFront){
+  const oldH = isHorizFront(e.front || 'jih');
+  const newH = isHorizFront(newFront);
+  if(oldH !== newH){
+    const cx = e.x + e.w/2, cy = e.y + e.d/2;
+    const w = e.w; e.w = e.d; e.d = w;
+    e.x = R(cx - e.w/2); e.y = R(cy - e.d/2);
+  }
+  e.front = newFront;
+}
+
 function rotateSelection(){
-  if(S.sel?.kind!=='el') return;
+  if(S.sel?.kind !== 'el') return;
   const e = getEl(S.sel.id); if(!e) return;
-  const cx = e.x + e.w/2, cy = e.y + e.d/2;
-  const w = e.w, h = e.d;
-  e.w = h; e.d = w;
-  e.x = R(cx - e.w/2); e.y = R(cy - e.d/2);
   const order = ['jih','západ','sever','východ'];
-  e.front = order[(order.indexOf(e.front||'jih')+1) % 4];
+  orientElement(e, order[(order.indexOf(e.front||'jih')+1) % 4]);
   pushHistory(); render();
 }
 
@@ -2202,6 +2230,17 @@ function pushHistory(){
   historyIndex = history.length-1;
   save(); render();
 }
+/** Uloží do historie a na disk BEZ překreslení inspektoru – pro úpravy polí
+    vpravo, aby psaní a Tab nepřišly o fokus. */
+function pushHistoryQuiet(){
+  const s = snapshot();
+  if(history[historyIndex] === s){ save(); return; }
+  history = history.slice(0, historyIndex+1);
+  history.push(s);
+  if(history.length > HISTORY_MAX) history.shift();
+  historyIndex = history.length-1;
+  save();
+}
 function commitPreDrag(){
   if(!hist.preDrag) return;
   const before = hist.preDrag; hist.preDrag = null;
@@ -2251,8 +2290,8 @@ function renderInspector(){
       <div class="insp-sec">
         <h4>Rozměry (mm)</h4>
         <div class="row2">
-          <label class="fld"><span>Šířka</span><input id="iW" type="number" step="5" min="${MIN_SIZE}" value="${e.w}"></label>
-          <label class="fld"><span>Hloubka</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${e.d}"></label>
+          <label class="fld"><span>Šířka</span><input id="iW" type="number" step="5" min="${MIN_SIZE}" value="${elFrontW(e)}"></label>
+          <label class="fld"><span>Hloubka</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${elFrontD(e)}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>X od rohu obvodu</span><input id="iX" type="number" step="5" value="${Math.round(e.x - OR.x)}"></label>
@@ -2288,21 +2327,19 @@ function renderInspector(){
       </div>`;
 
     const bind = (id, fn, ev='change') => { const el = $(id); if(el) el.addEventListener(ev, fn); };
-    /* název nesmí při psaní přestavět panel – jinak po každém písmenu
-       vypadne fokus a musíš klikat znovu */
-    bind('#iName', ev => {
-      e.name = ev.target.value;
-      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
-      updateStatus();
-    }, 'input');
-    bind('#iName', () => pushHistory(), 'change');
-    bind('#iNote', ev => { e.note = ev.target.value; pushHistory(); }, 'input');
-    bind('#iW', ev => { e.w = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
-    bind('#iD', ev => { e.d = Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE); pushHistory(); render(); });
-    bind('#iX', ev => { e.x = R(OR.x + (+ev.target.value||0)); pushHistory(); render(); });
-    bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistory(); render(); });
-    bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistory(); render(); });
-    bind('#iFront', ev => { e.front = ev.target.value; pushHistory(); render(); });
+    /* Pole vpravo nesmí přestavět panel ani při psaní, ani při potvrzení
+       (Tab/Enter) – jinak by po každém písmenu / tabulátoru vypadl fokus.
+       Překreslí se jen výkres; do historie se uloží až při opuštění pole. */
+    bind('#iName', ev => { e.name = ev.target.value; renderCanvas(); }, 'input');
+    bind('#iName', () => pushHistoryQuiet(), 'change');
+    bind('#iNote', ev => { e.note = ev.target.value; }, 'input');
+    bind('#iNote', () => pushHistoryQuiet(), 'change');
+    bind('#iW', ev => { setElFrontW(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iD', ev => { setElFrontD(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iX', ev => { e.x = R(OR.x + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
     $('#iRot').onclick = rotateSelection;
     $('#iDup').onclick = duplicateSelection;
     $('#iWall').onclick = snapToWall;
@@ -2383,8 +2420,11 @@ function renderInspector(){
         <button class="tb danger full" id="wDel">🗑 Smazat zeď</button>
       </div>`;
 
-    const wName = $('#wName'); if(wName) wName.addEventListener('input', ev => { w.name = ev.target.value; pushHistory(); });
-    const wT = $('#wT'); if(wT) wT.addEventListener('change', ev => { w.t = clamp(+ev.target.value||WALL_T_DEFAULT,20,1000); pushHistory(); render(); });
+    const wName = $('#wName'); if(wName){
+      wName.addEventListener('input', ev => { w.name = ev.target.value; renderCanvas(); });
+      wName.addEventListener('change', () => pushHistoryQuiet());
+    }
+    const wT = $('#wT'); if(wT) wT.addEventListener('change', ev => { w.t = clamp(+ev.target.value||WALL_T_DEFAULT,20,1000); pushHistoryQuiet(); renderCanvas(); });
     /* Délky úseků: Tab potvrdí číslo a skočí na další řádek, Shift+Tab zpět,
        Enter potvrdí a kurzor nechá na místě. render() přepisuje panel až
        v requestAnimationFrame – fokus proto NEVRACÍME hned (starý input by
@@ -2461,19 +2501,20 @@ function renderInspector(){
           <button class="tb danger full" id="gDel">🗑 Smazat</button>
         </div>
       </div>`;
-    $('#gName').addEventListener('input', ev => { g.name = ev.target.value; pushHistory(); });
+    $('#gName').addEventListener('input', ev => { g.name = ev.target.value; });
+    $('#gName').addEventListener('change', () => pushHistoryQuiet());
     $('#gPos').addEventListener('change', ev => {
       const v = +ev.target.value||0;
       if(horiz){ g.a.y = v; g.b.y = v; } else { g.a.x = v; g.b.x = v; }
-      pushHistory(); render();
+      pushHistoryQuiet(); renderCanvas();
     });
     $('#gLen').addEventListener('change', ev => {
       const v = Math.max(10, +ev.target.value||10);
       if(horiz){ const c = (g.a.x+g.b.x)/2; g.a.x = R(c-v/2); g.b.x = R(c+v/2); }
       else { const c = (g.a.y+g.b.y)/2; g.a.y = R(c-v/2); g.b.y = R(c+v/2); }
-      pushHistory(); render();
+      pushHistoryQuiet(); renderCanvas();
     });
-    $('#gPrint').addEventListener('change', ev => { g.print = ev.target.checked; pushHistory(); render(); });
+    $('#gPrint').addEventListener('change', ev => { g.print = ev.target.checked; pushHistoryQuiet(); renderCanvas(); });
     $('#gDel').onclick = deleteSelection;
     return;
   }
@@ -2498,11 +2539,11 @@ function renderInspector(){
       win.w = Math.max(100, +ev.target.value||100);
       const s2 = wall ? wallSegments(wall)[win.seg] : null;
       if(s2){ const h2=Math.min(win.w,segLength(s2))/2; win.off=R(Math.max(h2,Math.min(win.off,segLength(s2)-h2))); }
-      pushHistory();
+      pushHistoryQuiet(); renderCanvas();
     });
     $('#winOff').addEventListener('change', ev => {
       win.off = R(Math.max(half, Math.min(+ev.target.value||0, L-half)));
-      pushHistory();
+      pushHistoryQuiet(); renderCanvas();
     });
     $('#winDel').onclick = deleteSelection;
     return;
@@ -2544,7 +2585,7 @@ function renderInspector(){
       sm.note = ev.target.value;
       $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
     });
-    $('#symNote').addEventListener('change', () => pushHistory());
+    $('#symNote').addEventListener('change', () => pushHistoryQuiet());
     const reanchor = () => { applySymbolAnchor(sm); pushHistory(); };
     $('#symAlign')?.addEventListener('click', () => {
       if(alignSymbolToElementAlong(sm)){ pushHistory(); toast('Značka zarovnána podél zdi na střed skříně, od líce zůstává'); }
@@ -2554,8 +2595,8 @@ function renderInspector(){
     $('#symUnanchor')?.addEventListener('click', () => { sm.wallId=null; pushHistory(); });
     $('#symWall')?.addEventListener('change', ev => { sm.wallId=ev.target.value; sm.seg=0; sm.along=0; reanchor(); });
     $('#symSeg')?.addEventListener('change', ev => { sm.seg=+ev.target.value||0; reanchor(); });
-    $('#symAlong')?.addEventListener('change', ev => { sm.along=Math.max(0,+ev.target.value||0); reanchor(); });
-    $('#symOff')?.addEventListener('change', ev => { sm.off=+ev.target.value||0; reanchor(); });
+    $('#symAlong')?.addEventListener('change', ev => { sm.along=Math.max(0,+ev.target.value||0); applySymbolAnchor(sm); pushHistoryQuiet(); renderCanvas(); });
+    $('#symOff')?.addEventListener('change', ev => { sm.off=+ev.target.value||0; applySymbolAnchor(sm); pushHistoryQuiet(); renderCanvas(); });
     $('#symDel').onclick = deleteSelection;
     return;
   }
@@ -2650,7 +2691,7 @@ function buildPrint(){
   const P = PAPER[info.paper] || PAPER.A3L;
   const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',year:'numeric'});
   const els = [...p.elements].sort((a,b)=> (a.y-b.y) || (a.x-b.x));
-  const totalLen = els.reduce((s,e)=> s + e.w*(e.qty||1), 0);
+  const totalLen = els.reduce((s,e)=> s + elFrontW(e)*(e.qty||1), 0);
   const pages = [];
 
   /* 1) titulní strana */
@@ -2690,21 +2731,22 @@ function buildPrint(){
   if(els.length || wins.length || syms.length){
     const LAM = 18;   // síla lamina – půda je o dvě síly užší
     const rows = els.map((e,i) => {
-      const pw = e.w - 2*LAM;             // šířka půdy i latí
+      const wNom = elFrontW(e), dNom = elFrontD(e);
+      const pw = wNom - 2*LAM;            // šířka půdy i latí (podél čela)
       let out = `<tr>
         <td class="num">${i+1}</td>
         <td><span class="pr-tdot" style="background:${e.color}"></span>${esc(e.name || '—')}</td>
-        <td class="num">${fmt(e.w)}</td>
-        <td class="num">${fmt(e.d)}</td>
+        <td class="num">${fmt(wNom)}</td>
+        <td class="num">${fmt(dNom)}</td>
         <td class="num">${e.qty||1}</td>
-        <td class="num">${fmt(e.w*(e.qty||1))}</td>
+        <td class="num">${fmt(wNom*(e.qty||1))}</td>
         <td>${esc(e.note || '')}</td>
       </tr>`;
       if(pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
           <td class="num">${fmt(pw)}</td>
-          <td class="num">${fmt(e.d)}</td>
+          <td class="num">${fmt(dNom)}</td>
           <td class="num">1</td>
           <td class="num">${fmt(pw)}</td>
           <td>šířka skříně − 2× ${LAM} mm</td>
