@@ -708,7 +708,7 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
       const st = a.sg.a, ft = a.foot;
       const lx = ft.x - a.rx*out, ly = ft.y - a.ry*out;
       const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.7)+'px;';
-      const fs1 = dimF(2.8), fs2 = dimF(2.1), sep = dimF(3.6);
+      const fs1 = dimF(2.8);
       dim=`<g stroke="${dc}" fill="none">
         <line x1="${R(st.x)}" y1="${R(st.y)}" x2="${R(ft.x)}" y2="${R(ft.y)}" stroke-width="${pen(1.6)}" stroke-dasharray="${pen(2.2)} ${pen(2.2)}"/>
         <line x1="${R(ft.x)}" y1="${R(ft.y)}" x2="${R(lx)}" y2="${R(ly)}" stroke-width="${pen(1.0)}" stroke-dasharray="${pen(4)} ${pen(3)}"/>
@@ -716,8 +716,7 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
         <line x1="${R(st.x - a.rx*90)}" y1="${R(st.y - a.ry*90)}" x2="${R(st.x + a.rx*90)}" y2="${R(st.y + a.ry*90)}" stroke-width="${pen(1.4)}"/>
         <circle cx="${R(ft.x)}" cy="${R(ft.y)}" r="${dimF(1.7)}" fill="${dc}" stroke="#fff" stroke-width="${pen(0.5)}"/>
       </g>
-      <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">od rohu ${fmt(a.along)}</text>
-      <text x="${R(lx)}" y="${R(ly + sep)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs2}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">líce ${fmt(a.off)}</text>`;
+      <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">od rohu ${fmt(a.along)}</text>`;
     }
     return `<g>${dim}
       <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
@@ -1761,7 +1760,7 @@ function onUp(ev){
     const r = normRect(S.draft.a, S.draft.b);
     S.draft = null;
     if(r.w >= MIN_SIZE && r.h >= MIN_SIZE){
-      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:R(r.h) });
+      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:DFLT_EL_D });
       select('el', e.id);
       pushHistory();
       toast('Zadej přesné rozměry v panelu vpravo');
@@ -1915,7 +1914,7 @@ function commitDraft(){
     const r = normRect(d.a, d.b);
     S.draft = null;
     if(r.w >= MIN_SIZE && r.h >= MIN_SIZE){
-      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:R(r.h) });
+      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:DFLT_EL_D });
       select('el', e.id); pushHistory();
       return true;
     }
@@ -2124,11 +2123,12 @@ function pointInPoly(p, pts){
 
 function getEl(id){ return S.project.elements.find(e => e.id === id); }
 
+const DFLT_EL_D = 510;                    // výchozí hloubka obdélníku [mm]
 function addElement(o={}){
   const e = {
     id: uid('e'),
     x: o.x ?? 0, y: o.y ?? 0,
-    w: o.w ?? 600, d: o.d ?? 600,
+    w: o.w ?? 600, d: o.d ?? DFLT_EL_D,
     name: o.name || '',
     note: o.note || '',
     qty: o.qty || 1,
@@ -2139,9 +2139,9 @@ function addElement(o={}){
   return e;
 }
 
-/** Krátké klepnutí nástrojem Obdélník: vloží výchozí 600 × 600 pod prst
+/** Krátké klepnutí nástrojem Obdélník: vloží výchozí 600 × 510 pod prst
    a přichytí ho k nejbližšímu cíli v dosahu magnetu. */
-function addElementAtPoint(wx, wy, wmm=600, dmm=600){
+function addElementAtPoint(wx, wy, wmm=600, dmm=DFLT_EL_D){
   const e = addElement({ x:R(wx - wmm/2), y:R(wy - dmm/2), w:wmm, d:dmm });
   const r = computeSnap(e, e.x, e.y, 0, 0);
   e.x = R(r.x); e.y = R(r.y);
@@ -3012,7 +3012,7 @@ function setTool(t){
 }
 const HINTS = {
   select: 'Klepni na prvek, zeď nebo odstupovou čáru a uprav ji vpravo. Táhnout = přesun, bílé body = změna velikosti.',
-  rect:   'Táhni a nakresli obdélník – rozměry pak přepíšeš vpravo. Krátké klepnutí vloží obdélník 600 × 600.',
+  rect:   'Táhni a nakresli obdélník – rozměry pak přepíšeš vpravo. Krátké klepnutí vloží obdélník 600 × 510.',
   wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
@@ -3062,7 +3062,7 @@ function buildTools(){
       const wpt = screenToWorld(ev.clientX, ev.clientY);
       const e = addElementAtPoint(wpt.x, wpt.y);
       select('el', e.id); pushHistory();
-      toast('Obdélník 600 × 600 – uprav rozměry vpravo');
+      toast('Obdélník 600 × 510 (š × hl) – uprav rozměry vpravo');
       setTimeout(()=>$('#iW')?.focus(), 60);
     }
     downAt = null;
