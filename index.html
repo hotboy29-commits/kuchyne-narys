@@ -687,27 +687,32 @@ function windowsSvg(pen, hits, lw=2){
     </g>`;
   }).join('');
 }
-function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs){
+function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
   /* Kóty instalací mají barvu PODLE TYPU ZNAČKY (V/O/Z/VD/P), aby se daly
-     odlišit od tyrkysových kót skříní. dimFs přepočítá velikost písma kóty:
-     na plátně ~11 px (default), v tisku mm papíru. */
+     odlišit od tyrkysových kót skříní. VEDOU VEN Z VÝKRESU (přes zeď do okraje
+     papíru), aby nebyly přes skříně a jejich kóty. dimFs přepočítá velikost
+     písma: na plátně ~px (default), v tisku mm papíru. dimOut = vzdálenost
+     popisku od líce zdi (world). */
   const dimF = (typeof dimFs === 'function') ? dimFs : (mm => pen(mm*4.5833));
+  const out = (typeof dimOut === 'number' && dimOut > 0) ? dimOut : 520;
   return S.project.symbols.map(sm=>{
     const t=symType(sm.type); const sel=S.sel?.kind==='sym'&&S.sel.id===sm.id;
     const hs=halo?`paint-order:stroke;stroke:#fff;stroke-width:${fsz(36)}px;`:'';
     const a=symbolAnchor(sm);
     let dim='';
     if(a && S.showDimInst !== false){
-      const mx=(a.foot.x+sm.x)/2, my=(a.foot.y+sm.y)/2;
-      const ax=(a.sg.a.x+a.foot.x)/2, ay=(a.sg.a.y+a.foot.y)/2;
       const dc = t.color;                         // barva = barva značky
-      const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.5)+'px;';
-      dim=`<g stroke="${dc}" stroke-width="${pen(1.1)}" stroke-dasharray="${pen(5)} ${pen(3.4)}" fill="none">
-        <line x1="${R(a.sg.a.x)}" y1="${R(a.sg.a.y)}" x2="${R(a.foot.x)}" y2="${R(a.foot.y)}"/>
-        <line x1="${R(a.foot.x)}" y1="${R(a.foot.y)}" x2="${sm.x}" y2="${sm.y}"/>
+      /* popisek: za zdí směrem ven z výkresu (do okraje papíru) */
+      const lx = a.foot.x - a.rx*out, ly = a.foot.y - a.ry*out;
+      const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.6)+'px;';
+      const fs1 = dimF(2.6), fs2 = dimF(2.0);
+      const sep = dimF(3.4);
+      dim=`<g stroke="${dc}" stroke-width="${pen(1.0)}" stroke-dasharray="${pen(4)} ${pen(3)}" fill="none">
+        <line x1="${R(sm.x)}" y1="${R(sm.y)}" x2="${R(a.foot.x)}" y2="${R(a.foot.y)}"/>
+        <line x1="${R(a.foot.x)}" y1="${R(a.foot.y)}" x2="${R(lx)}" y2="${R(ly)}"/>
       </g>
-      <text x="${R(ax - a.rx*220)}" y="${R(ay - a.ry*220)}" text-anchor="middle" font-size="${dimF(2.4)}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
-      <text x="${R(mx + a.ry*180)}" y="${R(my - a.rx*180)}" text-anchor="middle" font-size="${dimF(2.4)}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.off)}</text>`;
+      <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">${fmt(a.along)}</text>
+      <text x="${R(lx)}" y="${R(ly + sep)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs2}" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">líce ${fmt(a.off)}</text>`;
     }
     return `<g>${dim}
       <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
@@ -851,7 +856,8 @@ function viewBBox(){
   const x = -S.view.tx / S.view.zoom, y = -S.view.ty / S.view.zoom;
   return { x, y, w: r.width / S.view.zoom, h: r.height / S.view.zoom };
 }
-function contentBBox(){
+function contentBBox(opts){
+  const skipGuides = !!(opts && opts.skipGuides);
   let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity, any=false;
   for(const w of S.project.walls){
     const h = (w.t||WALL_T_DEFAULT)/2;
@@ -860,7 +866,7 @@ function contentBBox(){
   for(const e of S.project.elements){
     x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); any=true;
   }
-  for(const g of S.project.guides){
+  if(!skipGuides) for(const g of S.project.guides){
     for(const p of [g.a,g.b]){ x0=Math.min(x0,p.x); y0=Math.min(y0,p.y); x1=Math.max(x1,p.x); y1=Math.max(y1,p.y); any=true; }
   }
   for(const sm of S.project.symbols){
@@ -921,7 +927,7 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -1190,10 +1196,18 @@ function dimsMarkup(){
       }
     }
   }
-  /* šířka skříně jen u vybrané – při kreslení nic nepřekáží */
+  /* šířka vybrané skříně se kótuje PODÉL JEJÍHO ČELA:
+     čelo k jihu/severu → vodorovná kóta pod skříní;
+     čelo k západu/východu → svislá kóta vedle skříně.
+     Díky tomu ukazuje i otočená skříň správnou šířku (600). */
   if(S.sel?.kind === 'el'){
     const e = getEl(S.sel.id);
-    if(e) parts.push(dimLine(e.x, e.y+e.d+160, e.x+e.w, e.y+e.d+160, 'x', '#0d6b5f'));
+    if(e){
+      if(isHorizFront(e.front || 'jih'))
+        parts.push(dimLine(e.x, e.y+e.d+160, e.x+e.w, e.y+e.d+160, 'x', '#0d6b5f'));
+      else
+        parts.push(dimLine(e.x+e.w+160, e.y, e.x+e.w+160, e.y+e.d, 'y', '#0d6b5f'));
+    }
   }
   /* vybraná zeď: délky úseků UVNITŘ obvodu; označená stěna svítí */
   if(S.sel?.kind === 'wall'){
@@ -2590,7 +2604,7 @@ function renderInspector(){
     /* poznámka nesmí při psaní přijít o fokus – přepíše se jen vrstva výkresu */
     $('#symNote').addEventListener('input', ev => {
       sm.note = ev.target.value;
-      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true) + guidesMarkup();
+      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + guidesMarkup();
     });
     $('#symNote').addEventListener('change', () => pushHistoryQuiet());
     const reanchor = () => { applySymbolAnchor(sm); pushHistory(); };
@@ -2823,10 +2837,9 @@ function legendHtml(){
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
-    + (S.project.guides.some(g=>g.print) ? `<span class="lg"><i class="sw" style="background:#c2410c;height:0;border-top:2px dashed #c2410c"></i>Odstupová čára</span>` : '')
-    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Kóta skříně / řady</span>
-       <span class="lg"><i class="sw" style="background:#334155"></i>Kóta obvodu místnosti</span>
-       <span class="lg"><i class="sw" style="background:${symUsed[0]?.color || '#2563eb'};border-radius:50%"></i>Kóty instalací = barva značky</span>` : '');
+    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Šířka skříně – tyrkysová čísla uvnitř skříněk</span>` : '')
+    + `<span class="lg"><i class="sw" style="background:#334155;height:0;border-top:1.6px solid #334155"></i>Rozměr místnosti</span>`
+    + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:${symUsed[0]?.color || '#2563eb'};border-radius:50%"></i>Kóty instalací = barva značky (mimo výkres)</span>` : '');
 }
 
 /**
@@ -2834,7 +2847,7 @@ function legendHtml(){
  * papíře a přepočteny přes měřítko k – proto nejsou „rozmazané“.
  */
 function drawingSvg(P){
-  const b = contentBBox();
+  const b = contentBBox({ skipGuides:true });
   if(!b) return `<svg viewBox="0 0 ${P.w} ${P.h}"></svg>`;
   const M = 12;                                  // okraj [mm papíru]
   const iw = P.w - M*2, ih = P.h - M*2;
@@ -2847,15 +2860,6 @@ function drawingSvg(P){
 
   const parts = [];
   parts.push(`<g transform="translate(${R(ox)},${R(oy)}) scale(${k})">`);
-
-  // odstupové čáry (pod zdmi, aby je nepřekryly)
-  for(const g of S.project.guides){
-    if(!g.print) continue;
-    const dx = g.b.x-g.a.x, dy = g.b.y-g.a.y, L = Math.hypot(dx,dy)||1;
-    const ex = 4000, ux = dx/L*ex, uy = dy/L*ex;
-    parts.push(`<line x1="${R(g.a.x-ux)}" y1="${R(g.a.y-uy)}" x2="${R(g.b.x+ux)}" y2="${R(g.b.y+uy)}"
-      stroke="#c2410c" stroke-width="${sw(PEN.guide)}" stroke-dasharray="${sw(1.6)} ${sw(1)}"/>`);
-  }
 
   // zdi
   for(const w of S.project.walls){
@@ -2884,64 +2888,42 @@ function drawingSvg(P){
 
     const capPx = Math.min(e.w, e.d);
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
+      const cx = e.x+e.w/2, cy = e.y+e.d/2;
       const size = fs(clamp(capPx*k*0.30, 2.0, 3.4));
-      parts.push(`<text x="${R(e.x+e.w/2)}" y="${R(e.y+e.d/2)}" text-anchor="middle" dominant-baseline="middle"
+      parts.push(`<text x="${R(cx)}" y="${R(cy)}" text-anchor="middle" dominant-baseline="middle"
         font-size="${size}" font-weight="700" fill="#0d1117"
         style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
-    }
-  }
-
-  // značky instalací
-  parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k))); // písmo kót instalací v mm papíru
-
-  // kóty
-  const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
-  if(closedWalls.length){
-    for(const w of closedWalls){
-      const bb = wallBBox(w);
-      parts.push(dimPrint(bb.x, bb.y+300, bb.x+bb.w, bb.y+300, 'x', k, 1, '#334155'));
-      parts.push(dimPrint(bb.x+300, bb.y, bb.x+300, bb.y+bb.h, 'y', k, 1, '#334155'));
-    }
-  } else {
-    const wb = wallsBBox();
-    if(wb){
-      parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k, 1, '#334155'));
-      parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k, 1, '#334155'));
-    }
-  }
-  for(const e of S.project.elements){
-    parts.push(dimPrint(e.x, e.y+e.d+220, e.x+e.w, e.y+e.d+220, 'x', k, 0.8));
-  }
-  for(const run of computeRuns()){
-    if(run.ids.length > 1)   // šířku jedné skříně netiskneme dvakrát
-      parts.push(dimPrint(run.x1, run.y+620, run.x2, run.y+620, 'x', k, 1.1));
-  }
-  for(const g of S.project.guides){
-    if(!g.print) continue;
-    /* krátká kolmá kóta: o kolik mm je čára odsazená od vnitřního líce zdi,
-       měřeno ve středu čáry, aby to vyšlo na tu zeď, se kterou je rovnoběžná */
-    const gm = { x:(g.a.x+g.b.x)/2, y:(g.a.y+g.b.y)/2 };
-    let best = null;
-    for(const w of S.project.walls) for(const sg of wallSegments(w)){
-      const dx = sg.b.x-sg.a.x, dy = sg.b.y-sg.a.y, L2 = dx*dx+dy*dy || 1;
-      let u = ((gm.x-sg.a.x)*dx + (gm.y-sg.a.y)*dy) / L2; u = Math.max(0, Math.min(1, u));
-      const px = sg.a.x+dx*u, py = sg.a.y+dy*u;
-      const d = Math.hypot(gm.x-px, gm.y-py);
-      if(!best || d < best.d) best = { d, px, py, t: w.t||WALL_T_DEFAULT };
-    }
-    if(best && best.d > 1){
-      /* čára JE líc – vzdálenost od ní je přímo odsazení */
-      const dist = Math.round(best.d);
-      if(dist > 0){
-        const ix = best.px, iy = best.py;
-        parts.push(`<line x1="${R(ix)}" y1="${R(iy)}" x2="${R(gm.x)}" y2="${R(gm.y)}"
-          stroke="#c2410c" stroke-width="${sw(PEN.dim)}"/>`
-          + `<text x="${R((ix+gm.x)/2)}" y="${R((iy+gm.y)/2 - 60)}" text-anchor="middle"
-             font-size="${fs(2.4)}" fill="#c2410c" style="font-family:Helvetica,Arial,sans-serif">${fmt(dist)}</text>`);
+      /* šířka skříně podél čela – malá tyrkysová kóta uvnitř skříně.
+         Otočená skříň (čelo svislé) ukáže stále správnou šířku (600),
+         ne osový rozměr. */
+      const horiz = isHorizFront(e.front || 'jih');
+      const wLabel = elFrontW(e);
+      if(capPx*k >= 12 && wLabel > 0){
+        const wSize = fs(clamp(capPx*k*0.20, 1.6, 2.6));
+        if(horiz){
+          parts.push(`<text x="${R(cx)}" y="${R(cy + e.d*0.18)}" text-anchor="middle" dominant-baseline="middle"
+            font-size="${wSize}" font-weight="700" fill="#0d6b5f"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw(0.35)}px">${fmt(wLabel)}</text>`);
+        } else {
+          parts.push(`<text x="${R(cx)}" y="${R(cy + e.d*0.18)}" text-anchor="middle" dominant-baseline="middle"
+            transform="rotate(-90 ${R(cx)} ${R(cy + e.d*0.18)})"
+            font-size="${wSize}" font-weight="700" fill="#0d6b5f"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw(0.35)}px">${fmt(wLabel)}</text>`);
+        }
       }
     }
   }
 
+  // značky instalací
+  parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
+
+  // kóty – jen čisté vnější kóty celé místnosti (mimo výkres);
+  // rozměry skříněk jsou uvnitř skříněk, odstupové čáry se netisknou
+  const wb = wallsBBox();
+  if(wb){
+    parts.push(dimPrint(wb.x, wb.y-560, wb.x+wb.w, wb.y-560, 'x', k, 1.1, '#334155'));
+    parts.push(dimPrint(wb.x-560, wb.y, wb.x-560, wb.y+wb.h, 'y', k, 1.1, '#334155'));
+  }
   // měřítko
   /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
   const bx = b.x + b.w - 1000, by = b.y + b.h + 700;
@@ -2977,9 +2959,9 @@ function dimPrint(x1,y1,x2,y2,axis,k,mul=1,color='#0d6b5f'){
                         : `M${x1-tick} ${y1} l${tick} ${tick*1.4} l${tick} ${-tick*1.4}`;
   const a2 = axis==='x' ? `M${x2} ${y2-tick} l${-tick*1.4} ${tick} l${tick*1.4} ${tick}`
                         : `M${x2+tick} ${y2} l${-tick} ${-tick*1.4} l${-tick} ${tick*1.4}`;
-  const halo = swp(0.35);                        // tenká bílá halo, ne tlustá skvrna
+  const halo = swp(0.8);                         // bílá halo pro čitelnost přes čáry
   const txt = `<text x="${R((x1+x2)/2)}" y="${R((y1+y2)/2)}" text-anchor="middle" dominant-baseline="middle"
-    font-size="${R(textMm/k)}" fill="${color}" font-weight="600"
+    font-size="${R(textMm/k)}" fill="${color}" font-weight="700"
     style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${halo}">${fmt(len)}</text>`;
   return line + `<path d="${a1}" fill="${color}"/><path d="${a2}" fill="${color}"/>` + txt;
 }
