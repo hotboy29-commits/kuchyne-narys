@@ -1201,17 +1201,26 @@ function dimsMarkup(){
       }
     }
   }
-  /* šířka vybrané skříně se kótuje PODÉL JEJÍHO ČELA:
-     čelo k jihu/severu → vodorovná kóta pod skříní;
-     čelo k západu/východu → svislá kóta vedle skříně.
-     Díky tomu ukazuje i otočená skříň správnou šířku (600). */
+  /* šířka vybrané skříně: kóta podél šířky, kreslená do středu místnosti
+     (aby nekolidovala s obvodovou kótou zdi). Otočená skříň ukáže šířku 600. */
   if(S.sel?.kind === 'el'){
     const e = getEl(S.sel.id);
     if(e){
-      if(isHorizFront(e.front || 'jih'))
-        parts.push(dimLine(e.x, e.y+e.d+160, e.x+e.w, e.y+e.d+160, 'x', '#0d6b5f'));
-      else
-        parts.push(dimLine(e.x+e.w+160, e.y, e.x+e.w+160, e.y+e.d, 'y', '#0d6b5f'));
+      let rb = wallsBBox();
+      if(!rb){
+        let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+        for(const ee of S.project.elements){ x0=Math.min(x0,ee.x); y0=Math.min(y0,ee.y); x1=Math.max(x1,ee.x+ee.w); y1=Math.max(y1,ee.y+ee.d); }
+        if(x0<Infinity) rb = { x:x0, y:y0, w:x1-x0, h:y1-y0 };
+      }
+      const rcx = rb ? rb.x+rb.w/2 : 0, rcy = rb ? rb.y+rb.h/2 : 0;
+      const cx = e.x+e.w/2, cy = e.y+e.d/2;
+      if(isHorizFront(e.front || 'jih')){
+        const fy = (cy < rcy) ? e.y+e.d+160 : e.y-160;
+        parts.push(dimLine(e.x, fy, e.x+e.w, fy, 'x', '#0d6b5f'));
+      } else {
+        const fx = (cx < rcx) ? e.x+e.w+160 : e.x-160;
+        parts.push(dimLine(fx, e.y, fx, e.y+e.d, 'y', '#0d6b5f'));
+      }
     }
   }
   /* vybraná zeď: délky úseků UVNITŘ obvodu; označená stěna svítí */
@@ -2856,7 +2865,7 @@ function drawingSvg(P){
   if(!b) return `<svg viewBox="0 0 ${P.w} ${P.h}"></svg>`;
   const M = 12;                                  // okraj [mm papíru]
   const iw = P.w - M*2, ih = P.h - M*2;
-  const pad = 900;                               // místo na kóty [mm skutečnosti]
+  const pad = 1250;                              // místo na kóty [mm skutečnosti]
   const k = Math.min(iw / (b.w + pad*2), ih / (b.h + pad*2));
   const ox = M + (iw - (b.w + pad*2)*k)/2 - (b.x - pad)*k;
   const oy = M + (ih - (b.h + pad*2)*k)/2 - (b.y - pad)*k;
@@ -2904,25 +2913,37 @@ function drawingSvg(P){
   // značky instalací
   parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
 
-  // kóty šířek skříní – KAŽDÁ skříň dostane kótu POD SVÝM ČELEM (venku, ne uvnitř)
-  const OFF_EL = 300;                        // odsazení kóty před čelo skříně [mm]
+  // Kóty šířek skříní – KAŽDÁ skříň má vlastní kótu podél šířky. Kreslí se
+  // VŽDY do středu místnosti (nikdy ke kraji, kde je kóta zdi), takže se
+  // s obvodovými kótami nemůžou překrývat. Kóty sousedních skříněk ve stejné
+  // řadě leží na jedné přímce a tvoří přehledný řetězec 600/600/…
+  let wbR = wallsBBox();
+  if(!wbR){
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const e of S.project.elements){ x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); }
+    if(x0<Infinity) wbR = { x:x0, y:y0, w:x1-x0, h:y1-y0 };
+  }
+  const rcx = wbR ? wbR.x + wbR.w/2 : 0, rcy = wbR ? wbR.y + wbR.h/2 : 0;
+  const OFF_EL = 360;                        // odsazení kóty od skříně [mm]
   for(const e of S.project.elements){
     const front = e.front || 'jih';
     const wF = elFrontW(e);
     if(wF < 40) continue;
+    const cx = e.x+e.w/2, cy = e.y+e.d/2;
     if(front==='jih' || front==='sever'){
-      const fy = (front==='jih') ? e.y+e.d+OFF_EL : e.y-OFF_EL;
-      parts.push(dimPrint(e.x, fy, e.x+e.w, fy, 'x', k, 0.85, '#0d6b5f'));
+      const below = (cy < rcy) ? 1 : -1;        // do středu místnosti
+      const fy = below>0 ? e.y+e.d+OFF_EL : e.y-OFF_EL;
+      parts.push(dimPrint(e.x, fy, e.x+e.w, fy, 'x', k, 1.1, '#0d6b5f'));
     } else {
-      const fx = (front==='východ') ? e.x+e.w+OFF_EL : e.x-OFF_EL;
-      parts.push(dimPrint(fx, e.y, fx, e.y+e.d, 'y', k, 0.85, '#0d6b5f'));
+      const right = (cx < rcx) ? 1 : -1;
+      const fx = right>0 ? e.x+e.w+OFF_EL : e.x-OFF_EL;
+      parts.push(dimPrint(fx, e.y, fx, e.y+e.d, 'y', k, 1.1, '#0d6b5f'));
     }
   }
-  // čisté vnější kóty celé místnosti
-  const wb = wallsBBox();
-  if(wb){
-    parts.push(dimPrint(wb.x, wb.y-600, wb.x+wb.w, wb.y-600, 'x', k, 1.05, '#334155'));
-    parts.push(dimPrint(wb.x-600, wb.y, wb.x-600, wb.y+wb.h, 'y', k, 1.05, '#334155'));
+  // vnější kóty místnosti – odsazené DÁL od výkresu, skříně mají vlastní prostor
+  if(wbR){
+    parts.push(dimPrint(wbR.x, wbR.y-950, wbR.x+wbR.w, wbR.y-950, 'x', k, 1.1, '#334155'));
+    parts.push(dimPrint(wbR.x-950, wbR.y, wbR.x-950, wbR.y+wbR.h, 'y', k, 1.1, '#334155'));
   }
   // měřítko
   /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
@@ -2959,7 +2980,7 @@ function dimPrint(x1,y1,x2,y2,axis,k,mul=1,color='#0d6b5f'){
                         : `M${x1-tick} ${y1} l${tick} ${tick*1.4} l${tick} ${-tick*1.4}`;
   const a2 = axis==='x' ? `M${x2} ${y2-tick} l${-tick*1.4} ${tick} l${tick*1.4} ${tick}`
                         : `M${x2+tick} ${y2} l${-tick} ${-tick*1.4} l${-tick} ${tick*1.4}`;
-  const halo = swp(0.8);                         // bílá halo pro čitelnost přes čáry
+  const halo = swp(1.0);                         // bílá halo pro čitelnost přes čáry
   const txt = `<text x="${R((x1+x2)/2)}" y="${R((y1+y2)/2)}" text-anchor="middle" dominant-baseline="middle"
     font-size="${R(textMm/k)}" fill="${color}" font-weight="700"
     style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${halo}">${fmt(len)}</text>`;
