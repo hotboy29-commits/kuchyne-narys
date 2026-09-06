@@ -2840,7 +2840,7 @@ function drawingSvg(P){
   }
 
   // značky instalací
-  parts.push(symbolsSvg(sw, false, mm => fs(mm), false, 0.35));
+  parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35)); // oprava: velikost pisma znaciek v PDF (jednotky sveta, jako na obrazovce)
 
   // kóty
   const closedWalls = S.project.walls.filter(w => w.closed && w.pts.length > 2);
