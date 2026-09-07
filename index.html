@@ -2178,37 +2178,44 @@ function setElFrontW(e, v){ if(isHorizFront(e.front || 'jih')) e.w = v; else e.d
 function setElFrontD(e, v){ if(isHorizFront(e.front || 'jih')) e.d = v; else e.w = v; }
 
 /* Bok+ – boční panel u skříně (NENÍ skříň). Je to tenký pruh (typicky 18 mm)
-   na levém nebo pravém konci skříně „při pohledu na čelo"; délka boku
-   (ve směru čela) = hloubka skříně + přesah (510 → 580 mm). Geometrie se
+   na levém nebo pravém konci skříně „při pohledu na čelo". Jeho délka jde do
+   hloubky skříně: hloubka skříně + 50 mm ke zdi (skříň stojí 50 mm od zdi)
+   + 20 mm přesah před čelo → u skříně 510 mm je bok+ 580 mm. Geometrie se
    pokaždé počítá ze skříně → bok se pohybuje i otáčí spolu se skříní. */
-const BOK_W_DFLT   = 18;   // tloušťka boku+ [mm]
-const BOK_OVER_DFLT = 70;  // přesah boku+ před čelo [mm] (510 → 580)
+const BOK_W_DFLT    = 18;  // tloušťka boku+ [mm]
+const BOK_BACK_DFLT = 50;  // za zadní hranu skříně ke zdi [mm] (skříň stojí 50 mm od zdi)
+const BOK_FRONT_DFLT = 20; // přesah před čelo (přes dvířka) [mm]
+// Pozn.: hloubka boku+ = hloubka skříně + 50 (ke zdi) + 20 (před čelo) = 510+70 = 580 mm
 
 function bokCfg(e){ const b = e && e.bok; return (b && b.side) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
-function bokOver(e){ const b = bokCfg(e); return b && b.over != null ? +b.over : BOK_OVER_DFLT; }
-function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokOver(e); }
+function bokBack(e){ const b = bokCfg(e); return b && b.back != null ? +b.back : BOK_BACK_DFLT; }
+function bokFront(e){ const b = bokCfg(e); return b && b.front != null ? +b.front : BOK_FRONT_DFLT; }
+function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokBack(e) + bokFront(e); }
 
 /* Obdélník boku ve world souřadnicích, nebo null. Strana L/R = levá/pravá,
-   když se na čelo díváš zepředu (z místnosti). Přepočte se při otočení. */
+   když se na čelo díváš zepředu (z místnosti). Přepočte se při otočení.
+   Po délce (do hloubky) bok+ přesahuje skříň: vzadu o BOK_BACK (ke zdi)
+   a vepředu o BOK_FRONT (přes dvířka). */
 function bokRect(e){
   const b = bokCfg(e); if(!b) return null;
-  const W = bokW(e), over = bokOver(e);
+  const W = bokW(e), back = bokBack(e), front = bokFront(e);
   const f = e.front || 'jih';
   const depth = isHorizFront(f) ? e.d : e.w;
+  const L = b.side === 'L';
   let x, y, w, h;
-  if(f === 'jih'){            // čelo vpravo dole
-    x = (b.side === 'L') ? e.x - W : e.x + e.w;
-    y = e.y; w = W; h = depth + over;
-  } else if(f === 'sever'){   // čelo nahoře
-    x = (b.side === 'L') ? e.x + e.w : e.x - W;
-    y = e.y - over; w = W; h = depth + over;
-  } else if(f === 'východ'){  // čelo vpravo
-    y = (b.side === 'L') ? e.y + e.d : e.y - W;
-    x = e.x; w = depth + over; h = W;
-  } else {                    // západ – čelo vlevo
-    y = (b.side === 'L') ? e.y - W : e.y + e.d;
-    x = e.x - over; w = depth + over; h = W;
+  if(f === 'jih'){            // čelo dole, zadní hrana nahoře
+    x = L ? e.x - W : e.x + e.w;
+    y = e.y - back; w = W; h = depth + back + front;
+  } else if(f === 'sever'){   // čelo nahoře, zadní hrana dole
+    x = L ? e.x + e.w : e.x - W;
+    y = e.y - front; w = W; h = depth + back + front;
+  } else if(f === 'východ'){  // čelo vpravo, zadní hrana vlevo
+    y = L ? e.y + e.d : e.y - W;
+    x = e.x - back; w = depth + back + front; h = W;
+  } else {                    // západ – čelo vlevo, zadní hrana vpravo
+    y = L ? e.y - W : e.y + e.d;
+    x = e.x - front; w = depth + back + front; h = W;
   }
   return { x, y, w, h };
 }
@@ -2423,10 +2430,14 @@ function renderInspector(){
           <label class="fld"><span>Tloušťka (mm)</span><input id="iBokW" type="number" min="5" max="60" step="1" value="${e.bok?bokW(e):BOK_W_DFLT}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
-          <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokOver" type="number" min="0" max="500" step="1" value="${e.bok?bokOver(e):BOK_OVER_DFLT}"></label>
-          <label class="fld"><span>Hloubka skříně vč. boku</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w))} mm" disabled></label>
+          <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokFront" type="number" min="0" max="500" step="1" value="${e.bok?bokFront(e):BOK_FRONT_DFLT}"></label>
+          <label class="fld"><span>Ke zdi za skříní (mm)</span><input id="iBokBack" type="number" min="0" max="500" step="1" value="${e.bok?bokBack(e):BOK_BACK_DFLT}"></label>
         </div>
-        <p class="hint">Bok+ se nekreslí jako skříň – ve výkresu je to tenký pruh na konci skříně a ve výpisu/PDF se uvádí jen jako „Bok+“.</p>
+        <div class="row2" style="margin-top:8px">
+          <label class="fld"><span>Hloubka boku+</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w)+bokBack(e)+bokFront(e))} mm" disabled></label>
+          <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokCfg(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
+        </div>
+        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Hloubka = hloubka skříně + přesah před čelo + odskok ke zdi (510 + 20 + 50 = 580 mm).</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -2471,7 +2482,8 @@ function renderInspector(){
         e.bok = e.bok || {};
         e.bok.side = v;
         e.bok.w = clamp(+$('#iBokW').value || BOK_W_DFLT, 5, 60);
-        e.bok.over = clamp(+$('#iBokOver').value || BOK_OVER_DFLT, 0, 500);
+        e.bok.front = clamp(+$('#iBokFront').value || BOK_FRONT_DFLT, 0, 500);
+        e.bok.back = clamp(+$('#iBokBack').value || BOK_BACK_DFLT, 0, 500);
       } else {
         delete e.bok;
       }
@@ -2480,8 +2492,11 @@ function renderInspector(){
     $('#iBokW').addEventListener('change', ev => {
       if(e.bok){ e.bok.w = clamp(+ev.target.value || BOK_W_DFLT, 5, 60); pushHistoryQuiet(); renderCanvas(); }
     });
-    $('#iBokOver').addEventListener('change', ev => {
-      if(e.bok){ e.bok.over = clamp(+ev.target.value || BOK_OVER_DFLT, 0, 500); pushHistoryQuiet(); renderCanvas(); }
+    $('#iBokFront').addEventListener('change', ev => {
+      if(e.bok){ e.bok.front = clamp(+ev.target.value || BOK_FRONT_DFLT, 0, 500); pushHistoryQuiet(); renderCanvas(); }
+    });
+    $('#iBokBack').addEventListener('change', ev => {
+      if(e.bok){ e.bok.back = clamp(+ev.target.value || BOK_BACK_DFLT, 0, 500); pushHistoryQuiet(); renderCanvas(); }
     });
     $('#iRot').onclick = rotateSelection;
     $('#iDup').onclick = duplicateSelection;
