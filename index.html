@@ -931,7 +931,7 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -2177,6 +2177,76 @@ function elFrontD(e){ return isHorizFront(e.front || 'jih') ? e.d : e.w; }
 function setElFrontW(e, v){ if(isHorizFront(e.front || 'jih')) e.w = v; else e.d = v; }
 function setElFrontD(e, v){ if(isHorizFront(e.front || 'jih')) e.d = v; else e.w = v; }
 
+/* Bok+ – boční panel u skříně (NENÍ skříň). Je to tenký pruh (typicky 18 mm)
+   na levém nebo pravém konci skříně „při pohledu na čelo"; délka boku
+   (ve směru čela) = hloubka skříně + přesah (510 → 580 mm). Geometrie se
+   pokaždé počítá ze skříně → bok se pohybuje i otáčí spolu se skříní. */
+const BOK_W_DFLT   = 18;   // tloušťka boku+ [mm]
+const BOK_OVER_DFLT = 70;  // přesah boku+ před čelo [mm] (510 → 580)
+
+function bokCfg(e){ const b = e && e.bok; return (b && b.side) ? b : null; }
+function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
+function bokOver(e){ const b = bokCfg(e); return b && b.over != null ? +b.over : BOK_OVER_DFLT; }
+function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokOver(e); }
+
+/* Obdélník boku ve world souřadnicích, nebo null. Strana L/R = levá/pravá,
+   když se na čelo díváš zepředu (z místnosti). Přepočte se při otočení. */
+function bokRect(e){
+  const b = bokCfg(e); if(!b) return null;
+  const W = bokW(e), over = bokOver(e);
+  const f = e.front || 'jih';
+  const depth = isHorizFront(f) ? e.d : e.w;
+  let x, y, w, h;
+  if(f === 'jih'){            // čelo vpravo dole
+    x = (b.side === 'L') ? e.x - W : e.x + e.w;
+    y = e.y; w = W; h = depth + over;
+  } else if(f === 'sever'){   // čelo nahoře
+    x = (b.side === 'L') ? e.x + e.w : e.x - W;
+    y = e.y - over; w = W; h = depth + over;
+  } else if(f === 'východ'){  // čelo vpravo
+    y = (b.side === 'L') ? e.y + e.d : e.y - W;
+    x = e.x; w = depth + over; h = W;
+  } else {                    // západ – čelo vlevo
+    y = (b.side === 'L') ? e.y - W : e.y + e.d;
+    x = e.x - over; w = depth + over; h = W;
+  }
+  return { x, y, w, h };
+}
+
+/* Kreslení boků na plátně (obrazovka): tenký pruh u konce skříně. */
+function bokMarkup(){
+  const z = S.view.zoom;
+  let out = '';
+  for(const e of S.project.elements){
+    const r = bokRect(e); if(!r) continue;
+    const thin = bokW(e);
+    out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
+      fill="#cbd5e199" stroke="#475569" stroke-width="${1.6/z}" stroke-dasharray="${7/z} ${5/z}"/>`;
+    /* popisek „Bok+“ jen když je panel na obrazovce dostatečně dlouhý */
+    if(Math.max(r.w, r.h) * z > 40 && Math.min(r.w, r.h) * z > 4){
+      const fs = clamp(thin * 1.05, 13, 60);
+      const v = r.h > r.w;                      // svislý pruh → text na výšku
+      const tx = R(r.x + r.w/2), ty = R(r.y + r.h/2);
+      const rot = v ? ` transform="rotate(-90 ${tx} ${ty})"` : '';
+      out += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle"${rot}
+        font-size="${fs}" font-weight="700" fill="#334155"
+        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}px">Bok+ ${thin}</text>`;
+    }
+  }
+  return out;
+}
+
+/* Kreslení boků do PDF (world souřadnice uvnitř <g scale(k)>). */
+function boksPrintSvg(sw){
+  let out = '';
+  for(const e of S.project.elements){
+    const r = bokRect(e); if(!r) continue;
+    out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
+      fill="#cbd5e1aa" stroke="#334155" stroke-width="${sw(0.22)}" stroke-dasharray="${sw(2)} ${sw(1.4)}"/>`;
+  }
+  return out;
+}
+
 /* Přeorientuje prvek na daný směr čela. Když se osa čela změní
    (vodorovná ↔ svislá), prvek se o 90° otočí kolem středu; šířka a
    hloubka prvku se přitom nemění. */
@@ -2341,6 +2411,24 @@ function renderInspector(){
         </div>
       </div>
       <div class="insp-sec">
+        <h4>Bok+ (boční panel)</h4>
+        <div class="row2">
+          <label class="fld"><span>Umístění</span>
+            <select id="iBokSide">
+              <option value="" ${e.bok&&e.bok.side?'':'selected'}>— bez boku —</option>
+              <option value="L" ${e.bok&&e.bok.side==='L'?'selected':''}>vlevo (při pohledu na čelo)</option>
+              <option value="R" ${e.bok&&e.bok.side==='R'?'selected':''}>vpravo (při pohledu na čelo)</option>
+            </select>
+          </label>
+          <label class="fld"><span>Tloušťka (mm)</span><input id="iBokW" type="number" min="5" max="60" step="1" value="${e.bok?bokW(e):BOK_W_DFLT}"></label>
+        </div>
+        <div class="row2" style="margin-top:8px">
+          <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokOver" type="number" min="0" max="500" step="1" value="${e.bok?bokOver(e):BOK_OVER_DFLT}"></label>
+          <label class="fld"><span>Hloubka skříně vč. boku</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w))} mm" disabled></label>
+        </div>
+        <p class="hint">Bok+ se nekreslí jako skříň – ve výkresu je to tenký pruh na konci skříně a ve výpisu/PDF se uvádí jen jako „Bok+“.</p>
+      </div>
+      <div class="insp-sec">
         <h4>Barva</h4>
         <div class="swatches">${COLORS.map(c=>`<button class="sw-btn${c===e.color?' on':''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>
       </div>
@@ -2375,6 +2463,26 @@ function renderInspector(){
     bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
+    /* Bok+ – side select přestaví panel (aby se aktualizovaly hodnoty), čísla
+       jen překreslí výkres a uloží (panel zůstává, ať psaní/Tab nevypadnou). */
+    $('#iBokSide').addEventListener('change', ev => {
+      const v = ev.target.value;
+      if(v){
+        e.bok = e.bok || {};
+        e.bok.side = v;
+        e.bok.w = clamp(+$('#iBokW').value || BOK_W_DFLT, 5, 60);
+        e.bok.over = clamp(+$('#iBokOver').value || BOK_OVER_DFLT, 0, 500);
+      } else {
+        delete e.bok;
+      }
+      pushHistory(); render();
+    });
+    $('#iBokW').addEventListener('change', ev => {
+      if(e.bok){ e.bok.w = clamp(+ev.target.value || BOK_W_DFLT, 5, 60); pushHistoryQuiet(); renderCanvas(); }
+    });
+    $('#iBokOver').addEventListener('change', ev => {
+      if(e.bok){ e.bok.over = clamp(+ev.target.value || BOK_OVER_DFLT, 0, 500); pushHistoryQuiet(); renderCanvas(); }
+    });
     $('#iRot').onclick = rotateSelection;
     $('#iDup').onclick = duplicateSelection;
     $('#iWall').onclick = snapToWall;
@@ -2618,7 +2726,7 @@ function renderInspector(){
     /* poznámka nesmí při psaní přijít o fokus – přepíše se jen vrstva výkresu */
     $('#symNote').addEventListener('input', ev => {
       sm.note = ev.target.value;
-      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + guidesMarkup();
+      $('#layerElems').innerHTML = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + guidesMarkup();
     });
     $('#symNote').addEventListener('change', () => pushHistoryQuiet());
     const reanchor = () => { applySymbolAnchor(sm); pushHistory(); };
@@ -2777,6 +2885,17 @@ function buildPrint(){
         <td class="num">${fmt(wNom*(e.qty||1))}</td>
         <td>${esc(e.note || '')}</td>
       </tr>`;
+      if(e.bok && e.bok.side){
+        const bkw = bokW(e);
+        out += `<tr class="pr-sub"><td class="num"></td>
+          <td>└ Bok+</td>
+          <td class="num">${fmt(bkw)}</td>
+          <td class="num">${fmt(bokDepthOf(e))}</td>
+          <td class="num">1</td>
+          <td class="num">${fmt(bkw)}</td>
+          <td>boční panel u skříně</td>
+        </tr>`;
+      }
       if(pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
@@ -2909,6 +3028,9 @@ function drawingSvg(P){
         style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
     }
   }
+
+  // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
+  parts.push(boksPrintSvg(sw));
 
   // značky instalací
   parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
