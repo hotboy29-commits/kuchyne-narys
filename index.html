@@ -1434,10 +1434,21 @@ function snapCandidates(excludeId){
   return out;
 }
 
+/** Obdélníky sestavy „prvek + bok+“ (pro kolize se zdí i pro přichytávání).
+    Bok+ není prvek sám o sobě – patří ke skříni, takže při pohybu/kolizích
+    hlídáme skříň i bok společně, aby se bok+ nemohl zaříznout do zdi. */
+function assemblyRects(e){
+  const rs = [{ x:e.x, y:e.y, w:e.w, d:e.d }];
+  const b = bokRect(e); if(b) rs.push({ x:b.x, y:b.y, w:b.w, d:b.d });
+  return rs;
+}
+
 /**
  * Vrátí {x, y, guides:[…]} – přichycenou polohu prvku.
  * Pravidla: vyhrává NEJBLIŽŠÍ cíl; zeď má přednost při shodě;
  * prvek se nikdy neprotáhne zdí; mřížka jen když nic jiného nepřipadá v úvahu.
+ * Přichytávají se VŠECHNY hrany sestavy = hrany skříně i hrany boku+ – díky
+ * tomu se bok+ chytne svou venkovní hranou přesně na hranu zdi.
  */
 function computeSnap(e, nx, ny, dxMoved, dyMoved){
   if(!S.magnet) return { x:nx, y:ny, guides:[] };
@@ -1446,24 +1457,32 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
   const shown = [];
   let bestX = null, bestY = null;
 
-  const yLo = ny, yHi = ny + e.d, xLo = nx, xHi = nx + e.w;
+  /* Hrany sestavy relativně k (e.x, e.y): skříň [0,e.w]/[0,e.d] + bok+. */
+  const xo = [0, e.w], yo = [0, e.d];
+  const b = bokRect(e);
+  if(b){
+    xo.push(b.x - e.x, b.x + b.w - e.x);
+    yo.push(b.y - e.y, b.y + b.h - e.y);
+  }
+  const axLo = nx + Math.min(...xo), axHi = nx + Math.max(...xo);
+  const ayLo = ny + Math.min(...yo), ayHi = ny + Math.max(...yo);
 
   for(const c of cands){
     if(c.axis === 'x'){
-      if(c.to < yLo - th || c.from > yHi + th) continue;
-      for(const [edge, pos] of [['l', xLo], ['r', xHi]]){
-        const d = c.pos - pos;
+      if(c.to < ayLo - th || c.from > ayHi + th) continue;
+      for(const off of xo){
+        const d = c.pos - (nx + off);
         if(Math.abs(d) > th) continue;
-        const cand = { d:Math.abs(d), nx: nx + d, c, edge };
+        const cand = { d:Math.abs(d), nx: nx + d, c };
         if(!bestX || cand.d < bestX.d - 1e-9 ||
            (Math.abs(cand.d - bestX.d) < 1e-9 && KIND_RANK[c.kind] < KIND_RANK[bestX.c.kind])) bestX = cand;
       }
     } else {
-      if(c.to < xLo - th || c.from > xHi + th) continue;
-      for(const [edge, pos] of [['t', yLo], ['b', yHi]]){
-        const d = c.pos - pos;
+      if(c.to < axLo - th || c.from > axHi + th) continue;
+      for(const off of yo){
+        const d = c.pos - (ny + off);
         if(Math.abs(d) > th) continue;
-        const cand = { d:Math.abs(d), ny: ny + d, c, edge };
+        const cand = { d:Math.abs(d), ny: ny + d, c };
         if(!bestY || cand.d < bestY.d - 1e-9 ||
            (Math.abs(cand.d - bestY.d) < 1e-9 && KIND_RANK[c.kind] < KIND_RANK[bestY.c.kind])) bestY = cand;
       }
@@ -1474,11 +1493,11 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
      Chytá obě osy zvlášť, aby se prvek choval předvídatelně i při šikmém tažení. */
   if(!bestX){
     const t = Math.round(nx/GRID_MM)*GRID_MM - nx;
-    if(Math.abs(t) <= th) bestX = { d:Math.abs(t), nx:nx+t, c:{kind:'grid'}, edge:'l' };
+    if(Math.abs(t) <= th) bestX = { d:Math.abs(t), nx:nx+t, c:{kind:'grid'} };
   }
   if(!bestY){
     const t = Math.round(ny/GRID_MM)*GRID_MM - ny;
-    if(Math.abs(t) <= th) bestY = { d:Math.abs(t), ny:ny+t, c:{kind:'grid'}, edge:'t' };
+    if(Math.abs(t) <= th) bestY = { d:Math.abs(t), ny:ny+t, c:{kind:'grid'} };
   }
 
   let x = nx, y = ny;
@@ -1499,10 +1518,13 @@ function pushGuide(out, cand, e, axis){
   else             out.push({ axis:'y', pos:cand.c.pos, from:Math.min(cand.c.from, e.x)-100, to:Math.max(cand.c.to, e.x+e.w)+100 });
 }
 
-/** Neskončil by prvek v překryvu se zdí? */
+/** Neskončila by SESTAVA (skříň + bok+) v překryvu se zdí? */
 function blockedByWall(test, orig){
   for(const w of S.project.walls){
-    if(elementHitsWall(test, w) && !elementHitsWall(orig, w)) return true;
+    const hitT = assemblyRects(test).some(r => elementHitsWall(r, w));
+    if(!hitT) continue;
+    const hitO = assemblyRects(orig).some(r => elementHitsWall(r, w));
+    if(!hitO) return true;
   }
   return false;
 }
@@ -1703,19 +1725,23 @@ function onMove(ev){
 
     /* Zeď je neprůchozí. Testuje se celá DRÁHA, ne jen cílový bod – jinak by
        prvek zeď „přeskočil“ při rychlém švihu. Když cíl není dosažitelný,
-       prvek po zdi klouže (nejdřív zkusí osu X, pak Y). */
-    const hits = rect => S.project.walls.some(wl => elementHitsWall(rect, wl));
+       prvek po zdi klouže (nejdřív zkusí osu X, pak Y). Hlídá se celá sestava
+       skříň + bok+, aby se bok+ nezařízl do zdi. */
+    const hitsAt = (x, y) => {
+      const mov = { ...e, x, y };
+      return assemblyRects(mov).some(r => S.project.walls.some(wl => elementHitsWall(r, wl)));
+    };
     const last = drag.lastOk || { x:drag.start.x, y:drag.start.y };
     const STEPS = 12;
     const pathClear = to => {
       for(let i=1;i<=STEPS;i++){
         const t = i/STEPS;
-        if(hits({ ...e, x: last.x + (to.x-last.x)*t, y: last.y + (to.y-last.y)*t })) return false;
+        if(hitsAt(last.x + (to.x-last.x)*t, last.y + (to.y-last.y)*t)) return false;
       }
       return true;
     };
     let fx, fy;
-    if(hits({ ...e, x:last.x, y:last.y }))      { fx = r.x;    fy = r.y; }     // už je v překryvu → volný pohyb
+    if(hitsAt(last.x, last.y))                  { fx = r.x;    fy = r.y; }     // už je v překryvu → volný pohyb
     else if(pathClear({ x:r.x,    y:r.y }))     { fx = r.x;    fy = r.y; }
     else if(pathClear({ x:r.x,    y:last.y }))  { fx = r.x;    fy = last.y; }
     else if(pathClear({ x:last.x, y:r.y }))     { fx = last.x; fy = r.y; }
@@ -2276,21 +2302,37 @@ function rotateSelection(){
   pushHistory(); render();
 }
 
-/** Přisune prvek k nejbližší zdi bez ohledu na dosah magnetu. */
+/** Přisune prvek k nejbližší zdi bez ohledu na dosah magnetu. Hledá se
+    nejbližší hrana CELÉ sestavy (skříň + bok+) – tak se k zdi přichytí i
+    bok+ svou venkovní hranou. */
 function snapToWall(){
   if(S.sel?.kind!=='el') return;
   const e = getEl(S.sel.id); if(!e) return;
   const saved = S.snapMm;
   S.snapMm = 100000;
+  const xs = [e.x, e.x+e.w], ys = [e.y, e.y+e.d];
+  const b = bokRect(e);
+  if(b){ xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h); }
   let best = null;
   for(const c of snapCandidates(e.id)){
     if(c.kind !== 'wall') continue;
-    for(const [axis, pos] of [['x', e.x],['x', e.x+e.w],['y', e.y],['y', e.y+e.d]]){
-      if(c.axis !== axis) continue;
-      const d = Math.abs(c.pos - pos);
-      if(!best || d < best.d){
-        const test = axis==='x' ? { ...e, x: e.x + (c.pos-pos) } : { ...e, y: e.y + (c.pos-pos) };
-        if(!elementHitsWall(test, findWall(c.id))) best = { d, test, axis };
+    if(c.axis === 'x'){
+      for(const px of xs){
+        const d = Math.abs(c.pos - px);
+        if(!best || d < best.d){
+          const test = { ...e, x: e.x + (c.pos - px) };
+          const wall = findWall(c.id);
+          if(!assemblyRects(test).some(r => elementHitsWall(r, wall))) best = { d, test };
+        }
+      }
+    } else {
+      for(const py of ys){
+        const d = Math.abs(c.pos - py);
+        if(!best || d < best.d){
+          const test = { ...e, y: e.y + (c.pos - py) };
+          const wall = findWall(c.id);
+          if(!assemblyRects(test).some(r => elementHitsWall(r, wall))) best = { d, test };
+        }
       }
     }
   }
