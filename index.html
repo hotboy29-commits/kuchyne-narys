@@ -496,10 +496,10 @@ body{
       <label class="fld"><span>Datum</span><input id="fDate" type="date"></label>
       <label class="fld"><span>Formát papíru</span>
         <select id="fPaper">
-          <option value="A3L">A3 na šířku (420 × 297)</option>
-          <option value="A3">A3 na výšku (297 × 420)</option>
           <option value="A4L">A4 na šířku (297 × 210)</option>
           <option value="A4">A4 na výšku (210 × 297)</option>
+          <option value="A3L">A3 na šířku (420 × 297)</option>
+          <option value="A3">A3 na výšku (297 × 420)</option>
         </select>
       </label>
       <label class="fld span2"><span>Poznámky</span><textarea id="fNotes" rows="3" placeholder="Materiál, kování, termín, atypická řešení…"></textarea></label>
@@ -593,7 +593,7 @@ function newProject(){
     id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
     info: {
       name:'', client:'', clientPhone:'', address:'', designer:'', designerContact:'',
-      date: new Date().toISOString().slice(0,10), paper:'A3L', notes:''
+      date: new Date().toISOString().slice(0,10), paper:'A4L', notes:''
     },
     windows: [], symbols: [],
     walls: [],
@@ -3653,7 +3653,7 @@ function resetProject(){
 
 function buildPrint(){
   const p = S.project, info = p.info;
-  const P = PAPER[info.paper] || PAPER.A3L;
+  const P = PAPER[info.paper] || PAPER.A4L;
   const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',year:'numeric'});
   const els = [...p.elements].sort((a,b)=> (a.y-b.y) || (a.x-b.x));
   const totalLen = els.reduce((s,e)=> s + elFrontW(e)*(e.qty||1), 0);
@@ -4196,6 +4196,12 @@ function init(){
   let restored = null;
   try{ restored = JSON.parse(STORE.getItem(STORE_KEY) || 'null'); }catch(e){}
   if(restored && (restored.walls?.length || restored.elements?.length)){
+    /* Projekty z doby, kdy byl výchozí formát A3 na šířku, se jednorázově
+       přepnou na A4 na šířku (tisk na běžný A4) – viz MIG_PAPER. */
+    if(restored.info?.paper === 'A3L' && !STORE.getItem('MIG_PAPER_A4L')){
+      restored.info.paper = 'A4L';
+      try{ STORE.setItem(STORE_KEY, JSON.stringify(restored)); }catch(e){}
+    }
     loadProject(restored);
     toast('Obnoven poslední nárys');
   } else {
@@ -4204,6 +4210,7 @@ function init(){
     history = [snapshot()]; historyIndex = 0;
     openProjectModal();
   }
+  try{ STORE.setItem('MIG_PAPER_A4L','1'); }catch(e){}
   requestAnimationFrame(()=>{ fitView(); render(); });
 }
 
