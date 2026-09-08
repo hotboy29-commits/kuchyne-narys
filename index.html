@@ -68,21 +68,21 @@ body{
 
 /* ───────── horní lišta ───────── */
 .topbar{
-  height:62px;display:flex;align-items:center;gap:8px;
-  padding:0 10px;background:var(--surface);border-bottom:1px solid var(--line);
-  overflow:hidden;                       /* nic se nesmí ztratit mimo obrazovku */
+  min-height:54px;display:flex;flex-wrap:wrap;align-items:center;
+  column-gap:10px;row-gap:6px;
+  padding:6px 10px;background:var(--surface);border-bottom:1px solid var(--line);
   min-width:0;
 }
 
 .chip{
   display:flex;flex-direction:column;align-items:flex-start;gap:1px;
-  padding:6px 12px;border:1px solid var(--line);border-radius:var(--radius-s);
-  background:var(--surface-2);cursor:pointer;min-width:0;max-width:230px;
-  font-family:var(--font);
+  padding:5px 12px;border:1.5px solid var(--accent);border-radius:var(--radius-s);
+  background:#fff;cursor:pointer;min-width:120px;max-width:220px;flex:0 0 auto;
+  box-shadow:0 1px 3px rgba(15,23,42,.12);font-family:var(--font);
 }
-.chip:active{background:var(--accent-soft);border-color:var(--accent)}
-.chip-k{font-size:10px;font-weight:700;letter-spacing:.09em;color:var(--ink-3)}
-.chip-v{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:210px}
+.chip:active{background:var(--accent-soft)}
+.chip-k{font-size:10px;font-weight:700;letter-spacing:.09em;color:var(--accent)}
+.chip-v{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:196px}
 
 /* nástroje */
 .tools{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:3px}
@@ -389,6 +389,7 @@ body{
 .kindseg button.on{background:#2563eb;color:#fff}
 
 .group .tb.vseg{ min-width:38px; padding:0 7px; font-size:12px; }
+.tb.newproj{border:1.5px solid var(--accent);color:var(--accent);background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.08)}
 
 </style>
 </head>
@@ -401,6 +402,8 @@ body{
     <button class="chip" id="btnProjectInfo" title="Název projektu a kontaktní údaje">
       <span class="chip-k">PROJEKT</span><span class="chip-v" id="projTitle">Nový nárys</span>
     </button>
+
+    <button class="tb newproj" id="btnNew" title="Nový prázdný projekt – smaže současný výkres">＋<span class="lb">Nový</span></button>
 
     <nav class="tools" id="tools" aria-label="Nástroje"></nav>
 
@@ -502,6 +505,7 @@ body{
       <label class="fld span2"><span>Poznámky</span><textarea id="fNotes" rows="3" placeholder="Materiál, kování, termín, atypická řešení…"></textarea></label>
     </div>
     <footer>
+      <button class="tb danger" id="btnProjNew" title="Smaže současný výkres a začne prázdný projekt (lze vrátit zpět)">＋ Nový projekt</button>
       <button class="tb" id="btnProjCancel">Zrušit</button>
       <button class="tb primary" id="btnProjSave">Uložit údaje</button>
     </footer>
@@ -3557,6 +3561,31 @@ function saveProjectInfo(){
 function openRoomModal(){ $('#modalRoom').classList.remove('hidden'); }
 function closeRoomModal(){ $('#modalRoom').classList.add('hidden'); }
 
+/* ── Nový prázdný projekt ──
+   Vyčistí výkres i uložený nárys (jinak by se při načtení vrátil starý).
+   Současný stav se předtím uloží do historie → jde vrátit přes Zpět (⌘Z). */
+function resetProject(){
+  const has = S.project.walls.length || S.project.elements.length
+    || S.project.windows.length || S.project.symbols.length || S.project.guides.length;
+  if(!confirm(has
+    ? 'Začít nový prázdný projekt?\n\nSoučasný výkres (zdi, skříně, okna, poznámky) bude smazán.\nVrátit lze tlačítkem Zpět (⌘Z).'
+    : 'Začít nový prázdný projekt?')) return;
+  pushHistory();                        // snapshot pro případné vrácení (⌘Z)
+  const n = newProject();
+  S.project.id = n.id;
+  S.project.walls = []; S.project.elements = [];
+  S.project.guides = []; S.project.windows = []; S.project.symbols = [];
+  S.project.info = n.info;
+  S.project.created = n.created;
+  S.sel = null; S.draft = null; S.measure = null; S.layer = 'all';
+  updLayerUI();
+  $('#projTitle').textContent = 'Nový nárys';
+  closeProjectModal();
+  try{ STORE.setItem(STORE_KEY, JSON.stringify(S.project)); }catch(err){}   // hned přepíše uložený nárys
+  render();
+  toast('Nový prázdný projekt');
+}
+
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
 
 function buildPrint(){
@@ -3946,6 +3975,8 @@ function buildTools(){
 function bindUi(){
   $('#btnProjectInfo').onclick = openProjectModal;
   $('#btnProjSave').onclick = saveProjectInfo;
+  $('#btnProjNew').onclick = resetProject;
+  $('#btnNew').onclick = resetProject;
   $('#btnProjCancel').onclick = closeProjectModal;
   $('#btnRoomTool').onclick = openRoomModal;
   $('#btnRoomCancel').onclick = closeRoomModal;
