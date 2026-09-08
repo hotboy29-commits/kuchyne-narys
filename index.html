@@ -3093,36 +3093,45 @@ function finishNewElementKind(e){
 
 /* Souvislé řady spodních skříněk (pro sokl a délky materiálu). */
 function dsRuns(){
-  const bases = [];
+  /* Do „řady DS“ patří spodní skříňky (base) i sloupy (column) stojící na stejné
+     čelní linii – sloup uprostřed řady (např. lednice) řadu nerozdělí. Řada,
+     která neobsahuje žádnou spodní skříňku, sokl nedostává. */
+  const items = [];
   for(const e of S.project.elements){
-    if(elKind3(e) !== 'base') continue;
+    const k = elKind3(e);
+    if(k!=='base' && k!=='column') continue;
     const f = e.front || 'jih';
-    let axis, s0, s1, face;
-    if(f==='jih')        { axis='x'; face=e.y+e.d; s0=e.x;         s1=e.x+e.w; }
-    else if(f==='sever') { axis='x'; face=e.y;    s0=e.x;         s1=e.x+e.w; }
-    else if(f==='východ'){ axis='y'; face=e.x;    s0=e.y;         s1=e.y+e.d; }
-    else                 { axis='y'; face=e.x+e.w;s0=e.y;         s1=e.y+e.d; }
-    bases.push({ e, f, axis, face:R(face), s0, s1 });
+    let s0, s1, face;
+    if(f==='jih')        { face=e.y+e.d; s0=e.x;   s1=e.x+e.w; }
+    else if(f==='sever') { face=e.y;    s0=e.x;   s1=e.x+e.w; }
+    else if(f==='východ'){ face=e.x;    s0=e.y;   s1=e.y+e.d; }
+    else                 { face=e.x+e.w;s0=e.y;   s1=e.y+e.d; }
+    items.push({ e, k, f, face:R(face), s0, s1 });
   }
   const groups = {};
-  for(const b of bases){ const key = b.f+':'+b.face; (groups[key]=groups[key]||[]).push(b); }
+  for(const it of items){ const key = it.f+':'+it.face; (groups[key]=groups[key]||[]).push(it); }
   const runs = [];
   for(const key in groups){
     const g = groups[key].sort((a,b)=>a.s0-b.s0);
     let cur = null;
     for(const b of g){
-      if(!cur){ cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e] }; }
-      else if(b.s0 - cur.s1 <= 90){ cur.s1 = Math.max(cur.s1,b.s1); cur.el.push(b.e); }
-      else { runs.push(cur); cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e] }; }
+      if(!cur){
+        cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e], n:(b.k==='base'?1:0) };
+      } else if(b.s0 - cur.s1 <= 90){
+        cur.s1 = Math.max(cur.s1, b.s1); cur.el.push(b.e); if(b.k==='base') cur.n++;
+      } else {
+        if(cur.n > 0) runs.push(cur);
+        cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e], n:(b.k==='base'?1:0) };
+      }
     }
-    if(cur) runs.push(cur);
+    if(cur && cur.n > 0) runs.push(cur);
   }
   const out = [];
   for(const r of runs){
     let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
     for(const e of r.el){ x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); }
     const len = (r.f==='jih'||r.f==='sever') ? (x1-x0) : (y1-y0);
-    out.push({ f:r.f, face:r.face, len, x0, y0, x1, y1, n:r.el.length });
+    out.push({ f:r.f, face:r.face, len, x0, y0, x1, y1, n:r.n });
   }
   return out;
 }
@@ -3708,7 +3717,7 @@ function buildPrint(){
   const wins = S.project.windows, syms = S.project.symbols;
   if(els.length || wins.length || syms.length){
     const LAM = 18;   // síla lamina – půda je o dvě síly užší
-    const rows = els.map((e,i) => {
+    const rowFor = (e, i) => {
       const wNom = elFrontW(e), dNom = elFrontD(e);
       const pw = wNom - 2*LAM;            // šířka půdy i latí (podél čela)
       const k3v = elKind3(e);
@@ -3752,39 +3761,53 @@ function buildPrint(){
         </tr>`;
       }
       return out;
-    }).join('');
+    };
+    /* Výpis se dělí stejně jako výkresy: DS (spodní skříňky + sloupy)
+       a HS (horní skříňky). Sloupy se ve výpisu počítají JEDNOU, v sekci DS. */
+    const listDS = els.filter(e=>{ const k = elKind3(e); return k==='base' || k==='column'; });
+    const listHS = els.filter(e=>elKind3(e)==='upper');
+    const sumW = list => list.reduce((s,e)=> s + elFrontW(e)*(e.qty||1), 0);
+    const totalDS = sumW(listDS), totalHS = sumW(listHS);
+    const nCols = els.filter(e=>elKind3(e)==='column').length;
+    const tableHead = `<thead><tr>
+      <th class="num">#</th><th>Název prvku</th>
+      <th class="num">Šířka (mm)</th><th class="num">Hloubka (mm)</th>
+      <th class="num">Ks</th><th class="num">Celkem (mm)</th><th>Poznámka</th>
+    </tr></thead>`;
+    const soklHtml = (() => {
+      const runs = dsRuns();
+      if(!runs.length) return '';
+      let t = 0; const rows = runs.map((r,i) => {
+        const obj = R(r.len + SOKL_RESERVE); t += obj;
+        return `<tr><td>DS řada ${i+1} (${r.n} spodních skříněk)</td>
+          <td class="num">${fmt(R(r.len))}</td>
+          <td class="num">${SOKL_RESERVE}</td>
+          <td class="num">${fmt(obj)}</td></tr>`;
+      }).join('');
+      return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Sokl (DS) – čelní, výška 150 mm, tl. 18 mm</b></div>
+        <table class="pr-table" style="margin-top:1mm">
+          <thead><tr><th>Sestava</th><th class="num">Délka řady (mm)</th><th class="num">Rezerva (mm)</th><th class="num">Objednat (mm)</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="3">Celkem objednat</td><td class="num">${fmt(t)}</td></tr></tfoot>
+        </table>`;
+    })();
+    let tables = '';
+    if(listDS.length) tables += `
+      <div class="pr-sub" style="margin-top:2mm"><b style="font-size:12.5px">A · Spodní sestava (DS) – spodní skříňky + sloupy</b>${nCols?` <span style="font-weight:400;color:#666">(${nCols} ${nCols===1?'sloup':'sloupy'})</span>`:''}</div>
+      <table class="pr-table">${tableHead}<tbody>${listDS.map((e,i)=>rowFor(e,i)).join('')}</tbody>
+      <tfoot><tr><td colspan="5">Celková šířka DS</td><td class="num">${fmt(totalDS)}</td><td></td></tr></tfoot></table>`;
+    if(listHS.length) tables += `
+      <div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">B · Horní sestava (HS) – horní skříňky</b>${nCols?` <span style="font-weight:400;color:#666">(sloupy jsou vykázané v sekci DS – kreslí se i do výkresu HS)</span>`:''}</div>
+      <table class="pr-table">${tableHead}<tbody>${listHS.map((e,i)=>rowFor(e,i)).join('')}</tbody>
+      <tfoot><tr><td colspan="5">Celková šířka HS</td><td class="num">${fmt(totalHS)}</td><td></td></tr></tfoot></table>`;
+    tables += soklHtml;
     pages.push(`
     <section class="pr-page">
       <div class="pr-head">
         <div><span class="pr-kicker">Příloha</span><h2>Výpis prvků</h2></div>
         <div class="pr-meta">${esc(info.name || '')}<br>${dateCs}</div>
       </div>
-      <table class="pr-table">
-        <thead><tr>
-          <th class="num">#</th><th>Název prvku</th>
-          <th class="num">Šířka (mm)</th><th class="num">Hloubka (mm)</th>
-          <th class="num">Ks</th><th class="num">Celkem (mm)</th><th>Poznámka</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr><td colspan="5">Celková šířka prvků</td><td class="num">${fmt(totalLen)}</td><td></td></tr></tfoot>
-      </table>
-      ${(() => {
-        const runs = dsRuns();
-        if(!runs.length) return '';
-        let t = 0; const rows = runs.map((r,i) => {
-          const obj = R(r.len + SOKL_RESERVE); t += obj;
-          return `<tr><td>Sokl – řada DS ${i+1} (${r.n} skříněk)</td>
-            <td class="num">${fmt(R(r.len))}</td>
-            <td class="num">${SOKL_RESERVE}</td>
-            <td class="num">${fmt(obj)}</td></tr>`;
-        }).join('');
-        return `<div class="pr-sub"><b style="font-size:12px">Sokly – čelní, výška 150 mm (tl. 18 mm)</b></div>
-        <table class="pr-table" style="margin-top:1mm">
-          <thead><tr><th>Sestava</th><th class="num">Délka řady (mm)</th><th class="num">Rezerva (mm)</th><th class="num">Objednat (mm)</th></tr></thead>
-          <tbody>${rows}</tbody>
-          <tfoot><tr><td colspan="3">Celkem objednat</td><td class="num">${fmt(t)}</td></tr></tfoot>
-        </table>`;
-      })()}
+      ${tables}
       ${wins.length ? `
       <table class="pr-table" style="margin-top:5mm">
         <thead><tr><th>Zeď</th><th class="num">Úsek</th><th class="num">Šířka okna (mm)</th><th class="num">Střed od začátku úseku (mm)</th></tr></thead>
