@@ -2253,6 +2253,8 @@ function setElFrontD(e, v){ if(isHorizFront(e.front || 'jih')) e.d = v; else e.w
 const BOK_W_DFLT    = 18;  // tloušťka boku+ [mm]
 const BOK_BACK_DFLT = 50;  // za zadní hranu skříně ke zdi [mm] (skříň stojí 50 mm od zdi)
 const BOK_FRONT_DFLT = 20; // přesah před čelo (přes dvířka) [mm]
+const BOK_H_DS = 900;      // výška boku+ u DS [mm] = sokl 150 + skříň 720 + deska ~30
+const BOK_H_HS = 750;      // výška boku+ u HS [mm]
 // Pozn.: hloubka boku+ = hloubka skříně + 50 (ke zdi) + 20 (před čelo) = 510+70 = 580 mm
 
 function bokCfg(e){ const b = e && e.bok; return (b && b.side) ? b : null; }
@@ -2265,6 +2267,13 @@ function bokBack(e){
 }
 function bokFront(e){ const b = bokCfg(e); return b && b.front != null ? +b.front : BOK_FRONT_DFLT; }
 function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokBack(e) + bokFront(e); }
+/* Výška boku+ podle druhu prvku (u sloupu do výšky sloupu). */
+function bokH(e){
+  const k = elKind3(e);
+  if(k==='upper') return BOK_H_HS;
+  if(k==='column') return elH3(e);
+  return BOK_H_DS;
+}
 
 /* Obdélník boku ve world souřadnicích, nebo null. Strana L/R = levá/pravá,
    když se na čelo díváš zepředu (z místnosti). Přepočte se při otočení.
@@ -2539,7 +2548,7 @@ function renderInspector(){
           <label class="fld"><span>Hloubka boku+</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w)+bokBack(e)+bokFront(e))} mm" disabled></label>
           <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokCfg(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
         </div>
-        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Hloubka = skříň + přesah před čelo + odskok ke zdi: u DS 510 + 20 + 50 = 580 mm; u HS (visí na zdi) 320 + 20 + 0 = 340 mm.</p>
+        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm (délka řady + 100 mm rezerva).</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -2921,13 +2930,15 @@ const B3D = {
   upperBot: 1400,   // spodní hrana horních skříněk [mm]
   colH:     2100,   // sloup [mm]
   fridgeH:  2030,   // sloup s lednicí [mm]
-  counterT: 40      // tloušťka pracovní desky [mm]
+  counterT: 30,     // tloušťka pracovní desky [mm] (DS: 150 + 720 + 30 = 900)
+  sokl:     150     // výška čelního soklu pod spodními skříněmi [mm]
 };
 
 /* Druh prvku – spodní / horní skříň (sloup se odvozuje z názvu). */
 const EL_WALL_GAP = 50;    // mezera zadní hrany spodní skříně od zdi [mm]
 const UP_D_DFLT   = 320;   // hloubka horní skříně po přepnutí [mm]
 const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
+const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] na každou řadu DS
 
 function hexRgb(h){
   const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
@@ -2964,7 +2975,12 @@ function kindLabel3(e){
   return k==='upper' ? 'horní skříň' : k==='column' ? 'sloup' : 'spodní skříň';
 }
 /* Spodní hrana boxu prvku v [mm] (horní skříňky visí; ostatní stojí na podlaze). */
-function elZ0(e){ return elKind3(e)==='upper' ? B3D.upperBot : B3D.floorT; }
+function elZ0(e){
+  const k = elKind3(e);
+  if(k==='upper')  return B3D.upperBot;
+  if(k==='base')   return B3D.floorT + B3D.sokl;   // DS stojí na soklu 150
+  return B3D.floorT;                                // sloup
+}
 
 /* Najde líc zdi nejblíž ZADNÍ hraně prvku (rovnoběžný úsek) a vrátí souřadnici
    toho líce (y u vodorovné zdi / x u svislé), nebo null. */
@@ -3075,6 +3091,49 @@ function finishNewElementKind(e){
   return e;
 }
 
+/* Souvislé řady spodních skříněk (pro sokl a délky materiálu). */
+function dsRuns(){
+  const bases = [];
+  for(const e of S.project.elements){
+    if(elKind3(e) !== 'base') continue;
+    const f = e.front || 'jih';
+    let axis, s0, s1, face;
+    if(f==='jih')        { axis='x'; face=e.y+e.d; s0=e.x;         s1=e.x+e.w; }
+    else if(f==='sever') { axis='x'; face=e.y;    s0=e.x;         s1=e.x+e.w; }
+    else if(f==='východ'){ axis='y'; face=e.x;    s0=e.y;         s1=e.y+e.d; }
+    else                 { axis='y'; face=e.x+e.w;s0=e.y;         s1=e.y+e.d; }
+    bases.push({ e, f, axis, face:R(face), s0, s1 });
+  }
+  const groups = {};
+  for(const b of bases){ const key = b.f+':'+b.face; (groups[key]=groups[key]||[]).push(b); }
+  const runs = [];
+  for(const key in groups){
+    const g = groups[key].sort((a,b)=>a.s0-b.s0);
+    let cur = null;
+    for(const b of g){
+      if(!cur){ cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e] }; }
+      else if(b.s0 - cur.s1 <= 90){ cur.s1 = Math.max(cur.s1,b.s1); cur.el.push(b.e); }
+      else { runs.push(cur); cur = { f:b.f, face:b.face, s0:b.s0, s1:b.s1, el:[b.e] }; }
+    }
+    if(cur) runs.push(cur);
+  }
+  const out = [];
+  for(const r of runs){
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
+    for(const e of r.el){ x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); }
+    const len = (r.f==='jih'||r.f==='sever') ? (x1-x0) : (y1-y0);
+    out.push({ f:r.f, face:r.face, len, x0, y0, x1, y1, n:r.el.length });
+  }
+  return out;
+}
+
+/* ── čelní sokl (150 mm) pod řadami DS – do 3D/PNG modelu ── */
+function plinths3(sc, mats){
+  for(const r of dsRuns()){
+    scBox(sc, r.x0, r.y0, r.x1, r.y1, B3D.floorT, B3D.floorT + B3D.sokl, mats.plinth);
+  }
+}
+
 /* ── zjednodušená scéna: vrcholy + plochy (materiál po ploše) ── */
 function mkScene(){ return { verts:[], facs:[] }; }
 function scAddPt(sc, x, y, z){
@@ -3149,7 +3208,7 @@ function counters3(sc){
       else runs.push({ r0:b.r0, r1:b.r1, rect:b.rect });
     }
     for(const run of runs){
-      const f = row[0].f, z0 = B3D.floorT + hTop, z1 = B3D.floorT + hTop + B3D.counterT;
+      const f = row[0].f, z0 = B3D.floorT + B3D.sokl + hTop, z1 = B3D.floorT + B3D.sokl + hTop + B3D.counterT;
       let x0,y0,x1,y1;
       if(f==='jih')      { x0 = run.r0; x1 = run.r1; y1 = row[0].front; y0 = Math.min(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y0)); }
       else if(f==='sever'){ x0 = run.r0; x1 = run.r1; y0 = row[0].front; y1 = Math.max(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y1)); }
@@ -3169,8 +3228,11 @@ function elements3(sc, mats){
     /* bok+ = tenký svislý panel na boku skříně */
     const b = bokRect(e);
     if(b){
-      const zh = z1 + (elKind3(e)==='base' ? B3D.counterT : 0);
-      scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, z0, zh, mats.el('#d8d3c8'));
+      let zB0, zB1; const kb = elKind3(e);
+      if(kb==='upper')        { zB0 = B3D.upperBot;                 zB1 = B3D.upperBot + BOK_H_HS; }
+      else if(kb==='column')  { zB0 = z0;                           zB1 = z1; }
+      else                    { zB0 = B3D.floorT;                   zB1 = B3D.floorT + BOK_H_DS; }
+      scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, zB0, zB1, mats.el('#d8d3c8'));
     }
   });
 }
@@ -3238,15 +3300,16 @@ function room3(sc, mats, noCeil){
 function buildScene3(noCeil){
   const sc = mkScene();
   const used = {};
-  const mats = { wall:'#ece8e0', floor:'#d8d0c2', ceil:'#f6f4ef', glass:'#bcd7e8', counter:'#f0ede6' };
+  const mats = { wall:'#ece8e0', floor:'#d8d0c2', ceil:'#f6f4ef', glass:'#bcd7e8', counter:'#f0ede6', plinth:'#e7e0d3' };
   mats.el = hex => { used[hex]=1; return 'el_' + hex.replace('#',''); };
   elements3(sc, mats);
   counters3(sc);
+  plinths3(sc, mats);
   room3(sc, mats, noCeil);
   const matList = Object.keys(used).map(h => ({ name:'el_'+h.replace('#',''), hex:h }));
   matList.push({ name:'wall', hex:mats.wall }, { name:'floor', hex:mats.floor },
                { name:'ceil', hex:mats.ceil }, { name:'glass', hex:mats.glass },
-               { name:'counter', hex:mats.counter });
+               { name:'counter', hex:mats.counter }, { name:'plinth', hex:mats.plinth });
   return { sc, matList };
 }
 function buildObj3(){
@@ -3660,14 +3723,14 @@ function buildPrint(){
         <td>${esc(noteX)}</td>
       </tr>`;
       if(e.bok && e.bok.side){
-        const bkw = bokW(e);
+        const bkw = bokW(e), bh = bokH(e);
         out += `<tr class="pr-sub"><td class="num"></td>
-          <td>└ Bok+</td>
-          <td class="num">${fmt(bkw)}</td>
+          <td>└ Bok+ (${elKind3(e)==='upper'?'HS':'DS'})</td>
+          <td class="num">${fmt(bh)}</td>
           <td class="num">${fmt(bokDepthOf(e))}</td>
           <td class="num">1</td>
-          <td class="num">${fmt(bkw)}</td>
-          <td>boční panel u skříně</td>
+          <td class="num">${fmt(bh)}</td>
+          <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)</td>
         </tr>`;
       }
       if(elKind3(e)==='base' && pw >= 1){
@@ -3705,6 +3768,23 @@ function buildPrint(){
         <tbody>${rows}</tbody>
         <tfoot><tr><td colspan="5">Celková šířka prvků</td><td class="num">${fmt(totalLen)}</td><td></td></tr></tfoot>
       </table>
+      ${(() => {
+        const runs = dsRuns();
+        if(!runs.length) return '';
+        let t = 0; const rows = runs.map((r,i) => {
+          const obj = R(r.len + SOKL_RESERVE); t += obj;
+          return `<tr><td>Sokl – řada DS ${i+1} (${r.n} skříněk)</td>
+            <td class="num">${fmt(R(r.len))}</td>
+            <td class="num">${SOKL_RESERVE}</td>
+            <td class="num">${fmt(obj)}</td></tr>`;
+        }).join('');
+        return `<div class="pr-sub"><b style="font-size:12px">Sokly – čelní, výška 150 mm (tl. 18 mm)</b></div>
+        <table class="pr-table" style="margin-top:1mm">
+          <thead><tr><th>Sestava</th><th class="num">Délka řady (mm)</th><th class="num">Rezerva (mm)</th><th class="num">Objednat (mm)</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="3">Celkem objednat</td><td class="num">${fmt(t)}</td></tr></tfoot>
+        </table>`;
+      })()}
       ${wins.length ? `
       <table class="pr-table" style="margin-top:5mm">
         <thead><tr><th>Zeď</th><th class="num">Úsek</th><th class="num">Šířka okna (mm)</th><th class="num">Střed od začátku úseku (mm)</th></tr></thead>
