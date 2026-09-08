@@ -415,7 +415,6 @@ body{
       <button class="tb" id="btnRoomTool" title="Obdélníková místnost">▢<span class="lb">Místnost</span></button>
       <button class="tb" id="btnImport" title="Načíst ze souboru JSON">↥<span class="lb">Načíst</span></button>
       <button class="tb" id="btnSave" title="Uložit do souboru JSON">↧<span class="lb">Uložit</span></button>
-      <button class="tb" id="btn3d" title="Export 3D modelu (OBJ+MTL, ZIP) – rozměry 1:1">🧊<span class="lb">3D</span></button>
       <button class="tb" id="btnPng" title="3D pohledy jako PNG – připravený vstup pro AI vizualizaci (Nano Banana…)">🖼️<span class="lb">PNG</span></button>
       <button class="tb primary" id="btnPdf" title="Export do PDF">⎙<span class="lb">PDF</span></button>
     </div>
@@ -3807,7 +3806,6 @@ function bindUi(){
   $('#btnFit').onclick = () => fitView();
   $('#btnSave').onclick = () => { save(); exportJson(); toast('Uloženo do souboru JSON'); };
   $('#btnPdf').onclick = doExportPdf;
-  $('#btn3d').onclick = doExport3D;
   $('#btnPng').onclick = doExportPng;
   $('#btnImport').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = ev => {
