@@ -383,6 +383,11 @@ body{
 .sympal .tb.on{ background:#2563eb; border-color:#2563eb; color:#fff; }
 .sympal .tb.on b{ color:#fff; }
 
+.kindseg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface-2)}
+.kindseg button{flex:1;padding:7px 4px;font-size:12px;font-weight:600;border:0;background:transparent;color:var(--ink-2);cursor:pointer}
+.kindseg button + .kindseg button{border-left:1px solid var(--line)}
+.kindseg button.on{background:#2563eb;color:#fff}
+
 </style>
 </head>
 <body>
@@ -1049,9 +1054,11 @@ function elementsMarkup(){
     if(fv[1]===-1) dl = `M${e.x+m} ${e.y+m} H${e.x+e.w-m}`;
     if(fv[0]===1)  dl = `M${e.x+e.w-m} ${e.y+m} V${e.y+e.d-m}`;
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
+    const up = elKind3(e)==='upper';
+    const dash = up ? ` stroke-dasharray="${R(11/z)} ${R(7/z)}"` : '';
     return `<g data-el="${e.id}">
       <rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
-            fill="${c}22" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}" style="cursor:move"/>
+            fill="${c}${up?'0a':'22'}" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
       <path d="${dl}" stroke="${c}" stroke-width="${2/z}" fill="none" opacity=".8"/>
       <text x="${e.x+e.w/2}" y="${e.y+e.d/2 - fs*0.15}" text-anchor="middle" dominant-baseline="middle"
             font-size="${fs}" font-weight="700" fill="#111827"
@@ -2480,9 +2487,15 @@ function renderInspector(){
         </div>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Výška (mm)</span><input id="iH" type="number" step="10" min="100" max="3000" value="${elH3(e)}"></label>
-          <label class="fld"><span>Druh sestavy</span><input type="text" value="${kindLabel3(e)}" disabled></label>
+          <label class="fld"><span>Výška patří</span><input type="text" value="${kindLabel3(e)}" disabled></label>
         </div>
-        <p class="hint">Výška se řídí názvem prvku (horní ≈ 720, sloup/lednice ≈ 2100, jinak spodní ≈ 850 mm). Číslo tu můžeš přepsat; používá se pro 3D export.</p>
+        <label class="fld"><span>Druh (kreslí se jinak)</span>
+          <div class="kindseg">
+            <button type="button" id="iKindBase" class="${elKind3(e)!=='upper'?'on':''}">Spodní</button>
+            <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
+          </div>
+        </label>
+        <p class="hint">${elKind3(e)==='column' ? 'Sloup – druh podle názvu (lednice/trouba). Kliknutím na Spodní/Horní ho můžeš změnit.':(elKind3(e)==='upper'?'Horní skříň: visí na zdi, hloubka 320 mm, výška 710 mm; ve výkresu je přerušovaná.':'Přepni na „Horní“ a skříň se sama přisune ke zdi (hloubka 320, výška 710) – ve výkresu bude přerušovaná.' )}</p>
       </div>
       <div class="insp-sec">
         <h4>Bok+ (boční panel)</h4>
@@ -2541,6 +2554,8 @@ function renderInspector(){
     bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
     $('#iH').addEventListener('change', ev => { e.h = clamp(+ev.target.value||0,100,3000); pushHistoryQuiet(); renderCanvas(); });
+    $('#iKindBase').onclick  = () => setElKind3(e, 'base');
+    $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
     /* Bok+ – side select přestaví panel (aby se aktualizovaly hodnoty), čísla
        jen překreslí výkres a uloží (panel zůstává, ať psaní/Tab nevypadnou). */
@@ -2880,12 +2895,17 @@ const B3D = {
   sill:     950,    // parapet okna [mm]
   winTop:   2450,   // horní hrana okna [mm]
   baseH:    850,    // spodní skříň vč. soklu [mm]
-  upperH:   720,    // horní skříň [mm]
+  upperH:   710,    // horní skříň [mm]
   upperBot: 1400,   // spodní hrana horních skříněk [mm]
   colH:     2100,   // sloup [mm]
   fridgeH:  2030,   // sloup s lednicí [mm]
   counterT: 40      // tloušťka pracovní desky [mm]
 };
+
+/* Druh prvku – spodní / horní skříň (sloup se odvozuje z názvu). */
+const EL_WALL_GAP = 50;    // mezera zadní hrany spodní skříně od zdi [mm]
+const UP_D_DFLT   = 320;   // hloubka horní skříně po přepnutí [mm]
+const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
 
 function hexRgb(h){
   const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
@@ -2899,24 +2919,88 @@ function san3(s){ return String(s??'').replace(/[^A-Za-z0-9_.\-]/g,'_').slice(0,
    hodnotu přepíše). */
 function guessKind3(e){
   const n = ((e.name||'') + ' ' + (e.note||'')).toLowerCase();
-  if(/horn|nástěnn|nasteen|vrchn|vrni/.test(n)) return 'upper';
   if(/sloup|sloupc/.test(n) || /lednic|chladnic|mraz/.test(n)) return 'column';
+  if(/horn|nástěnn|nasteen|vrchn|vrni/.test(n)) return 'upper';
   return 'base';
 }
-function guessH3(e){
-  if(guessKind3(e)==='upper') return B3D.upperH;
-  if(guessKind3(e)==='column'){
-    return /lednic|chladnic|mraz/.test(((e.name||'')+' '+(e.note||'')).toLowerCase()) ? B3D.fridgeH : B3D.colH;
-  }
+/* Druh prvku: přednost má přepínač uživatele (e.kind), jinak odhad z názvu. */
+function elKind3(e){
+  if(e.kind==='upper') return 'upper';
+  if(e.kind==='base')  return 'base';
+  return guessKind3(e);
+}
+const isUpperEl = e => elKind3(e)==='upper';
+function defaultH3(e){
+  const k = elKind3(e);
+  if(k==='upper') return B3D.upperH;
+  if(k==='column') return /lednic|chladnic|mraz/.test(((e.name||'')+' '+(e.note||'')).toLowerCase()) ? B3D.fridgeH : B3D.colH;
   return B3D.baseH;
 }
-function elH3(e){ const h = +e.h; return h>=100 ? h : guessH3(e); }
+function elH3(e){ const h = +e.h; return h>=100 ? h : defaultH3(e); }
 function kindLabel3(e){
-  const k = guessKind3(e);
+  const k = elKind3(e);
   return k==='upper' ? 'horní skříň' : k==='column' ? 'sloup' : 'spodní skříň';
 }
 /* Spodní hrana boxu prvku v [mm] (horní skříňky visí; ostatní stojí na podlaze). */
-function elZ0(e){ return guessKind3(e)==='upper' ? B3D.upperBot : B3D.floorT; }
+function elZ0(e){ return elKind3(e)==='upper' ? B3D.upperBot : B3D.floorT; }
+
+/* Najde líc zdi nejblíž ZADNÍ hraně prvku (rovnoběžný úsek) a vrátí souřadnici
+   toho líce (y u vodorovné zdi / x u svislé), nebo null. */
+function wallFaceBehind(e){
+  const f = e.front || 'jih';
+  const horiz = (f==='jih' || f==='sever');      // zadní hrana vodorovná
+  let back, a0, a1;
+  if(f==='jih')      { back=e.y;         a0=e.x; a1=e.x+e.w; }
+  else if(f==='sever'){ back=e.y+e.d;    a0=e.x; a1=e.x+e.w; }
+  else if(f==='východ'){ back=e.x;       a0=e.y; a1=e.y+e.d; }
+  else               { back=e.x+e.w;     a0=e.y; a1=e.y+e.d; }
+  let best = null;
+  for(const w of S.project.walls){
+    for(const [aa,bb] of wallBandOutline(w)){
+      const dx=bb.x-aa.x, dy=bb.y-aa.y, L=Math.hypot(dx,dy);
+      if(L < 1) continue;
+      const isH = Math.abs(dy) < Math.abs(dx);
+      if(isH !== horiz) continue;
+      const lo = horiz ? Math.min(aa.x,bb.x) : Math.min(aa.y,bb.y);
+      const hi = horiz ? Math.max(aa.x,bb.x) : Math.max(aa.y,bb.y);
+      if(Math.max(lo, a0) - 1 > Math.min(hi, a1)) continue;   // neleží za zadní hranou
+      const face = horiz ? aa.y : aa.x;
+      const d = Math.abs(face - back);
+      if(!best || d < best.d - 1e-6) best = { d, face };
+    }
+  }
+  return best ? best.face : null;
+}
+
+/* Přepne druh prvku. Horní skříň: přisune zadní hranu na líc zdi, hloubka 320,
+   výška 710. Spodní: vrátí zadní hranu do mezery EL_WALL_GAP (50 mm) od zdi. */
+function setElKind3(e, kind){
+  e.kind = (kind==='upper') ? 'upper' : 'base';
+  const f = e.front || 'jih';
+  const face = wallFaceBehind(e);
+  if(face == null){
+    if(kind==='upper') e.h = UP_H_DFLT;
+    pushHistory(); render();
+    toast('Nenašel jsem zeď u prvku – změnil jsem jen druh, polohu uprav ručně');
+    return;
+  }
+  if(kind==='upper'){
+    if(f==='jih')       { e.y = R(face); e.d = UP_D_DFLT; }
+    else if(f==='sever'){ e.d = UP_D_DFLT; e.y = R(face - UP_D_DFLT); }
+    else if(f==='východ'){ e.x = R(face); e.w = UP_D_DFLT; }
+    else                { e.w = UP_D_DFLT; e.x = R(face - UP_D_DFLT); }
+    e.h = UP_H_DFLT;
+  } else {
+    if(f==='jih')       { e.y = R(face + EL_WALL_GAP); }
+    else if(f==='sever'){ e.y = R(face - EL_WALL_GAP - e.d); }
+    else if(f==='východ'){ e.x = R(face + EL_WALL_GAP); }
+    else                { e.x = R(face - EL_WALL_GAP - e.w); }
+  }
+  pushHistory(); render();
+  toast(kind==='upper'
+    ? 'Horní skříň: u zdi, hloubka ' + UP_D_DFLT + ' mm, výška ' + UP_H_DFLT + ' mm'
+    : 'Spodní skříň: zadní hrana ' + EL_WALL_GAP + ' mm od zdi');
+}
 
 /* ── zjednodušená scéna: vrcholy + plochy (materiál po ploše) ── */
 function mkScene(){ return { verts:[], facs:[] }; }
@@ -2968,7 +3052,7 @@ function scBox(sc, x0,y0,x1,y1, z0,z1, mat){
 function counters3(sc){
   const bases = [];
   for(const e of S.project.elements){
-    if(guessKind3(e) !== 'base') continue;
+    if(elKind3(e) !== 'base') continue;
     const f = e.front || 'jih', w = e.w, d = e.d;
     let front, range0, range1, rect;
     if(f==='jih')      { front = e.y + d; range0 = e.x;         range1 = e.x + w; rect = { y0:e.y,  y1:e.y+d }; }
@@ -3012,7 +3096,7 @@ function elements3(sc, mats){
     /* bok+ = tenký svislý panel na boku skříně */
     const b = bokRect(e);
     if(b){
-      const zh = z1 + (guessKind3(e)==='base' ? B3D.counterT : 0);
+      const zh = z1 + (elKind3(e)==='base' ? B3D.counterT : 0);
       scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, z0, zh, mats.el('#d8d3c8'));
     }
   });
@@ -3453,6 +3537,8 @@ function buildPrint(){
     const rows = els.map((e,i) => {
       const wNom = elFrontW(e), dNom = elFrontD(e);
       const pw = wNom - 2*LAM;            // šířka půdy i latí (podél čela)
+      const k3v = elKind3(e);
+      const noteX = (k3v==='base') ? (e.note||'') : ((k3v==='upper'?'horní skříň':'sloup') + (e.note?' — '+e.note:''));
       let out = `<tr>
         <td class="num">${i+1}</td>
         <td><span class="pr-tdot" style="background:${e.color}"></span>${esc(e.name || '—')}</td>
@@ -3460,7 +3546,7 @@ function buildPrint(){
         <td class="num">${fmt(dNom)}</td>
         <td class="num">${e.qty||1}</td>
         <td class="num">${fmt(wNom*(e.qty||1))}</td>
-        <td>${esc(e.note || '')}</td>
+        <td>${esc(noteX)}</td>
       </tr>`;
       if(e.bok && e.bok.side){
         const bkw = bokW(e);
@@ -3473,7 +3559,7 @@ function buildPrint(){
           <td>boční panel u skříně</td>
         </tr>`;
       }
-      if(pw >= 1){
+      if(elKind3(e)==='base' && pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
           <td class="num">${fmt(pw)}</td>
@@ -3585,8 +3671,9 @@ function drawingSvg(P){
 
   // prvky – tenká linka, žádná výplň přes sousedy
   for(const e of S.project.elements){
+    const upEl = elKind3(e)==='upper';
     parts.push(`<rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
-      fill="${e.color}14" stroke="#1f2937" stroke-width="${sw(PEN.el)}"/>`);
+      fill="${e.color}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(80, e.w*0.14, e.d*0.14);
     let dl = '';
@@ -3625,6 +3712,7 @@ function drawingSvg(P){
   const rcx = wbR ? wbR.x + wbR.w/2 : 0, rcy = wbR ? wbR.y + wbR.h/2 : 0;
   const OFF_EL = 360;                        // odsazení kóty od skříně [mm]
   for(const e of S.project.elements){
+    if(elKind3(e)==='upper') continue;      // horní skříňky nemají vlastní kótu (kopírují spodní řadu)
     const front = e.front || 'jih';
     const wF = elFrontW(e);
     if(wF < 40) continue;
