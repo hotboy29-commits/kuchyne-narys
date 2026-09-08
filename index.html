@@ -415,6 +415,7 @@ body{
       <button class="tb" id="btnRoomTool" title="Obdélníková místnost">▢<span class="lb">Místnost</span></button>
       <button class="tb" id="btnImport" title="Načíst ze souboru JSON">↥<span class="lb">Načíst</span></button>
       <button class="tb" id="btnSave" title="Uložit do souboru JSON">↧<span class="lb">Uložit</span></button>
+      <button class="tb" id="btn3d" title="Export 3D modelu (OBJ+MTL, ZIP) – rozměry 1:1">🧊<span class="lb">3D</span></button>
       <button class="tb primary" id="btnPdf" title="Export do PDF">⎙<span class="lb">PDF</span></button>
     </div>
 
@@ -2477,6 +2478,11 @@ function renderInspector(){
             <select id="iFront">${FRONTS.map(f=>`<option value="${f}" ${f===(e.front||'jih')?'selected':''}>${f}</option>`).join('')}</select>
           </label>
         </div>
+        <div class="row2" style="margin-top:8px">
+          <label class="fld"><span>Výška (mm)</span><input id="iH" type="number" step="10" min="100" max="3000" value="${elH3(e)}"></label>
+          <label class="fld"><span>Druh sestavy</span><input type="text" value="${kindLabel3(e)}" disabled></label>
+        </div>
+        <p class="hint">Výška se řídí názvem prvku (horní ≈ 720, sloup/lednice ≈ 2100, jinak spodní ≈ 850 mm). Číslo tu můžeš přepsat; používá se pro 3D export.</p>
       </div>
       <div class="insp-sec">
         <h4>Bok+ (boční panel)</h4>
@@ -2534,6 +2540,7 @@ function renderInspector(){
     bind('#iX', ev => { e.x = R(OR.x + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
+    $('#iH').addEventListener('change', ev => { e.h = clamp(+ev.target.value||0,100,3000); pushHistoryQuiet(); renderCanvas(); });
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
     /* Bok+ – side select přestaví panel (aby se aktualizovaly hodnoty), čísla
        jen překreslí výkres a uloží (panel zůstává, ať psaní/Tab nevypadnou). */
@@ -2858,6 +2865,339 @@ const STORE = (() => {
              setItem:(k,v)=>void m.set(k,String(v)), removeItem:k=>void m.delete(k) };
   }
 })();
+
+/* ═════════════════════════ 3D EXPORT (OBJ + MTL v ZIP) ═════════════════════════
+   Z přesného 2D plánku postaví 3D model (metry) – skříně (spodní/horní/sloupy
+   podle názvu a pole „Výška“), bok+, pracovní desky nad souvislými řadami,
+   stěny se skutečnými okenními otvory, podlaha a strop. Soubor se stáhne jako
+   ZIP (model.obj + model.mtl + návod). Rozměry odpovídají plánku 1:1. */
+
+const B3D = {
+  wallH:    2600,   // výška místnosti / zdí [mm]
+  ceilT:    120,    // tloušťka stropní desky [mm]
+  floorT:   120,    // tloušťka podlahové desky [mm]
+  pad:      600,    // přesah podlahy/stropu přes obrys [mm]
+  sill:     950,    // parapet okna [mm]
+  winTop:   2450,   // horní hrana okna [mm]
+  baseH:    850,    // spodní skříň vč. soklu [mm]
+  upperH:   720,    // horní skříň [mm]
+  upperBot: 1400,   // spodní hrana horních skříněk [mm]
+  colH:     2100,   // sloup [mm]
+  fridgeH:  2030,   // sloup s lednicí [mm]
+  counterT: 40      // tloušťka pracovní desky [mm]
+};
+
+function hexRgb(h){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
+  if(!m) return '0.85 0.83 0.80';
+  const n = parseInt(m[1], 16);
+  return [(n>>16)&255, (n>>8)&255, n&255].map(v => R(v/255)).join(' ');
+}
+function san3(s){ return String(s??'').replace(/[^A-Za-z0-9_.\-]/g,'_').slice(0,28); }
+
+/* Odvození druhu a výšky prvku podle názvu/poznámky („Výška“ v inspektoru
+   hodnotu přepíše). */
+function guessKind3(e){
+  const n = ((e.name||'') + ' ' + (e.note||'')).toLowerCase();
+  if(/horn|nástěnn|nasteen|vrchn|vrni/.test(n)) return 'upper';
+  if(/sloup|sloupc/.test(n) || /lednic|chladnic|mraz/.test(n)) return 'column';
+  return 'base';
+}
+function guessH3(e){
+  if(guessKind3(e)==='upper') return B3D.upperH;
+  if(guessKind3(e)==='column'){
+    return /lednic|chladnic|mraz/.test(((e.name||'')+' '+(e.note||'')).toLowerCase()) ? B3D.fridgeH : B3D.colH;
+  }
+  return B3D.baseH;
+}
+function elH3(e){ const h = +e.h; return h>=100 ? h : guessH3(e); }
+function kindLabel3(e){
+  const k = guessKind3(e);
+  return k==='upper' ? 'horní skříň' : k==='column' ? 'sloup' : 'spodní skříň';
+}
+/* Spodní hrana boxu prvku v [mm] (horní skříňky visí; ostatní stojí na podlaze). */
+function elZ0(e){ return guessKind3(e)==='upper' ? B3D.upperBot : B3D.floorT; }
+
+/* ── zjednodušená scéna: vrcholy + plochy (materiál po ploše) ── */
+function mkScene(){ return { verts:[], facs:[] }; }
+function scAddPt(sc, x, y, z){
+  const q = n => Math.round(n*1000)/1000;      // 0.001 m = 1 mm
+  sc.verts.push([q(x/1000), q(-y/1000), q(z/1000)]);
+  return sc.verts.length - 1;
+}
+function vec3(a,b){ return [b[0]-a[0], b[1]-a[1], b[2]-a[2]]; }
+function cross3(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot3(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+function mid3(ps){ return ps.reduce((s,p)=>{ s[0]+=p[0]; s[1]+=p[1]; s[2]+=p[2]; return s; },[0,0,0]).map(v=>v/ps.length); }
+
+/* Čtyřúhelník mezi 4 3D body; normálu otočí vždy VEN od středu tělesa cen. */
+function scQuad(sc, pts, cen, mat){
+  const cc = mid3(pts);
+  let n = cross3(vec3(pts[0],pts[1]), vec3(pts[0],pts[2]));
+  const out = vec3(cc, cen);
+  if(dot3(n, out) < 0){
+    sc.facs.push({ mat, v:[scAddPt(sc,pts[0][0],pts[0][1],pts[0][2]), scAddPt(sc,pts[3][0],pts[3][1],pts[3][2]), scAddPt(sc,pts[2][0],pts[2][1],pts[2][2]), scAddPt(sc,pts[1][0],pts[1][1],pts[1][2])] });
+  } else {
+    sc.facs.push({ mat, v:pts.map(p=>scAddPt(sc,p[0],p[1],p[2])) });
+  }
+}
+
+/* Hranol z rovinného polygonu (plan x,y v mm) mezi z0 a z1 [mm]. */
+function scPrism(sc, corners, z0, z1, mat){
+  const n = corners.length;
+  if(n < 3 || z1 - z0 < 0.5) return;
+  const btm = [], top = [], all = [];
+  for(const c of corners){
+    btm.push([c.x, c.y, z0]); top.push([c.x, c.y, z1]);
+  }
+  all.push(...btm, ...top);
+  const cen = mid3(all);
+  for(let i=0;i<n;i++){
+    const j = (i+1)%n;
+    scQuad(sc, [btm[i], btm[j], top[j], top[i]], cen, mat);   // bok
+  }
+  scQuad(sc, btm, cen, mat);                                    // dno (dolů)
+  scQuad(sc, top, cen, mat);                                    // vrch (nahoru)
+}
+/* Obdélník (x0,y0)-(x1,y1) v mm jako hranol. */
+function scBox(sc, x0,y0,x1,y1, z0,z1, mat){
+  scPrism(sc, [{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}], z0, z1, mat);
+}
+
+/* ── pracovní desky nad souvislými řadami spodních skříněk ── */
+function counters3(sc){
+  const bases = [];
+  for(const e of S.project.elements){
+    if(guessKind3(e) !== 'base') continue;
+    const f = e.front || 'jih', w = e.w, d = e.d;
+    let front, range0, range1, rect;
+    if(f==='jih')      { front = e.y + d; range0 = e.x;         range1 = e.x + w; rect = { y0:e.y,  y1:e.y+d }; }
+    else if(f==='sever'){ front = e.y;   range0 = e.x;         range1 = e.x + w; rect = { y0:e.y,  y1:e.y+d }; }
+    else if(f==='východ'){ front = e.x + w; range0 = e.y;      range1 = e.y + d; rect = { x0:e.x,  x1:e.x+w }; }
+    else                { front = e.x;   range0 = e.y;         range1 = e.y + d; rect = { x0:e.x,  x1:e.x+w }; }
+    bases.push({ e, f, front:R(front), r0:R(range0), r1:R(range1), rect, h:elH3(e) });
+  }
+  const groups = {};
+  for(const b of bases){
+    const key = b.f + ':' + b.front;
+    (groups[key] = groups[key] || []).push(b);
+  }
+  for(const key in groups){
+    const row = groups[key];
+    const hTop = Math.max(...row.map(b => b.h));
+    row.sort((a,b) => a.r0 - b.r0);
+    let runs = [];
+    for(const b of row){
+      if(runs.length && b.r0 - runs[runs.length-1].r1 <= 90) runs[runs.length-1].r1 = Math.max(runs[runs.length-1].r1, b.r1);
+      else runs.push({ r0:b.r0, r1:b.r1, rect:b.rect });
+    }
+    for(const run of runs){
+      const f = row[0].f, z0 = B3D.floorT + hTop, z1 = B3D.floorT + hTop + B3D.counterT;
+      let x0,y0,x1,y1;
+      if(f==='jih')      { x0 = run.r0; x1 = run.r1; y1 = row[0].front; y0 = Math.min(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y0)); }
+      else if(f==='sever'){ x0 = run.r0; x1 = run.r1; y0 = row[0].front; y1 = Math.max(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y1)); }
+      else if(f==='východ'){ y0 = run.r0; y1 = run.r1; x1 = row[0].front; x0 = Math.min(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.x0)); }
+      else               { y0 = run.r0; y1 = run.r1; x0 = row[0].front; x1 = Math.max(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.x1)); }
+      scBox(sc, x0,y0,x1,y1, z0,z1, 'counter');
+    }
+  }
+}
+
+/* ── celá sestava prvků (skříně + sloupy + bok+) ── */
+function elements3(sc, mats){
+  S.project.elements.forEach((e, i) => {
+    const h = elH3(e), z0 = elZ0(e), z1 = z0 + h;
+    const mat = mats.el(e.color || '#c9c3b8');
+    scBox(sc, e.x, e.y, e.x + e.w, e.y + e.d, z0, z1, mat);
+    /* bok+ = tenký svislý panel na boku skříně */
+    const b = bokRect(e);
+    if(b){
+      const zh = z1 + (guessKind3(e)==='base' ? B3D.counterT : 0);
+      scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, z0, zh, mats.el('#d8d3c8'));
+    }
+  });
+}
+
+/* ── místnost: podlaha, strop, stěny s otvory oken ── */
+function room3(sc, mats){
+  const c = contentBBox({ skipGuides:true });
+  if(!c) return;
+  const P = B3D.pad;
+  scBox(sc, c.x-P, c.y-P, c.x+c.w+P, c.y+c.h+P, 0, B3D.floorT, mats.floor);
+  scBox(sc, c.x-P, c.y-P, c.x+c.w+P, c.y+c.h+P, B3D.wallH, B3D.wallH+B3D.ceilT, mats.ceil);
+  /* okna načtená podle zdi a úseku */
+  const winsBy = {};
+  for(const w of S.project.windows) winsBy[w.wallId+':'+w.seg] = winsBy[w.wallId+':'+w.seg] || [];
+  for(const w of S.project.windows) winsBy[w.wallId+':'+w.seg].push(w);
+
+  for(const w of S.project.walls){
+    const t = w.t || WALL_T_DEFAULT, side = wallSide(w);
+    for(const sg of wallSegments(w)){
+      const dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y, L = Math.hypot(dx,dy);
+      if(L < 1) continue;
+      const ux = dx/L, uy = dy/L;
+      /* směr pásu ven z místnosti (stejná konvence jako 2D výplň zdi) */
+      const onx = -uy*side, ony = ux*side;
+      const ext = t;                      // prodloužení přes rohy, ať rohy sedí
+      const s0 = -ext, s1 = L + ext;
+      /* otevřené úseky (okna) */
+      const open = [];
+      for(const win of (winsBy[w.id+':'+sg.i] || [])){
+        const half = Math.min(win.w, L)/2;
+        const a = Math.max(s0, win.off - half), b = Math.min(s1, win.off + half);
+        if(b - a > 1) open.push([a,b]);
+      }
+      open.sort((p,q) => p[0]-q[0]);
+      const parts = [];
+      let cur = s0;
+      for(const [a,b] of open){
+        if(a - cur > 1) parts.push({ a:cur, b:a, open:false });
+        parts.push({ a, b, open:true });
+        cur = b;
+      }
+      if(s1 - cur > 1) parts.push({ a:cur, b:s1, open:false });
+      for(const seg of parts){
+        const pA = { x:sg.a.x + ux*seg.a, y:sg.a.y + uy*seg.a };
+        const pB = { x:sg.a.x + ux*seg.b, y:sg.a.y + uy*seg.b };
+        const corners = [
+          { x:pA.x,          y:pA.y },
+          { x:pB.x,          y:pB.y },
+          { x:pB.x + onx*t,  y:pB.y + ony*t },
+          { x:pA.x + onx*t,  y:pA.y + ony*t }
+        ];
+        if(seg.open){
+          scPrism(sc, corners, 0, B3D.sill, mats.wall);                  // parapet
+          scPrism(sc, corners, B3D.sill, B3D.winTop, mats.glass);        // zasklení
+          scPrism(sc, corners, B3D.winTop, B3D.wallH, mats.wall);        // nadpraží
+        } else {
+          scPrism(sc, corners, 0, B3D.wallH, mats.wall);
+        }
+      }
+    }
+  }
+}
+
+/* ── sestavení OBJ + MTL ── */
+function buildObj3(){
+  const sc = mkScene();
+  const used = {};
+  const mats = {
+    wall:  '#ece8e0',
+    floor: '#d8d0c2',
+    ceil:  '#f6f4ef',
+    glass: '#bcd7e8',
+    counter:'#f0ede6'
+  };
+  mats.el = hex => { used[hex] = 1; return 'el_' + hex.replace('#',''); };
+
+  elements3(sc, mats);
+  counters3(sc);
+  room3(sc, mats);
+
+  const matList = Object.keys(used).map(h => ({ name:'el_'+h.replace('#',''), hex:h }));
+  matList.push({ name:'wall', hex:mats.wall }, { name:'floor', hex:mats.floor },
+               { name:'ceil', hex:mats.ceil }, { name:'glass', hex:mats.glass },
+               { name:'counter', hex:mats.counter });
+
+  let obj = '# 3D model z plánku (kuchyne-narys)\n# souradnice v metrech (plan x,y; -y = nahoru), Z nahoru\n';
+  obj += '# meritko 1:1 k planku; materialy viz model.mtl\n';
+  for(const v of sc.verts) obj += 'v ' + v.join(' ') + '\n';
+  const byMat = {};
+  sc.facs.forEach((f, i) => { (byMat[f.mat] = byMat[f.mat] || []).push([i, f.v]); });
+  let oi = 0;
+  for(const m in byMat){
+    obj += '\no cast_' + (oi++) + '\n';
+    obj += 'usemtl ' + m + '\n';
+    for(const [, v] of byMat[m]){
+      obj += 'f ' + v.map(i => (i+1)).join(' ') + '\n';
+    }
+  }
+  let mtl = '# materialy (kd = barva; v Blenderu je nahrad plnohodnotnymi)\n';
+  for(const m of matList) mtl += 'newmtl ' + m.name + '\nKd ' + hexRgb(m.hex) + '\nKs 0 0 0\nKa 0 0 0\n\n';
+  return { obj, mtl };
+}
+
+/* ── ZIP (bez komprese) + stažení ── */
+function crc32(bytes){
+  let c; const t = [];
+  for(let n=0;n<256;n++){ c = n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n] = c>>>0; }
+  let crc = 0xFFFFFFFF;
+  for(const b of bytes) crc = t[(crc ^ b) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files){
+  const enc = new TextEncoder();
+  const u16 = v => [v & 255, (v >> 8) & 255];
+  const u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
+  const body = [], centr = [];
+  let off = 0;
+  for(const f of files){
+    const nb = [...enc.encode(f.name)], db = [...enc.encode(f.data)];
+    const crc = crc32(new Uint8Array(db));
+    body.push(...[80,75,3,4,20,0,0,0,0,0], ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...nb, ...db);
+    centr.push(...[80,75,1,2,20,0,20,0,0,0,0,0], ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off), ...nb);
+    off += 30 + nb.length + db.length;
+  }
+  const cdSize = centr.length;
+  body.push(...centr, ...[80,75,5,6,0,0,0,0], ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), ...u16(0));
+  return new Uint8Array(body);
+}
+function doExport3D(){
+  if((!S.project.walls.length) && (!S.project.elements.length)){
+    toast('Nejdřív nakresli místnost a skříně'); return;
+  }
+  try{
+    const { obj, mtl } = buildObj3();
+    const readme = [
+      '3D model z plánku (kuchyne-narys) – rozměry odpovídají plánku 1:1.',
+      '',
+      'SOUBORY',
+      '  model.obj  – geometrie (metry, Z nahoru)',
+      '  model.mtl  – základní barvy (v Blenderu je nahraď materiály)',
+      '',
+      'POSTUP V BLENDERU (zdarma, blender.org)',
+      '  1) File → Import → Wavefront (.obj) → vyber model.obj (Scale 1.00).',
+      '  2) V objektovém režimu A (vše) a pak v záložce Modifiers není třeba nic.',
+      '     Normály: Tab (edit), A (vybrat vše), Mesh → Normals → Recalculate Outside.',
+      '  3) Barvy jsou jednoduché; vyber objekt a v Material Properties mu nastav',
+      '     materiál (kuchyň = matný laminát, deska = kámen…).',
+      '  4) Zasklení oken: materiálu „glass“ dej Principled BSDF s Transmission 1,',
+      '     nebo ho vymaž a do otvoru vlož vlastní okno.',
+      '  5) Scénu osvětli: přidej pár Area/Spot světel (nebo HDRI world), kameru',
+      '     a renderuj Eevee (rychle) / Cycles (fotorealisticky).',
+      '',
+      'CO JE V MODELU',
+      '  – stěny se skutečnými okenními otvory (parapet + zasklení + nadpraží),',
+      '  – podlaha a strop (přesahují obrys – pohodlně je nech),',
+      '  – spodní skříňky se společnou pracovní deskou nad souvislými řadami,',
+      '  – horní skříňky (spodní hrana ' + B3D.upperBot + ' mm) a sloupy/lednice,',
+      '  – bok+ jako tenký boční panel.',
+      '',
+      'VÝŠKY A NASTAVENÍ',
+      '  Výška prvku se řídí jeho názvem (horní ≈ ' + B3D.upperH + ', sloup ≈ ' + B3D.colH + ',',
+      '  jinak spodní ≈ ' + B3D.baseH + ' mm) – v aplikaci ji u prvku přepíšeš polem',
+      '  „Výška (mm)“. Globální parametry (výška místnosti, parapet, sokl…) jsou v',
+      '  index.html u konstant B3D.*.',
+      ''
+    ].join('\n');
+    const bytes = zipStore([
+      { name:'model.obj', data:obj },
+      { name:'model.mtl', data:mtl },
+      { name:'navod-blender.txt', data:readme }
+    ]);
+    const blob = new Blob([bytes], { type:'application/zip' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const base = (S.project.info.name || 'narys').replace(/[^\w\dáčďéěíňóřšťúůýž -]/gi,'').trim() || 'narys';
+    a.download = base + '_3D.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('Stažen 3D model (ZIP) – rozměry 1:1 k plánku');
+  }catch(err){
+    console.error(err);
+    toast('3D export selhal: ' + err.message);
+  }
+}
 
 let saveTimer = null;
 function save(){
@@ -3305,6 +3645,7 @@ function bindUi(){
   $('#btnFit').onclick = () => fitView();
   $('#btnSave').onclick = () => { save(); exportJson(); toast('Uloženo do souboru JSON'); };
   $('#btnPdf').onclick = doExportPdf;
+  $('#btn3d').onclick = doExport3D;
   $('#btnImport').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = ev => {
     const f = ev.target.files[0]; if(!f) return;
