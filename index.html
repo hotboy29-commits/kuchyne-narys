@@ -888,6 +888,15 @@ function fitView(padMm=400){
   S.view.ty = r.height/2 - (b.y + b.h/2) * S.view.zoom;
   render();
 }
+function stageCenterPt(){
+  const r = svg().getBoundingClientRect();
+  return { x: r.left + r.width/2, y: r.top + r.height/2 };
+}
+/* Zoom kolem středu plátna o násobek f (pro tlačítka a klávesnici). */
+function zoomBy(f){
+  const c = stageCenterPt();
+  zoomAt(c.x, c.y, S.view.zoom * f);
+}
 function zoomAt(cx, cy, z){
   const r = svg().getBoundingClientRect();
   const px = cx - r.left, py = cy - r.top;
@@ -1836,9 +1845,19 @@ function onDblClick(ev){
 }
 
 function onWheel(ev){
+  /* Kolečko NAD PLÁTNEM vždy = zoom výkresu.
+     Gesto „ctrl/cmd + kolečko“ (pinch na trackpadu) KDEKOLI v aplikaci taky =
+     zoom výkresu a zablokuje se tím zoom celé stránky prohlížeče. Jinak by se
+     uživateli zvětšil i panel vpravo a horní lišta a nešly by zase oddálit.
+     Obyčejné kolečko mimo plátno (nad panelem vpravo) normálně roluje. */
+  const t = (ev.target instanceof Element) ? ev.target : null;
+  const overCanvas = !!(t && t.closest('#svg'));
+  if(!overCanvas && !(ev.ctrlKey || ev.metaKey)) return;   // nech prohlížeč / panel
   ev.preventDefault();
+  let cx = ev.clientX, cy = ev.clientY;
+  if(!overCanvas){ const c = stageCenterPt(); cx = c.x; cy = c.y; }
   const z = S.view.zoom * (ev.deltaY < 0 ? 1.12 : 1/1.12);
-  zoomAt(ev.clientX, ev.clientY, z);
+  zoomAt(cx, cy, z);
 }
 
 /* ── vícedotyková gesta: dva prsty = přiblížení / oddálení a posun ── */
@@ -3281,10 +3300,8 @@ function bindUi(){
     $('#btnMagnet').setAttribute('aria-pressed', S.magnet?'true':'false');
     toast(S.magnet ? 'Magnet zapnutý' : 'Magnet vypnutý');
   };
-  const stageCenter = () => { const r = svg().getBoundingClientRect();
-    return { x: r.left + r.width/2, y: r.top + r.height/2 }; };
-  $('#btnZoomIn').onclick  = () => { const c = stageCenter(); zoomAt(c.x, c.y, S.view.zoom*1.25); };
-  $('#btnZoomOut').onclick = () => { const c = stageCenter(); zoomAt(c.x, c.y, S.view.zoom/1.25); };
+  $('#btnZoomIn').onclick  = () => zoomBy(1.25);
+  $('#btnZoomOut').onclick = () => zoomBy(1/1.25);
   $('#btnFit').onclick = () => fitView();
   $('#btnSave').onclick = () => { save(); exportJson(); toast('Uloženo do souboru JSON'); };
   $('#btnPdf').onclick = doExportPdf;
@@ -3310,7 +3327,9 @@ function bindUi(){
   s.addEventListener('pointerup', ptrUp);
   s.addEventListener('pointercancel', ptrUp);
   s.addEventListener('dblclick', onDblClick);
-  s.addEventListener('wheel', onWheel, { passive:false });
+  /* wheel se chytá na celém okně, aby pinch/ctrl+kolečko kdekoli
+     zoomoval výkres a ne celou stránku (viz onWheel) */
+  window.addEventListener('wheel', onWheel, { passive:false });
   s.addEventListener('contextmenu', ev => ev.preventDefault());
 
   window.addEventListener('keydown', ev => {
@@ -3322,6 +3341,10 @@ function bindUi(){
     if(meta && k==='s'){ ev.preventDefault(); save(); exportJson(); return; }
     if(meta && k==='p'){ ev.preventDefault(); doExportPdf(); return; }
     if(meta && k==='d'){ ev.preventDefault(); duplicateSelection(); return; }
+    /* Zoom výkresu klávesnicí – aby se nezvětšovala celá stránka (a s ní
+       panel vpravo a lišty), které pak nejdou oddálit. */
+    if(meta && (k==='+' || k==='=')){ ev.preventDefault(); zoomBy(1.25); return; }
+    if(meta && k==='-'){ ev.preventDefault(); zoomBy(1/1.25); return; }
     if(ev.key==='Delete' || ev.key==='Backspace'){ ev.preventDefault(); deleteSelection(); return; }
     if(ev.key==='Enter'){ if(S.draft?.kind==='wall'){ ev.preventDefault(); finishWall(false); } return; }
     if(ev.key==='Backspace' && S.draft?.kind==='wall'){ ev.preventDefault(); undoWallPoint(); return; }
