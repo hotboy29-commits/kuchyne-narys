@@ -416,6 +416,7 @@ body{
       <button class="tb" id="btnImport" title="Načíst ze souboru JSON">↥<span class="lb">Načíst</span></button>
       <button class="tb" id="btnSave" title="Uložit do souboru JSON">↧<span class="lb">Uložit</span></button>
       <button class="tb" id="btn3d" title="Export 3D modelu (OBJ+MTL, ZIP) – rozměry 1:1">🧊<span class="lb">3D</span></button>
+      <button class="tb" id="btnPng" title="3D pohledy jako PNG – připravený vstup pro AI vizualizaci (Nano Banana…)">🖼️<span class="lb">PNG</span></button>
       <button class="tb primary" id="btnPdf" title="Export do PDF">⎙<span class="lb">PDF</span></button>
     </div>
 
@@ -3019,12 +3020,12 @@ function elements3(sc, mats){
 }
 
 /* ── místnost: podlaha, strop, stěny s otvory oken ── */
-function room3(sc, mats){
+function room3(sc, mats, noCeil){
   const c = contentBBox({ skipGuides:true });
   if(!c) return;
   const P = B3D.pad;
   scBox(sc, c.x-P, c.y-P, c.x+c.w+P, c.y+c.h+P, 0, B3D.floorT, mats.floor);
-  scBox(sc, c.x-P, c.y-P, c.x+c.w+P, c.y+c.h+P, B3D.wallH, B3D.wallH+B3D.ceilT, mats.ceil);
+  if(!noCeil) scBox(sc, c.x-P, c.y-P, c.x+c.w+P, c.y+c.h+P, B3D.wallH, B3D.wallH+B3D.ceilT, mats.ceil);
   /* okna načtená podle zdi a úseku */
   const winsBy = {};
   for(const w of S.project.windows) winsBy[w.wallId+':'+w.seg] = winsBy[w.wallId+':'+w.seg] || [];
@@ -3078,27 +3079,22 @@ function room3(sc, mats){
 }
 
 /* ── sestavení OBJ + MTL ── */
-function buildObj3(){
+function buildScene3(noCeil){
   const sc = mkScene();
   const used = {};
-  const mats = {
-    wall:  '#ece8e0',
-    floor: '#d8d0c2',
-    ceil:  '#f6f4ef',
-    glass: '#bcd7e8',
-    counter:'#f0ede6'
-  };
-  mats.el = hex => { used[hex] = 1; return 'el_' + hex.replace('#',''); };
-
+  const mats = { wall:'#ece8e0', floor:'#d8d0c2', ceil:'#f6f4ef', glass:'#bcd7e8', counter:'#f0ede6' };
+  mats.el = hex => { used[hex]=1; return 'el_' + hex.replace('#',''); };
   elements3(sc, mats);
   counters3(sc);
-  room3(sc, mats);
-
+  room3(sc, mats, noCeil);
   const matList = Object.keys(used).map(h => ({ name:'el_'+h.replace('#',''), hex:h }));
   matList.push({ name:'wall', hex:mats.wall }, { name:'floor', hex:mats.floor },
                { name:'ceil', hex:mats.ceil }, { name:'glass', hex:mats.glass },
                { name:'counter', hex:mats.counter });
-
+  return { sc, matList };
+}
+function buildObj3(){
+  const { sc, matList } = buildScene3(false);
   let obj = '# 3D model z plánku (kuchyne-narys)\n# souradnice v metrech (plan x,y; -y = nahoru), Z nahoru\n';
   obj += '# meritko 1:1 k planku; materialy viz model.mtl\n';
   for(const v of sc.verts) obj += 'v ' + v.join(' ') + '\n';
@@ -3132,7 +3128,8 @@ function zipStore(files){
   const body = [], centr = [];
   let off = 0;
   for(const f of files){
-    const nb = [...enc.encode(f.name)], db = [...enc.encode(f.data)];
+    const nb = [...enc.encode(f.name)];
+    const db = (typeof f.data === 'string') ? [...enc.encode(f.data)] : [...f.data];
     const crc = crc32(new Uint8Array(db));
     body.push(...[80,75,3,4,20,0,0,0,0,0], ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...nb, ...db);
     centr.push(...[80,75,1,2,20,0,20,0,0,0,0,0], ...u32(crc), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off), ...nb);
@@ -3196,6 +3193,171 @@ function doExport3D(){
   }catch(err){
     console.error(err);
     toast('3D export selhal: ' + err.message);
+  }
+}
+
+/* ═══════════════ 3D POHLEDY → PNG (vstup pro AI vizualizaci, např. Nano Banana) ═══════
+   Vyrendruje z přesného 3D modelu plánku čisté obrázky BEZ popisků a kót:
+   pohled shora + dva izometrické + nízký boční. Stěny jsou průsvitné, aby bylo
+   vidět celou kuchyni v místnosti (okna jsou vidět jako zasklení). Vše je
+   neutrálně světlé – konečný styl pak určí prompt. Stáhne se ZIP s PNG a
+   šablonou promptu. */
+
+const PNG_VIEWS = [
+  { name:'1_shora',         az:0,   el:90, desc:'pohled shora (dispozice 1:1)' },
+  { name:'2_izometricky_A', az:45,  el:32, desc:'izometrický pohled A' },
+  { name:'3_izometricky_B', az:225, el:32, desc:'izometrický pohled B' },
+  { name:'4_nizky_bocni',   az:90,  el:14, desc:'nízký boční pohled' }
+];
+
+function hexToRgbArr(h){
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
+  if(!m) return [0.8,0.78,0.75];
+  const n = parseInt(m[1], 16);
+  return [(n>>16)&255, (n>>8)&255, n&255].map(v => v/255);
+}
+function nrm3(v){ const L = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0]/L, v[1]/L, v[2]/L]; }
+
+function pngStyle(mat){
+  if(mat === 'wall')    return { c:[0.86,0.84,0.80], a:0.45 };
+  if(mat === 'glass')   return { c:[0.68,0.80,0.90], a:0.85 };
+  if(mat === 'floor')   return { c:[0.93,0.91,0.88], a:1 };
+  if(mat === 'counter') return { c:[0.90,0.88,0.84], a:1 };
+  if(mat === 'ceil')    return { c:[0.95,0.94,0.92], a:0.15 };
+  return { c:[0.78,0.79,0.83], a:1 };              // skříně – neutrální světle šedá
+}
+
+/* Nakreslí jeden pohled scény do canvasu a vrátí base64 PNG (bez hlavičky). */
+function renderPngView(sc, az, el){
+  const W = 1500, H = 1500;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+
+  const E = el * Math.PI/180, A = az * Math.PI/180;
+  /* směr od počátku ke kameře */
+  const d = [Math.cos(E)*Math.sin(A), Math.cos(E)*Math.cos(A), Math.sin(E)];
+  /* g = směr pohledu (od kamery k počátku) */
+  const g = [-d[0], -d[1], -d[2]];
+  let right, upv;
+  if(el > 89){ right = [1,0,0]; upv = [0,1,0]; }        // pohled shora, sever nahoru
+  else {
+    right = nrm3(cross3([0,0,1], g));                   // doprava na obrazovce
+    if(!(Math.abs(right[0])+Math.abs(right[1])+Math.abs(right[2]) > 0.5)) right = [1,0,0];
+    upv = nrm3(cross3(g, right));                       // nahoru na obrazovce
+  }
+
+  /* plochy + světelný stín (přibližný 3D dojem) */
+  const light = nrm3([0.5, 0.3, 0.8]);
+  const polys = [];
+  for(const f of sc.facs){
+    const pts = f.v.map(i => sc.verts[i]);
+    if(pts.length < 3) continue;
+    const n0 = nrm3(cross3(vec3(pts[0], pts[1]), vec3(pts[0], pts[2])));
+    const bright = 0.58 + 0.42 * Math.abs(dot3(n0, light));
+    let dep = 0; for(const p of pts) dep += dot3(p, d); dep /= pts.length;
+    polys.push({ pts, dep, bright, mat:f.mat });
+  }
+  polys.sort((a,b) => a.dep - b.dep);                   // daleké nejdřív
+
+  /* rozsah pro vystředění */
+  let x0=Infinity, x1=-Infinity, y0=Infinity, y1=-Infinity;
+  for(const p of polys) for(const q of p.pts){
+    const X = dot3(q, right), Y = dot3(q, upv);
+    if(X<x0)x0=X; if(X>x1)x1=X; if(Y<y0)y0=Y; if(Y>y1)y1=Y;
+  }
+  if(!isFinite(x0)) return '';
+  const mrg = 90;
+  const scale = Math.min((W-2*mrg)/(x1-x0 || 1), (H-2*mrg)/(y1-y0 || 1));
+  const mx = (x0+x1)/2, my = (y0+y1)/2;
+  const px = p => (dot3(p, right) - mx) * scale + W/2;
+  const py = p => H/2 - (dot3(p, upv)   - my) * scale;
+
+  for(const poly of polys){
+    const st = pngStyle(poly.mat);
+    const r = Math.round(clamp(st.c[0]*poly.bright,0,1)*255);
+    const gg = Math.round(clamp(st.c[1]*poly.bright,0,1)*255);
+    const b = Math.round(clamp(st.c[2]*poly.bright,0,1)*255);
+    ctx.beginPath();
+    for(let i=0;i<poly.pts.length;i++){
+      const X = px(poly.pts[i]), Y = py(poly.pts[i]);
+      if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(' + r + ',' + gg + ',' + b + ',' + st.a + ')';
+    ctx.fill();
+  }
+  return cv.toDataURL('image/png').split(',')[1] || '';
+}
+
+function b64ToBytes(b64){
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+function doExportPng(){
+  if((!S.project.walls.length) && (!S.project.elements.length)){
+    toast('Nejdřív nakresli místnost a skříně'); return;
+  }
+  try{
+    const { sc } = buildScene3(true);                   // bez stropu, ať je vidět dovnitř
+    const files = [];
+    const lines = [
+      'Sada čistých 3D pohledů z přesného plánku (rozměry a rozmístění odpovídají skutečnosti,',
+      'barvy jsou neutrální – konečný vzhled určí prompt).',
+      '',
+      'JAK POUŽÍT S AI (např. Nano Banana v aplikaci Google / Gemini):',
+      '1) Nahraj VŠECHNY čtyři PNG najednou jako referenci (model jim rozumí líp než jednomu).',
+      '2) Vlož prompt níže (klidně ho uprav podle svého vkusu).',
+      '3) Řekni AI, ať zachová přesně počet, velikosti a umístění skříněk, oken a spotřebičů',
+      '   z obrázku a jen je „oblékne“ do realistických materiálů a detailů.',
+      '',
+      'PROMPT (CZ) – zkopíruj:',
+      '„Na obrázcích je přesný 3D model kuchyně podle plánu. Přemaluj ho na fotorealistickou',
+      'vizualizaci. Zachovej přesně rozmístění a velikosti skříněk, sloupů, dřezu, myčky,',
+      'varné desky, trouby, lednice a oken. Styl: světlá kuchyně (málo denního světla),',
+      'matná smetanově bílá čela, tenké mosazné úchytky, pracovní deska z bílého křemene',
+      's béžovou žilnatinou, béžovo-bílé metro dlaždice, světlá dubová podlaha, doplňky ve',
+      'světlém dubu a béžové keramice, rostlina. Žádné horní skříňky na stěně s oknem.',
+      'Teplé bodové osvětlení stropu, LED pásek pod horními skříňkami. Bez textů a log.“',
+      '',
+      'PROMPT (EN) – zkopíruj:',
+      '“The images show an accurate 3D model of a kitchen layout. Repaint it into a',
+      'photorealistic visualization. Keep the exact placement and sizes of cabinets,',
+      'columns, sink, dishwasher, cooktop, oven, fridge and windows. Style: bright',
+      'kitchen (little daylight), matte cream-white fronts, thin brass handles, white',
+      'quartz countertop with beige veining, beige-white metro tiles, light oak floor,',
+      'light oak and beige ceramic decor, one plant. No wall cabinets on the window',
+      'wall. Warm ceiling spotlights, LED strip under wall cabinets. No text or logos.”',
+      '',
+      'TIPY:',
+      '– Když výsledek „přidá/ubírá“ skříňku nebo okno, zkus prompt zdůraznit, ať nic',
+      '  nepřidává a počty nemění.',
+      '– Pro více úhlů nech AI vygenerovat pokračování a u každého zopakuj stejný popis.'
+    ].join('\n');
+
+    for(const v of PNG_VIEWS){
+      const b64 = renderPngView(sc, v.az, v.el);
+      files.push({ name: v.name + '.png', data: b64ToBytes(b64) });
+    }
+    files.push({ name:'prompt.txt', data: lines });
+
+    const bytes = zipStore(files);
+    const blob = new Blob([bytes], { type:'application/zip' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    const base = (S.project.info.name || 'narys').replace(/[^\w\dáčďéěíňóřšťúůýž -]/gi,'').trim() || 'narys';
+    a.download = base + '_3D_pohledy.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    toast('Staženo: 4 PNG pohledy + prompt (ZIP) – připraveno pro AI vizualizaci');
+  }catch(err){
+    console.error(err);
+    toast('Export pohledů selhal: ' + err.message);
   }
 }
 
@@ -3646,6 +3808,7 @@ function bindUi(){
   $('#btnSave').onclick = () => { save(); exportJson(); toast('Uloženo do souboru JSON'); };
   $('#btnPdf').onclick = doExportPdf;
   $('#btn3d').onclick = doExport3D;
+  $('#btnPng').onclick = doExportPng;
   $('#btnImport').onclick = () => $('#fileInput').click();
   $('#fileInput').onchange = ev => {
     const f = ev.target.files[0]; if(!f) return;
