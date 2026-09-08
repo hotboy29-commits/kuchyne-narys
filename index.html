@@ -388,6 +388,8 @@ body{
 .kindseg button + .kindseg button{border-left:1px solid var(--line)}
 .kindseg button.on{background:#2563eb;color:#fff}
 
+.group .tb.vseg{ min-width:38px; padding:0 7px; font-size:12px; }
+
 </style>
 </head>
 <body>
@@ -414,6 +416,12 @@ body{
       <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
+    </div>
+
+    <div class="group" title="Zobrazená vrstva výkresu – sloupy jsou v obou">
+      <button class="tb vseg" id="btnLayerAll" aria-pressed="true" title="Zobrazit vše (DS + HS + sloupy)">Vše</button>
+      <button class="tb vseg" id="btnLayerDS" aria-pressed="false" title="Vrstva DS – spodní skříňky + sloupy">DS</button>
+      <button class="tb vseg" id="btnLayerHS" aria-pressed="false" title="Vrstva HS – horní skříňky + sloupy">HS</button>
     </div>
 
     <div class="group">
@@ -570,6 +578,7 @@ const S = {
   showGrid: true,
   showDims: true,
   showDimInst: true,      // kóty instalací (voda/elektro…) – barva = typ značky
+  layer: 'all',            // zobrazená vrstva: all | DS | HS
   guides: [],                // dočasná magnetická vodítka během tažení
   draft: null,               // rozkreslená zeď / obdélník / odstup
   measure: null
@@ -874,6 +883,7 @@ function contentBBox(opts){
     for(const p of w.pts){ x0=Math.min(x0,p.x-h); y0=Math.min(y0,p.y-h); x1=Math.max(x1,p.x+h); y1=Math.max(y1,p.y+h); any=true; }
   }
   for(const e of S.project.elements){
+    if(opts && opts.filter && !opts.filter(e)) continue;
     x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); any=true;
   }
   if(!skipGuides) for(const g of S.project.guides){
@@ -1043,7 +1053,7 @@ function wallsMarkup(){
 
 function elementsMarkup(){
   const z = S.view.zoom;
-  return S.project.elements.map(e => {
+  return S.project.elements.filter(layerShowsEl).map(e => {
     const sel = S.sel?.kind==='el' && S.sel.id===e.id;
     const fs = clamp(Math.min(e.w, e.d)/5, 90, 320);
     const c = e.color || COLORS[0];
@@ -1443,6 +1453,7 @@ function snapCandidates(excludeId){
   }
   for(const e of S.project.elements){
     if(e.id === excludeId) continue;
+    if(!layerShowsEl(e)) continue;
     out.push({ axis:'x', pos:e.x,      from:e.y, to:e.y+e.d, kind:'el', id:e.id });
     out.push({ axis:'x', pos:e.x+e.w,  from:e.y, to:e.y+e.d, kind:'el', id:e.id });
     out.push({ axis:'y', pos:e.y,      from:e.x, to:e.x+e.w, kind:'el', id:e.id });
@@ -1803,7 +1814,7 @@ function onUp(ev){
     const r = normRect(S.draft.a, S.draft.b);
     S.draft = null;
     if(r.w >= MIN_SIZE && r.h >= MIN_SIZE){
-      const e = addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:DFLT_EL_D });
+      const e = finishNewElementKind(addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:DFLT_EL_D }));
       select('el', e.id);
       pushHistory();
       toast('Zadej přesné rozměry v panelu vpravo');
@@ -2195,7 +2206,7 @@ function addElement(o={}){
 /** Krátké klepnutí nástrojem Obdélník: vloží výchozí 600 × 510 pod prst
    a přichytí ho k nejbližšímu cíli v dosahu magnetu. */
 function addElementAtPoint(wx, wy, wmm=600, dmm=DFLT_EL_D){
-  const e = addElement({ x:R(wx - wmm/2), y:R(wy - dmm/2), w:wmm, d:dmm });
+  const e = finishNewElementKind(addElement({ x:R(wx - wmm/2), y:R(wy - dmm/2), w:wmm, d:dmm }));
   const r = computeSnap(e, e.x, e.y, 0, 0);
   e.x = R(r.x); e.y = R(r.y);
   return e;
@@ -2242,7 +2253,12 @@ const BOK_FRONT_DFLT = 20; // přesah před čelo (přes dvířka) [mm]
 
 function bokCfg(e){ const b = e && e.bok; return (b && b.side) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
-function bokBack(e){ const b = bokCfg(e); return b && b.back != null ? +b.back : BOK_BACK_DFLT; }
+function bokBack(e){
+  const b = bokCfg(e);
+  if(b && b.back != null) return +b.back;
+  /* horní skříň visí u zdi → bok+ začíná na líci zdi (odskok 0); spodní mají 50 mm */
+  return elKind3(e)==='upper' ? 0 : BOK_BACK_DFLT;
+}
 function bokFront(e){ const b = bokCfg(e); return b && b.front != null ? +b.front : BOK_FRONT_DFLT; }
 function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokBack(e) + bokFront(e); }
 
@@ -2278,6 +2294,7 @@ function bokMarkup(){
   const z = S.view.zoom;
   let out = '';
   for(const e of S.project.elements){
+    if(!layerShowsEl(e)) continue;
     const r = bokRect(e); if(!r) continue;
     const thin = bokW(e);
     out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
@@ -2297,9 +2314,10 @@ function bokMarkup(){
 }
 
 /* Kreslení boků do PDF (world souřadnice uvnitř <g scale(k)>). */
-function boksPrintSvg(sw){
+function boksPrintSvg(sw, filter){
   let out = '';
   for(const e of S.project.elements){
+    if(filter && !filter(e)) continue;
     const r = bokRect(e); if(!r) continue;
     out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
       fill="#cbd5e1aa" stroke="#334155" stroke-width="${sw(0.22)}" stroke-dasharray="${sw(2)} ${sw(1.4)}"/>`;
@@ -2510,14 +2528,14 @@ function renderInspector(){
           <label class="fld"><span>Tloušťka (mm)</span><input id="iBokW" type="number" min="5" max="60" step="1" value="${e.bok?bokW(e):BOK_W_DFLT}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
-          <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokFront" type="number" min="0" max="500" step="1" value="${e.bok?bokFront(e):BOK_FRONT_DFLT}"></label>
-          <label class="fld"><span>Ke zdi za skříní (mm)</span><input id="iBokBack" type="number" min="0" max="500" step="1" value="${e.bok?bokBack(e):BOK_BACK_DFLT}"></label>
+          <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokFront" type="number" min="0" max="500" step="1" value="${bokFront(e)}"></label>
+          <label class="fld"><span>Ke zdi za skříní (mm)</span><input id="iBokBack" type="number" min="0" max="500" step="1" value="${bokBack(e)}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Hloubka boku+</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w)+bokBack(e)+bokFront(e))} mm" disabled></label>
           <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokCfg(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
         </div>
-        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Hloubka = hloubka skříně + přesah před čelo + odskok ke zdi (510 + 20 + 50 = 580 mm).</p>
+        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Hloubka = skříň + přesah před čelo + odskok ke zdi: u DS 510 + 20 + 50 = 580 mm; u HS (visí na zdi) 320 + 20 + 0 = 340 mm.</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -2566,7 +2584,7 @@ function renderInspector(){
         e.bok.side = v;
         e.bok.w = clamp(+$('#iBokW').value || BOK_W_DFLT, 5, 60);
         e.bok.front = clamp(+$('#iBokFront').value || BOK_FRONT_DFLT, 0, 500);
-        e.bok.back = clamp(+$('#iBokBack').value || BOK_BACK_DFLT, 0, 500);
+        e.bok.back = clamp(+$('#iBokBack').value || (elKind3(e)==='upper' ? 0 : BOK_BACK_DFLT), 0, 500);
       } else {
         delete e.bok;
       }
@@ -2894,7 +2912,7 @@ const B3D = {
   pad:      600,    // přesah podlahy/stropu přes obrys [mm]
   sill:     950,    // parapet okna [mm]
   winTop:   2450,   // horní hrana okna [mm]
-  baseH:    850,    // spodní skříň vč. soklu [mm]
+  baseH:    720,    // spodní skříň (bok DS = 720 × 510) [mm]
   upperH:   710,    // horní skříň [mm]
   upperBot: 1400,   // spodní hrana horních skříněk [mm]
   colH:     2100,   // sloup [mm]
@@ -2995,11 +3013,62 @@ function setElKind3(e, kind){
     else if(f==='sever'){ e.y = R(face - EL_WALL_GAP - e.d); }
     else if(f==='východ'){ e.x = R(face + EL_WALL_GAP); }
     else                { e.x = R(face - EL_WALL_GAP - e.w); }
+    e.h = B3D.baseH;
   }
+  /* bok+ se přizpůsobí druhu: HS u zdi (odskok 0), DS s odskokem 50 */
+  if(e.bok && e.bok.side) e.bok.back = kind==='upper' ? 0 : BOK_BACK_DFLT;
   pushHistory(); render();
   toast(kind==='upper'
     ? 'Horní skříň: u zdi, hloubka ' + UP_D_DFLT + ' mm, výška ' + UP_H_DFLT + ' mm'
     : 'Spodní skříň: zadní hrana ' + EL_WALL_GAP + ' mm od zdi');
+}
+
+/* ── VRSTVY DS / HS ─────────────────────────────────────────────────────
+   Sloupy (lednice/trouba…) se zobrazují v OBOU vrstvách; DS vrstva = spodní
+   skříňky + sloupy, HS vrstva = horní skříňky + sloupy. */
+function layerShowsEl(e){
+  if(S.layer === 'all') return true;
+  const k = elKind3(e);
+  if(S.layer === 'DS') return k === 'base' || k === 'column';
+  if(S.layer === 'HS') return k === 'upper' || k === 'column';
+  return true;
+}
+function updLayerUI(){
+  for(const l of ['all','DS','HS']){
+    const b = document.getElementById('btnLayer' + l);
+    if(b) b.setAttribute('aria-pressed', S.layer===l ? 'true':'false');
+  }
+}
+function setLayer(l){
+  if(!['all','DS','HS'].includes(l)) l = 'all';
+  S.layer = l;
+  if(S.sel && S.sel.kind==='el'){
+    const ee = getEl(S.sel.id);
+    if(ee && !layerShowsEl(ee)) S.sel = null;
+  }
+  updLayerUI();
+  render();
+  toast(l==='all' ? 'Zobrazeno vše (DS + HS + sloupy)'
+     : l==='DS'  ? 'Vrstva DS: spodní skříňky + sloupy'
+     :            'Vrstva HS: horní skříňky + sloupy');
+}
+/* Nový prvek nakreslený ve vrstvě HS je rovnou HORNÍ skříň: přisune se ke
+   zdi, hloubka 320, výška 710. */
+function finishNewElementKind(e){
+  if(S.layer === 'HS'){
+    e.kind = 'upper'; e.h = UP_H_DFLT;
+    const f = e.front || 'jih';
+    const face = wallFaceBehind(e);
+    if(face != null){
+      if(f==='jih')        { e.y = R(face); e.d = UP_D_DFLT; }
+      else if(f==='sever') { e.d = UP_D_DFLT; e.y = R(face - UP_D_DFLT); }
+      else if(f==='východ'){ e.x = R(face); e.w = UP_D_DFLT; }
+      else                 { e.w = UP_D_DFLT; e.x = R(face - UP_D_DFLT); }
+    } else {
+      e.d = Math.min(e.d, UP_D_DFLT);
+    }
+  }
+  return e;
 }
 
 /* ── zjednodušená scéna: vrcholy + plochy (materiál po ploše) ── */
@@ -3511,24 +3580,37 @@ function buildPrint(){
       <div class="pr-block"><h3>Adresa realizace</h3><p>${esc(info.address || '—')}</p></div>
       <div class="pr-block"><h3>Datum</h3><p>${dateCs}\nFormát ${info.paper} (${P.w} × ${P.h} mm)</p></div>
       <div class="pr-block"><h3>Rozsah</h3><p>${els.length} prvků · ${p.walls.length} zdí · ${p.guides.length} odstupů\ncelková šířka prvků ${(totalLen/1000).toFixed(2)} m</p></div>
-      <div class="pr-block"><h3>Podklady</h3><p>Půdorys s kótami v mm\nVýpis prvků na další straně</p></div>
+      <div class="pr-block"><h3>Podklady</h3><p>Půdorys DS a HS s kótami v mm\nVýpis prvků na další straně</p></div>
     </div>
     ${info.notes ? `<div class="pr-notes"><h3>Poznámky</h3><p>${esc(info.notes)}</p></div>` : ''}
     <div class="pr-cover-foot"><span>${esc(info.name || 'Název projektu')}</span><span>${dateCs}</span></div>
   </section>`);
 
-  /* 2) výkres */
-  pages.push(`
+  /* 2) výkresy – DS a HS zvlášť (sloupy jsou v obou), aby se nepřekrývaly */
+  const winsAll = S.project.windows, symsAll = S.project.symbols;
+  const showList = !!(els.length || winsAll.length || symsAll.length);
+  const fDS = e => { const k = elKind3(e); return k==='base' || k==='column'; };
+  const fHS = e => { const k = elKind3(e); return k==='upper' || k==='column'; };
+  const showDS = els.some(fDS);
+  const showHS = els.some(fHS);
+  const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0);
+  let pg = 1;
+  const drawOne = (kicker, title, sub, filter, fname) => {
+    pg++;
+    pages.push(`
   <section class="pr-page">
     <div class="pr-head">
-      <div><span class="pr-kicker">Výkres 1</span><h2>Půdorys – ${esc(info.name || 'Název projektu')}</h2></div>
-      <div class="pr-meta">${esc(info.client || '')}<br>${dateCs} · Kóty v mm</div>
+      <div><span class="pr-kicker">${kicker}</span><h2>${title} – ${esc(info.name || 'Název projektu')}</h2></div>
+      <div class="pr-meta">${esc(info.client || '')}<br>${dateCs} · Kóty v mm · ${sub}</div>
     </div>
-    <div class="pr-drawing">${drawingSvg(P)}</div>
-    <div class="pr-legend">${legendHtml()}</div>
+    <div class="pr-drawing">${drawingSvg(P, { filter })}</div>
+    <div class="pr-legend">${legendHtml(filter)}</div>
     ${info.notes ? `<div class="pr-notes-inline"><b>Poznámky:</b> ${esc(info.notes)}</div>` : ''}
-    <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – půdorys</span><span>Strana 2 / ${2 + (els.length?1:0)}</span></div>
+    <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – ${fname}</span><span>Strana ${pg} / ${nPages}</span></div>
   </section>`);
+  };
+  if(showDS) drawOne('Výkres 1', 'Půdorys DS', 'spodní skříňky + sloupy', fDS, 'půdorys DS');
+  if(showHS) drawOne('Výkres 2', 'Půdorys HS', 'horní skříňky + sloupy', fHS, 'půdorys HS');
 
   /* 3) výpis prvků + oken + instalací */
   const wins = S.project.windows, syms = S.project.symbols;
@@ -3612,7 +3694,7 @@ function buildPrint(){
         }).join('')}</tbody>
       </table>` : ''}
       ${info.notes ? `<div class="pr-notes-inline" style="white-space:pre-wrap">${esc(info.notes)}</div>` : ''}
-      <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – výpis prvků</span><span>Strana 3 / 3</span></div>
+      <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – výpis prvků</span><span>Strana ${(++pg)} / ${nPages}</span></div>
     </section>`);
   }
 
@@ -3626,13 +3708,16 @@ function buildPrint(){
   $('#printRoot').innerHTML = pages.join('');
 }
 
-function legendHtml(){
-  const used = [...new Map(S.project.elements.map(e=>[e.name||'bez názvu', e])).values()];
+function legendHtml(filter){
+  const fEls = filter ? S.project.elements.filter(filter) : S.project.elements;
+  const used = [...new Map(fEls.map(e=>[e.name||'bez názvu', e])).values()];
   const symUsed = [...new Map(S.project.symbols.map(sm=>[sm.type, symType(sm.type)])).values()];
   return used.map(e => `<span class="lg"><i class="sw" style="background:${e.color}"></i>${esc(e.name||'bez názvu')}</span>`).join('')
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
+    + (fEls.some(e=>elKind3(e)==='upper')
+       ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px dashed #334155"></i>Horní skříň (HS) – přerušovaně</span>` : '')
     + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:#0d6b5f"></i>Šířka skříně – tyrkysová kóta pod čelem skříně</span>` : '')
     + `<span class="lg"><i class="sw" style="background:#334155;height:0;border-top:1.6px solid #334155"></i>Rozměr místnosti</span>`
     + (S.showDimInst ? `<span class="lg"><i class="sw" style="background:${symUsed[0]?.color || '#2563eb'};border-radius:50%"></i>Kóty instalací = barva značky (mimo výkres)</span>` : '');
@@ -3642,8 +3727,9 @@ function legendHtml(){
  * Výkres v souřadnicích PAPÍRU (mm). Tloušťky čar i písma jsou zadány v mm na
  * papíře a přepočteny přes měřítko k – proto nejsou „rozmazané“.
  */
-function drawingSvg(P){
-  const b = contentBBox({ skipGuides:true });
+function drawingSvg(P, opt){
+  const filter = (opt && opt.filter) || null;
+  const b = contentBBox({ skipGuides:true, filter });
   if(!b) return `<svg viewBox="0 0 ${P.w} ${P.h}"></svg>`;
   const M = 12;                                  // okraj [mm papíru]
   const iw = P.w - M*2, ih = P.h - M*2;
@@ -3669,8 +3755,9 @@ function drawingSvg(P){
   // okna ve zdech
   parts.push(windowsSvg(sw, false, 0.25));
 
-  // prvky – tenká linka, žádná výplň přes sousedy
+  // prvky – tenká linka, žádná výplň přes sousedy (jen prvky dané vrstvy)
   for(const e of S.project.elements){
+    if(filter && !filter(e)) continue;
     const upEl = elKind3(e)==='upper';
     parts.push(`<rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
       fill="${e.color}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
@@ -3694,7 +3781,7 @@ function drawingSvg(P){
   }
 
   // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
-  parts.push(boksPrintSvg(sw));
+  parts.push(boksPrintSvg(sw, filter));
 
   // značky instalací
   parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
@@ -3712,7 +3799,7 @@ function drawingSvg(P){
   const rcx = wbR ? wbR.x + wbR.w/2 : 0, rcy = wbR ? wbR.y + wbR.h/2 : 0;
   const OFF_EL = 360;                        // odsazení kóty od skříně [mm]
   for(const e of S.project.elements){
-    if(elKind3(e)==='upper') continue;      // horní skříňky nemají vlastní kótu (kopírují spodní řadu)
+    if(filter && !filter(e)) continue;
     const front = e.front || 'jih';
     const wF = elFrontW(e);
     if(wF < 40) continue;
@@ -3849,7 +3936,7 @@ function buildTools(){
       const wpt = screenToWorld(ev.clientX, ev.clientY);
       const e = addElementAtPoint(wpt.x, wpt.y);
       select('el', e.id); pushHistory();
-      toast('Obdélník 600 × 510 (š × hl) – uprav rozměry vpravo');
+      toast(S.layer==='HS' ? 'Horní skříň 600 × 320 (š × hl) u zdi – uprav rozměry vpravo' : 'Obdélník 600 × 510 (š × hl) – uprav rozměry vpravo');
       setTimeout(()=>$('#iW')?.focus(), 60);
     }
     downAt = null;
@@ -3889,6 +3976,9 @@ function bindUi(){
     $('#btnMagnet').setAttribute('aria-pressed', S.magnet?'true':'false');
     toast(S.magnet ? 'Magnet zapnutý' : 'Magnet vypnutý');
   };
+  $('#btnLayerAll').onclick = () => setLayer('all');
+  $('#btnLayerDS').onclick  = () => setLayer('DS');
+  $('#btnLayerHS').onclick  = () => setLayer('HS');
   $('#btnZoomIn').onclick  = () => zoomBy(1.25);
   $('#btnZoomOut').onclick = () => zoomBy(1/1.25);
   $('#btnFit').onclick = () => fitView();
