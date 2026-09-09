@@ -1138,8 +1138,11 @@ function draftMarkup(){
   }
   if(d.kind==='guide' || d.kind==='measure'){
     const col = d.kind==='guide' ? '#c2410c' : '#0d6b5f';
+    const ends = d.kind==='measure'
+      ? `<circle cx="${d.a.x}" cy="${d.a.y}" r="${7/z}" fill="#0d6b5f"/><circle cx="${d.b.x}" cy="${d.b.y}" r="${7/z}" fill="#0d6b5f"/>`
+      : '';
     return `<line x1="${d.a.x}" y1="${d.a.y}" x2="${d.b.x}" y2="${d.b.y}" stroke="${col}" stroke-width="${2/z}" stroke-dasharray="${12/z} ${8/z}"/>
-      <text x="${(d.a.x+d.b.x)/2}" y="${(d.a.y+d.b.y)/2 - 120/z}" text-anchor="middle" font-size="${clamp(220/z,120,420)}" font-weight="600" fill="${col}" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${60/z}px">${fmt(Math.hypot(d.b.x-d.a.x, d.b.y-d.a.y))}</text>`;
+      <text x="${(d.a.x+d.b.x)/2}" y="${(d.a.y+d.b.y)/2 - 120/z}" text-anchor="middle" font-size="${clamp(220/z,120,420)}" font-weight="600" fill="${col}" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${60/z}px">${fmt(Math.hypot(d.b.x-d.a.x, d.b.y-d.a.y))}</text>${ends}`;
   }
   return '';
 }
@@ -1496,13 +1499,22 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
     xo.push(b.x - e.x, b.x + b.w - e.x);
     yo.push(b.y - e.y, b.y + b.h - e.y);
   }
-  const axLo = nx + Math.min(...xo), axHi = nx + Math.max(...xo);
-  const ayLo = ny + Math.min(...yo), ayHi = ny + Math.max(...yo);
+  const xMin = Math.min(...xo), xMax = Math.max(...xo);
+  const yMin = Math.min(...yo), yMax = Math.max(...yo);
+  const axLo = nx + xMin, axHi = nx + xMax;
+  const ayLo = ny + yMin, ayHi = ny + yMax;
+  const cx = nx + (xMin + xMax)/2, cy = ny + (yMin + yMax)/2;
 
   for(const c of cands){
     if(c.axis === 'x'){
       if(c.to < ayLo - th || c.from > ayHi + th) continue;
-      for(const off of xo){
+      /* Ke ZDI se přikládá vždy NEJZAJÍCÍ hrana sestavy ve směru zdi:
+         je-li v tom směru bok+, přiloží se venkovní hrana boku+, ne korpus.
+         (K sousedům/vodítkům se pořád mohou přikládat obě hrany.) */
+      const offs = (c.kind === 'wall')
+        ? [ (c.pos < cx) ? xMin : xMax ]
+        : xo;
+      for(const off of offs){
         const d = c.pos - (nx + off);
         if(Math.abs(d) > th) continue;
         const cand = { d:Math.abs(d), nx: nx + d, c };
@@ -1511,7 +1523,10 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
       }
     } else {
       if(c.to < axLo - th || c.from > axHi + th) continue;
-      for(const off of yo){
+      const offs = (c.kind === 'wall')
+        ? [ (c.pos < cy) ? yMin : yMax ]
+        : yo;
+      for(const off of offs){
         const d = c.pos - (ny + off);
         if(Math.abs(d) > th) continue;
         const cand = { d:Math.abs(d), ny: ny + d, c };
@@ -1576,6 +1591,11 @@ function snapPoint(w, ortho=false){
       const d = Math.hypot(p.x-w.x, p.y-w.y);
       if(d <= th && d < best.d) best = { x:p.x, y:p.y, d };
     }
+    const bk = bokRect(el);
+    if(bk) for(const p of [{x:bk.x,y:bk.y},{x:bk.x+bk.w,y:bk.y},{x:bk.x,y:bk.y+bk.h},{x:bk.x+bk.w,y:bk.y+bk.h}]){
+      const d = Math.hypot(p.x-w.x, p.y-w.y);
+      if(d <= th && d < best.d) best = { x:p.x, y:p.y, d };
+    }
   }
   if(ortho && best.d === Infinity){
     best = { x: Math.round(w.x/GRID_MM)*GRID_MM, y: Math.round(w.y/GRID_MM)*GRID_MM, d:0 };
@@ -1585,6 +1605,62 @@ function snapPoint(w, ortho=false){
 
 function normRect(a,b){
   return { x:Math.min(a.x,b.x), y:Math.min(a.y,b.y), w:Math.abs(a.x-b.x), h:Math.abs(a.y-b.y) };
+}
+
+/** Přichycení bodu měření: chytá se na ROHY a HRANY skříní, boků+ a zdí
+    (hrany = kolmá vzdálenost k líci), takže naměříš skutečnou mezeru. */
+function measureSnapPoint(w){
+  if(!S.magnet) return { x:w.x, y:w.y };
+  const th = Math.max(S.snapMm, 45);
+  let best = { d:Infinity, x:w.x, y:w.y };
+  const chk = (x,y) => {
+    const d = Math.hypot(x-w.x, y-w.y);
+    if(d <= th && d < best.d) best = { d, x, y };
+  };
+  /* rohy zdí a prvků (i boků+) */
+  for(const wall of S.project.walls) for(const p of wall.pts) chk(p.x, p.y);
+  for(const e of S.project.elements){
+    if(!layerShowsEl(e)) continue;
+    chk(e.x,e.y); chk(e.x+e.w,e.y); chk(e.x,e.y+e.d); chk(e.x+e.w,e.y+e.d);
+    const b = bokRect(e);
+    if(b){ chk(b.x,b.y); chk(b.x+b.w,b.y); chk(b.x,b.y+b.h); chk(b.x+b.w,b.y+b.h); }
+  }
+  /* hrany: průmět na líce zdí a na hrany prvků/boků */
+  const foot = (sx,sy,ex,ey) => {
+    const dx=ex-sx, dy=ey-sy, L2=dx*dx+dy*dy;
+    if(L2 < 1) return;
+    let u = ((w.x-sx)*dx + (w.y-sy)*dy)/L2;
+    u = Math.max(0, Math.min(1, u));
+    const fx = sx+dx*u, fy = sy+dy*u;
+    const d = Math.hypot(w.x-fx, w.y-fy);
+    if(d <= th && d < best.d) best = { d, x:fx, y:fy };
+  };
+  for(const wall of S.project.walls){
+    const t = wall.t || WALL_T_DEFAULT, side = wallSide(wall);
+    for(const sg of wallSegments(wall)){
+      const n = segNormal(sg);
+      for(const offv of [0, t*side]){
+        foot(sg.a.x+n.nx*offv, sg.a.y+n.ny*offv, sg.b.x+n.nx*offv, sg.b.y+n.ny*offv);
+      }
+    }
+  }
+  for(const e of S.project.elements){
+    if(!layerShowsEl(e)) continue;
+    foot(e.x,e.y,e.x+e.w,e.y); foot(e.x+e.w,e.y,e.x+e.w,e.y+e.d);
+    foot(e.x+e.w,e.y+e.d,e.x,e.y+e.d); foot(e.x,e.y+e.d,e.x,e.y);
+    const b = bokRect(e);
+    if(b){
+      foot(b.x,b.y,b.x+b.w,b.y); foot(b.x+b.w,b.y,b.x+b.w,b.y+b.h);
+      foot(b.x+b.w,b.y+b.h,b.x,b.y+b.h); foot(b.x,b.y+b.h,b.x,b.y);
+    }
+  }
+  /* záloha: mřížka */
+  if(best.d === Infinity){
+    const gx = Math.round(w.x/GRID_MM)*GRID_MM, gy = Math.round(w.y/GRID_MM)*GRID_MM;
+    const d = Math.hypot(gx-w.x, gy-w.y);
+    if(d <= th) best = { d, x:gx, y:gy };
+  }
+  return { x:R(best.x), y:R(best.y) };
 }
 
 /* ─────────────────────────── 7. INTERAKCE ─────────────────────────── */
@@ -1620,8 +1696,9 @@ function onDown(ev){
     return;
   }
   if(S.tool==='measure'){
-    S.measure = { a:w, b:w };
-    S.draft = { kind:'measure', a:w, b:w };
+    const sp = measureSnapPoint(w);
+    S.measure = { a:sp, b:sp };
+    S.draft = { kind:'measure', a:{x:sp.x,y:sp.y}, b:{x:sp.x,y:sp.y} };
     drag = { mode:'measure' };
     return;
   }
@@ -1713,7 +1790,8 @@ function onMove(ev){
     return;
   }
   if(drag.mode==='rect' || drag.mode==='measure'){
-    S.draft.b = w; render(); return;
+    S.draft.b = (drag.mode==='measure') ? measureSnapPoint(w) : w;
+    render(); return;
   }
   if(drag.mode==='guide'){
     const s = snapPoint(w, true);
@@ -4023,7 +4101,7 @@ const HINTS = {
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
   sym:    'Dole vyber značku a klepej do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
-  measure:'Táhni pro změření vzdálenosti – nic se neukládá.'
+  measure:'Táhni pro změření vzdálenosti. Chytá se na rohy/hrany skříní, boků+ a zdí – naměříš skutečnou mezeru. Nic se neukládá.'
 };
 
 function toast(msg){
