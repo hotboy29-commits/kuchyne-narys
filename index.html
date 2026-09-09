@@ -1474,7 +1474,7 @@ function snapCandidates(excludeId){
     hlídáme skříň i bok společně, aby se bok+ nemohl zaříznout do zdi. */
 function assemblyRects(e){
   const rs = [{ x:e.x, y:e.y, w:e.w, d:e.d }];
-  const b = bokRect(e); if(b) rs.push({ x:b.x, y:b.y, w:b.w, d:b.d });
+  for(const b of bokRects(e)) rs.push({ x:b.x, y:b.y, w:b.w, d:b.d });
   return rs;
 }
 
@@ -1494,8 +1494,7 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
 
   /* Hrany sestavy relativně k (e.x, e.y): skříň [0,e.w]/[0,e.d] + bok+. */
   const xo = [0, e.w], yo = [0, e.d];
-  const b = bokRect(e);
-  if(b){
+  for(const b of bokRects(e)){
     xo.push(b.x - e.x, b.x + b.w - e.x);
     yo.push(b.y - e.y, b.y + b.h - e.y);
   }
@@ -1591,8 +1590,7 @@ function snapPoint(w, ortho=false){
       const d = Math.hypot(p.x-w.x, p.y-w.y);
       if(d <= th && d < best.d) best = { x:p.x, y:p.y, d };
     }
-    const bk = bokRect(el);
-    if(bk) for(const p of [{x:bk.x,y:bk.y},{x:bk.x+bk.w,y:bk.y},{x:bk.x,y:bk.y+bk.h},{x:bk.x+bk.w,y:bk.y+bk.h}]){
+    for(const bk of bokRects(el)) for(const p of [{x:bk.x,y:bk.y},{x:bk.x+bk.w,y:bk.y},{x:bk.x,y:bk.y+bk.h},{x:bk.x+bk.w,y:bk.y+bk.h}]){
       const d = Math.hypot(p.x-w.x, p.y-w.y);
       if(d <= th && d < best.d) best = { x:p.x, y:p.y, d };
     }
@@ -1622,8 +1620,7 @@ function measureSnapPoint(w){
   for(const e of S.project.elements){
     if(!layerShowsEl(e)) continue;
     chk(e.x,e.y); chk(e.x+e.w,e.y); chk(e.x,e.y+e.d); chk(e.x+e.w,e.y+e.d);
-    const b = bokRect(e);
-    if(b){ chk(b.x,b.y); chk(b.x+b.w,b.y); chk(b.x,b.y+b.h); chk(b.x+b.w,b.y+b.h); }
+    for(const b of bokRects(e)){ chk(b.x,b.y); chk(b.x+b.w,b.y); chk(b.x,b.y+b.h); chk(b.x+b.w,b.y+b.h); }
   }
   /* hrany: průmět na líce zdí a na hrany prvků/boků */
   const foot = (sx,sy,ex,ey) => {
@@ -1648,8 +1645,7 @@ function measureSnapPoint(w){
     if(!layerShowsEl(e)) continue;
     foot(e.x,e.y,e.x+e.w,e.y); foot(e.x+e.w,e.y,e.x+e.w,e.y+e.d);
     foot(e.x+e.w,e.y+e.d,e.x,e.y+e.d); foot(e.x,e.y+e.d,e.x,e.y);
-    const b = bokRect(e);
-    if(b){
+    for(const b of bokRects(e)){
       foot(b.x,b.y,b.x+b.w,b.y); foot(b.x+b.w,b.y,b.x+b.w,b.y+b.h);
       foot(b.x+b.w,b.y+b.h,b.x,b.y+b.h); foot(b.x,b.y+b.h,b.x,b.y);
     }
@@ -2335,7 +2331,18 @@ const BOK_H_DS = 900;      // výška boku+ u DS [mm] = sokl 150 + skříň 720 
 const BOK_H_HS = 750;      // výška boku+ u HS [mm]
 // Pozn.: hloubka boku+ = hloubka skříně + 50 (ke zdi) + 20 (před čelo) = 510+70 = 580 mm
 
-function bokCfg(e){ const b = e && e.bok; return (b && b.side) ? b : null; }
+function bokSides(e){
+  /* Které strany mají bok+: {L, R}. Starší uložení (side:'L'/'R') se přečte. */
+  const b = e && e.bok; const o = { L:false, R:false };
+  if(!b) return o;
+  if(b.sides){ o.L = !!b.sides.L; o.R = !!b.sides.R; return o; }
+  if(b.side === 'L') o.L = true; else if(b.side === 'R') o.R = true;
+  if(b.L) o.L = true; if(b.R) o.R = true;
+  return o;
+}
+function bokAny(e){ const sd = bokSides(e); return sd.L || sd.R; }
+function bokHas(e, side){ return !!bokSides(e)[side]; }
+function bokCfg(e){ const b = e && e.bok; return b && bokAny(e) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
 function bokBack(e){
   const b = bokCfg(e);
@@ -2352,17 +2359,12 @@ function bokH(e){
   if(k==='column') return elH3(e);
   return BOK_H_DS;
 }
-
-/* Obdélník boku ve world souřadnicích, nebo null. Strana L/R = levá/pravá,
-   když se na čelo díváš zepředu (z místnosti). Přepočte se při otočení.
-   Po délce (do hloubky) bok+ přesahuje skříň: vzadu o BOK_BACK (ke zdi)
-   a vepředu o BOK_FRONT (přes dvířka). */
-function bokRect(e){
-  const b = bokCfg(e); if(!b) return null;
+/* Obdélník boku+ na zadané straně (L/R „při pohledu na čelo“). */
+function bokRectFor(e, side){
   const W = bokW(e), back = bokBack(e), front = bokFront(e);
   const f = e.front || 'jih';
   const depth = isHorizFront(f) ? e.d : e.w;
-  const L = b.side === 'L';
+  const L = side === 'L';
   let x, y, w, h;
   if(f === 'jih'){            // čelo dole, zadní hrana nahoře
     x = L ? e.x - W : e.x + e.w;
@@ -2379,26 +2381,33 @@ function bokRect(e){
   }
   return { x, y, w, h };
 }
-
+/* Obdélníky všech nakonfigurovaných boků+ dané skříně. */
+function bokRects(e){
+  const sd = bokSides(e), out = [];
+  if(sd.L) out.push(bokRectFor(e, 'L'));
+  if(sd.R) out.push(bokRectFor(e, 'R'));
+  return out;
+}
 /* Kreslení boků na plátně (obrazovka): tenký pruh u konce skříně. */
 function bokMarkup(){
   const z = S.view.zoom;
   let out = '';
   for(const e of S.project.elements){
     if(!layerShowsEl(e)) continue;
-    const r = bokRect(e); if(!r) continue;
     const thin = bokW(e);
-    out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
-      fill="#cbd5e199" stroke="#475569" stroke-width="${1.6/z}" stroke-dasharray="${7/z} ${5/z}"/>`;
-    /* popisek „Bok+“ jen když je panel na obrazovce dostatečně dlouhý */
-    if(Math.max(r.w, r.h) * z > 40 && Math.min(r.w, r.h) * z > 4){
-      const fs = clamp(thin * 1.05, 13, 60);
-      const v = r.h > r.w;                      // svislý pruh → text na výšku
-      const tx = R(r.x + r.w/2), ty = R(r.y + r.h/2);
-      const rot = v ? ` transform="rotate(-90 ${tx} ${ty})"` : '';
-      out += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle"${rot}
-        font-size="${fs}" font-weight="700" fill="#334155"
-        style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}px">Bok+ ${thin}</text>`;
+    for(const r of bokRects(e)){
+      out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
+        fill="#cbd5e199" stroke="#475569" stroke-width="${1.6/z}" stroke-dasharray="${7/z} ${5/z}"/>`;
+      /* popisek „Bok+“ jen když je panel na obrazovce dostatečně dlouhý */
+      if(Math.max(r.w, r.h) * z > 40 && Math.min(r.w, r.h) * z > 4){
+        const fs = clamp(thin * 1.05, 13, 60);
+        const v = r.h > r.w;                      // svislý pruh → text na výšku
+        const tx = R(r.x + r.w/2), ty = R(r.y + r.h/2);
+        const rot = v ? ` transform="rotate(-90 ${tx} ${ty})"` : '';
+        out += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle"${rot}
+          font-size="${fs}" font-weight="700" fill="#334155"
+          style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}px">Bok+ ${thin}</text>`;
+      }
     }
   }
   return out;
@@ -2409,9 +2418,10 @@ function boksPrintSvg(sw, filter){
   let out = '';
   for(const e of S.project.elements){
     if(filter && !filter(e)) continue;
-    const r = bokRect(e); if(!r) continue;
-    out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
-      fill="#cbd5e1aa" stroke="#334155" stroke-width="${sw(0.22)}" stroke-dasharray="${sw(2)} ${sw(1.4)}"/>`;
+    for(const r of bokRects(e)){
+      out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
+        fill="#cbd5e1aa" stroke="#334155" stroke-width="${sw(0.22)}" stroke-dasharray="${sw(2)} ${sw(1.4)}"/>`;
+    }
   }
   return out;
 }
@@ -2447,8 +2457,7 @@ function snapToWall(){
   const saved = S.snapMm;
   S.snapMm = 100000;
   const xs = [e.x, e.x+e.w], ys = [e.y, e.y+e.d];
-  const b = bokRect(e);
-  if(b){ xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h); }
+  for(const b of bokRects(e)){ xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h); }
   let best = null;
   for(const c of snapCandidates(e.id)){
     if(c.kind !== 'wall') continue;
@@ -2607,26 +2616,26 @@ function renderInspector(){
         <p class="hint">${elKind3(e)==='column' ? 'Sloup – druh podle názvu (lednice/trouba). Kliknutím na Spodní/Horní ho můžeš změnit.':(elKind3(e)==='upper'?'Horní skříň: visí na zdi, hloubka 320 mm, výška 710 mm; ve výkresu je přerušovaná.':'Přepni na „Horní“ a skříň se sama přisune ke zdi (hloubka 320, výška 710) – ve výkresu bude přerušovaná.' )}</p>
       </div>
       <div class="insp-sec">
-        <h4>Bok+ (boční panel)</h4>
+        <h4>Bok+ (boční panely)</h4>
         <div class="row2">
-          <label class="fld"><span>Umístění</span>
-            <select id="iBokSide">
-              <option value="" ${e.bok&&e.bok.side?'':'selected'}>— bez boku —</option>
-              <option value="L" ${e.bok&&e.bok.side==='L'?'selected':''}>vlevo (při pohledu na čelo)</option>
-              <option value="R" ${e.bok&&e.bok.side==='R'?'selected':''}>vpravo (při pohledu na čelo)</option>
-            </select>
+          <label class="fld"><span>Strana (při pohledu na čelo)</span>
+            <div class="kindseg">
+              <button type="button" id="iBokL" class="${bokHas(e,'L')?'on':''}">Vlevo</button>
+              <button type="button" id="iBokR" class="${bokHas(e,'R')?'on':''}">Vpravo</button>
+            </div>
           </label>
           <label class="fld"><span>Tloušťka (mm)</span><input id="iBokW" type="number" min="5" max="60" step="1" value="${e.bok?bokW(e):BOK_W_DFLT}"></label>
         </div>
+        <p class="hint">Můžeš zapnout obě strany najednou. Vypni obě = bez boku+.</p>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokFront" type="number" min="0" max="500" step="1" value="${bokFront(e)}"></label>
           <label class="fld"><span>Ke zdi za skříní (mm)</span><input id="iBokBack" type="number" min="0" max="500" step="1" value="${bokBack(e)}"></label>
         </div>
         <div class="row2" style="margin-top:8px">
-          <label class="fld"><span>Hloubka boku+</span><input type="text" value="${fmt(bokCfg(e)?bokDepthOf(e):(isHorizFront(e.front||'jih')?e.d:e.w)+bokBack(e)+bokFront(e))} mm" disabled></label>
-          <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokCfg(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
+          <label class="fld"><span>Hloubka boku+</span><input type="text" value="${bokAny(e)?(fmt(bokDepthOf(e))+' mm'):'—'}" disabled></label>
+          <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokAny(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
         </div>
-        <p class="hint">Bok+ není skříň – kreslí se jen jako tenký pruh na konci skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm (délka řady + 100 mm rezerva).</p>
+        <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm (délka řady + 100 mm rezerva).</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -2666,21 +2675,22 @@ function renderInspector(){
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
-    /* Bok+ – side select přestaví panel (aby se aktualizovaly hodnoty), čísla
-       jen překreslí výkres a uloží (panel zůstává, ať psaní/Tab nevypadnou). */
-    $('#iBokSide').addEventListener('change', ev => {
-      const v = ev.target.value;
-      if(v){
-        e.bok = e.bok || {};
-        e.bok.side = v;
-        e.bok.w = clamp(+$('#iBokW').value || BOK_W_DFLT, 5, 60);
-        e.bok.front = clamp(+$('#iBokFront').value || BOK_FRONT_DFLT, 0, 500);
-        e.bok.back = clamp(+$('#iBokBack').value || (elKind3(e)==='upper' ? 0 : BOK_BACK_DFLT), 0, 500);
-      } else {
-        delete e.bok;
-      }
+    /* Bok+ – přepínání stran (může být vlevo i vpravo zároveň). Klik na tlačítko
+       zapne/vypne danou stranu; čísla polí se převezmou a uloží. */
+    const toggleBokSide = (side) => {
+      e.bok = e.bok || {};
+      e.bok.w = clamp(+$('#iBokW').value || BOK_W_DFLT, 5, 60);
+      e.bok.front = clamp(+$('#iBokFront').value || BOK_FRONT_DFLT, 0, 500);
+      e.bok.back = clamp(+$('#iBokBack').value || (elKind3(e)==='upper' ? 0 : BOK_BACK_DFLT), 0, 500);
+      const sd = bokSides(e);            // starší uložení (side) se převede na obě strany
+      delete e.bok.side; delete e.bok.L; delete e.bok.R;
+      sd[side] = !sd[side];
+      if(sd.L || sd.R){ e.bok.sides = { L:sd.L, R:sd.R }; }
+      else { delete e.bok; }
       pushHistory(); render();
-    });
+    };
+    $('#iBokL').onclick = () => toggleBokSide('L');
+    $('#iBokR').onclick = () => toggleBokSide('R');
     $('#iBokW').addEventListener('change', ev => {
       if(e.bok){ e.bok.w = clamp(+ev.target.value || BOK_W_DFLT, 5, 60); pushHistoryQuiet(); renderCanvas(); }
     });
@@ -3114,7 +3124,7 @@ function setElKind3(e, kind){
     e.h = B3D.baseH;
   }
   /* bok+ se přizpůsobí druhu: HS u zdi (odskok 0), DS s odskokem 50 */
-  if(e.bok && e.bok.side) e.bok.back = kind==='upper' ? 0 : BOK_BACK_DFLT;
+  if(bokAny(e)) e.bok.back = kind==='upper' ? 0 : BOK_BACK_DFLT;
   pushHistory(); render();
   toast(kind==='upper'
     ? 'Horní skříň: u zdi, hloubka ' + UP_D_DFLT + ' mm, výška ' + UP_H_DFLT + ' mm'
@@ -3312,9 +3322,8 @@ function elements3(sc, mats){
     const h = elH3(e), z0 = elZ0(e), z1 = z0 + h;
     const mat = mats.el(e.color || '#c9c3b8');
     scBox(sc, e.x, e.y, e.x + e.w, e.y + e.d, z0, z1, mat);
-    /* bok+ = tenký svislý panel na boku skříně */
-    const b = bokRect(e);
-    if(b){
+    /* bok+ = tenký svislý panel(y) na boku/bocích skříně */
+    for(const b of bokRects(e)){
       let zB0, zB1; const kb = elKind3(e);
       if(kb==='upper')        { zB0 = B3D.upperBot;                 zB1 = B3D.upperBot + BOK_H_HS; }
       else if(kb==='column')  { zB0 = z0;                           zB1 = z1; }
@@ -3809,17 +3818,17 @@ function buildPrint(){
         <td class="num">${fmt(wNom*(e.qty||1))}</td>
         <td>${esc(noteX)}</td>
       </tr>`;
-      if(e.bok && e.bok.side){
-        const bkw = bokW(e), bh = bokH(e);
-        out += `<tr class="pr-sub"><td class="num"></td>
-          <td>└ Bok+ (${elKind3(e)==='upper'?'HS':'DS'})</td>
+      const bkw = bokW(e), bh = bokH(e);
+      const bokRows = [['L','vlevo'],['R','vpravo']].filter(([sd])=>bokHas(e,sd))
+        .map(([,str]) => `<tr class="pr-sub"><td class="num"></td>
+          <td>└ Bok+ (${elKind3(e)==='upper'?'HS':'DS'} – ${str})</td>
           <td class="num">${fmt(bh)}</td>
           <td class="num">${fmt(bokDepthOf(e))}</td>
           <td class="num">1</td>
           <td class="num">${fmt(bh)}</td>
           <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)</td>
-        </tr>`;
-      }
+        </tr>`).join('');
+      if(bokRows) out += bokRows;
       if(elKind3(e)==='base' && pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
