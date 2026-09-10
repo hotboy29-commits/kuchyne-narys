@@ -858,7 +858,12 @@ function elementHitsWall(e, wall){
      jako překryv, jinak magnet ke zdi nikdy neprojde. Proto obdélník o 1 mm
      ztenčíme: do zdi se počítá jen to, co skutečně proniklo DOVNTŘ pásu. */
   const r = { x:e.x+1, y:e.y+1, w:Math.max(0,e.w-2), h:Math.max(0,e.d-2) };
-  return wallBandOutline(wall).some(([a,b]) => segHitsRect(a, b, r));
+  if(wallBandOutline(wall).some(([a,b]) => segHitsRect(a, b, r))) return true;
+  /* Tenký prvek (bok+ 18 mm) se vejde CELÝ do pásu zdi (120 mm), aniž by se
+     dotkl jeho obrysu – bez tohohle testu by „pohřbený" bok+ prošel jako OK
+     a skříň by se přichytila vnitřní hranou boku+ na líc zdi. */
+  const corners = [{x:r.x,y:r.y},{x:r.x+r.w,y:r.y},{x:r.x+r.w,y:r.y+r.h},{x:r.x,y:r.y+r.h}];
+  return wallBandQuads(wall).some(q => corners.some(p => pointStrictlyInQuad(p, q)));
 }
 
 /* ─────────────────────────── 4. SOUŘADNICE / POHLED ─────────────────────────── */
@@ -1317,8 +1322,27 @@ function wallSide(w){
 }
 
 /** Obrys pásu zdi jako seznam úseček (pro kolize) – čára + rub + čela. */
-function wallBandOutline(w){
+function bandOffsets(w){
   const t = w.t || WALL_T_DEFAULT, side = wallSide(w);
+  const pts = w.pts, n = pts.length, count = w.closed ? n : n-1;
+  const N=[]; for(let i=0;i<count;i++){ const a=pts[i],b=pts[(i+1)%n];
+    const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1; N.push({x:-dy/L*t*side,y:dx/L*t*side}); }
+  const O=[];
+  for(let i=0;i<n;i++){
+    if(!w.closed && i===0){ O.push(N[0]); continue; }
+    if(!w.closed && i===n-1){ O.push(N[count-1]); continue; }
+    const n0=N[((i-1)+count)%count], n1=N[i%count];
+    let mx=n0.x+n1.x,my=n0.y+n1.y; const ml=Math.hypot(mx,my);
+    if(ml<1e-9){ O.push(n0); continue; }
+    mx/=ml;my/=ml;
+    const cos=(n0.x*mx+n0.y*my)/t;
+    const k=cos>0.25?t/cos:t/0.25;
+    O.push({x:mx*k,y:my*k});
+  }
+  return O;
+}
+
+function wallBandOutline(w){
   const pts = w.pts, n = pts.length, count = w.closed ? n : n-1;
   const off = bandOffsets(w);
   const edges = [];
@@ -1332,23 +1356,33 @@ function wallBandOutline(w){
     edges.push([pts[n-1],{x:pts[n-1].x+off[n-1].x,y:pts[n-1].y+off[n-1].y}]);
   }
   return edges;
-  function bandOffsets(w){
-    const N=[]; for(let i=0;i<count;i++){ const a=pts[i],b=pts[(i+1)%n];
-      const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1; N.push({x:-dy/L*t*side,y:dx/L*t*side}); }
-    const O=[];
-    for(let i=0;i<n;i++){
-      if(!w.closed && i===0){ O.push(N[0]); continue; }
-      if(!w.closed && i===n-1){ O.push(N[count-1]); continue; }
-      const n0=N[((i-1)+count)%count], n1=N[i%count];
-      let mx=n0.x+n1.x,my=n0.y+n1.y; const ml=Math.hypot(mx,my);
-      if(ml<1e-9){ O.push(n0); continue; }
-      mx/=ml;my/=ml;
-      const cos=(n0.x*mx+n0.y*my)/t;
-      const k=cos>0.25?t/cos:t/0.25;
-      O.push({x:mx*k,y:my*k});
-    }
-    return O;
+}
+
+/** Čtyřúhelníky pásu zdi po úsecích – pro test „je obdélník CELÝ uvnitř zdi". */
+function wallBandQuads(w){
+  const pts = w.pts, n = pts.length, count = w.closed ? n : n-1;
+  const off = bandOffsets(w);
+  const quads = [];
+  for(let i=0;i<count;i++){
+    const a=pts[i], b=pts[(i+1)%n];
+    const oa={x:a.x+off[i].x,y:a.y+off[i].y}, ob={x:b.x+off[(i+1)%n].x,y:b.y+off[(i+1)%n].y};
+    quads.push([a,b,ob,oa]);
   }
+  return quads;
+}
+
+/** Leží bod OSTŘE uvnitř konvexního čtyřúhelníku (s rezervou 0,05 mm)? */
+function pointStrictlyInQuad(p, q){
+  let pos = 0, neg = 0;
+  for(let i=0;i<4;i++){
+    const a=q[i], b=q[(i+1)%4];
+    const ex=b.x-a.x, ey=b.y-a.y, L=Math.hypot(ex,ey)||1;
+    const dist = (ex*(p.y-a.y) - ey*(p.x-a.x)) / L;
+    if(dist > 0.05) pos++;
+    else if(dist < -0.05) neg++;
+    else return false;
+  }
+  return pos===4 || neg===4;
 }
 
 /** SVG path pásu zdi – vyplní přesně to, co zabírá skutečná zeď. */
@@ -1451,6 +1485,17 @@ function snapCandidates(excludeId){
         const bx = s.b.x + n.nx*offv, by = s.b.y + n.ny*offv;
         if(Math.abs(ax-bx) < 1e-6)      out.push({ axis:'x', pos:ax, from:Math.min(ay,by), to:Math.max(ay,by), kind:'wall', id:w.id, n });
         else if(Math.abs(ay-by) < 1e-6) out.push({ axis:'y', pos:ay, from:Math.min(ax,bx), to:Math.max(ax,bx), kind:'wall', id:w.id, n });
+      }
+    }
+    /* Čelní (koncové) hrany otevřené zdi – „hrana zdi", na kterou se má dát
+       přichytit venkovní hrana sestavy (bok+). */
+    if(!w.closed){
+      const off = bandOffsets(w);
+      const np = w.pts.length;
+      for(const [p, o] of [[w.pts[0], off[0]], [w.pts[np-1], off[np-1]]]){
+        const qx = p.x + o.x, qy = p.y + o.y;
+        if(Math.abs(p.y-qy) < 1e-6)      out.push({ axis:'y', pos:p.y, from:Math.min(p.x,qx), to:Math.max(p.x,qx), kind:'wall', id:w.id });
+        else if(Math.abs(p.x-qx) < 1e-6) out.push({ axis:'x', pos:p.x, from:Math.min(p.y,qy), to:Math.max(p.y,qy), kind:'wall', id:w.id });
       }
     }
   }
@@ -1786,7 +1831,17 @@ function onMove(ev){
     return;
   }
   if(drag.mode==='rect' || drag.mode==='measure'){
-    S.draft.b = (drag.mode==='measure') ? measureSnapPoint(w) : w;
+    if(drag.mode==='measure'){
+      /* Měření pouze po ose X nebo Y – rozhodne větší pohyb myši; druhá osa
+         se zafixuje na výchozí bod, takže měrka nikdy není šikmá. */
+      const a = S.draft.a;
+      const horiz = Math.abs(w.x - a.x) >= Math.abs(w.y - a.y);
+      const p = horiz ? { x:w.x, y:a.y } : { x:a.x, y:w.y };
+      const sp = measureSnapPoint(p);
+      S.draft.b = horiz ? { x:sp.x, y:a.y } : { x:a.x, y:sp.y };
+    } else {
+      S.draft.b = w;
+    }
     render(); return;
   }
   if(drag.mode==='guide'){
@@ -2488,6 +2543,35 @@ function snapToWall(){
 }
 function findWall(id){ return S.project.walls.find(w=>w.id===id) || { pts:[], t:0 }; }
 
+/** Je-li bok+ zaseklý UVNITŘ zdi (např. zapnut u skříně, která už dosedala na
+    líc), posune skříň kolmo ke zdi tak, že VENKOVNÍ hrana boku+ dosedne na líc.
+    Vrací true, když prvkem pohnul. */
+function healBokOverlap(e){
+  const hitsAny = t => assemblyRects(t).some(r => S.project.walls.some(wl => elementHitsWall(r, wl)));
+  const bokBad = () => bokRects(e).some(b => S.project.walls.some(wl => elementHitsWall(b, wl)));
+  if(!bokBad()) return false;
+  let moved = false;
+  for(let pass=0; pass<4 && bokBad(); pass++){
+    const xs = [e.x, e.x+e.w], ys = [e.y, e.y+e.d];
+    for(const b of bokRects(e)){ xs.push(b.x, b.x+b.w); ys.push(b.y, b.y+b.h); }
+    let best = null;
+    for(const c of snapCandidates(e.id)){
+      if(c.kind !== 'wall') continue;
+      for(const p of (c.axis==='x' ? xs : ys)){
+        const shift = c.pos - p;
+        if(Math.abs(shift) < 0.01) continue;
+        const test = c.axis==='x' ? { ...e, x: e.x + shift } : { ...e, y: e.y + shift };
+        if(hitsAny(test)) continue;
+        if(!best || Math.abs(shift) < best.d) best = { d: Math.abs(shift), test };
+      }
+    }
+    if(!best) break;
+    e.x = R(best.test.x); e.y = R(best.test.y);
+    moved = true;
+  }
+  return moved;
+}
+
 /** Dovře mezeru k sousedovi ve stejné řadě. */
 function closeGap(dir){
   if(S.sel?.kind!=='el') return;
@@ -2685,7 +2769,10 @@ function renderInspector(){
       const sd = bokSides(e);            // starší uložení (side) se převede na obě strany
       delete e.bok.side; delete e.bok.L; delete e.bok.R;
       sd[side] = !sd[side];
-      if(sd.L || sd.R){ e.bok.sides = { L:sd.L, R:sd.R }; }
+      if(sd.L || sd.R){
+        e.bok.sides = { L:sd.L, R:sd.R };
+        if(healBokOverlap(e)) toast('Bok+ by byl ve zdi – skříň se vysunula, venkovní hrana boku+ dosedá na líc zdi');
+      }
       else { delete e.bok; }
       pushHistory(); render();
     };
@@ -4110,7 +4197,7 @@ const HINTS = {
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
   sym:    'Dole vyber značku a klepej do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
-  measure:'Táhni pro změření vzdálenosti. Chytá se na rohy/hrany skříní, boků+ a zdí – naměříš skutečnou mezeru. Nic se neukládá.'
+  measure:'Táhni pro změření vzdálenosti – měří se jen vodorovně (X) nebo svisle (Y), nikdy šikmo. Chytá se na rohy/hrany skříní, boků+ a zdí. Nic se neukládá.'
 };
 
 function toast(msg){
