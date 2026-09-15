@@ -1146,8 +1146,18 @@ function draftMarkup(){
     const ends = d.kind==='measure'
       ? `<circle cx="${d.a.x}" cy="${d.a.y}" r="${7/z}" fill="#0d6b5f"/><circle cx="${d.b.x}" cy="${d.b.y}" r="${7/z}" fill="#0d6b5f"/>`
       : '';
+    /* Popisek měrky: malý (stálá velikost na obrazovce ~14 px) a umístěný
+       VEDLE dráhy, ne na ní – vodorovná měrka → nad linkou, svislá → vpravo
+       od linky. Bílá halo obrysová linka jen tenká, ať nepřekrývá kresbu. */
+    const mx = (d.a.x+d.b.x)/2, my = (d.a.y+d.b.y)/2;
+    const fs = 14/z;
+    const horiz = Math.abs(d.b.x-d.a.x) >= Math.abs(d.b.y-d.a.y);
+    const tx = horiz ? mx : mx + 9/z;
+    const ty = horiz ? my - 9/z : my;
+    const anchor = horiz ? 'middle' : 'start';
+    const baseline = horiz ? 'auto' : 'middle';
     return `<line x1="${d.a.x}" y1="${d.a.y}" x2="${d.b.x}" y2="${d.b.y}" stroke="${col}" stroke-width="${2/z}" stroke-dasharray="${12/z} ${8/z}"/>
-      <text x="${(d.a.x+d.b.x)/2}" y="${(d.a.y+d.b.y)/2 - 120/z}" text-anchor="middle" font-size="${clamp(220/z,120,420)}" font-weight="600" fill="${col}" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${60/z}px">${fmt(Math.hypot(d.b.x-d.a.x, d.b.y-d.a.y))}</text>${ends}`;
+      <text x="${tx}" y="${ty}" text-anchor="${anchor}" dominant-baseline="${baseline}" font-size="${fs}" font-weight="600" fill="${col}" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}px">${fmt(Math.hypot(d.b.x-d.a.x, d.b.y-d.a.y))}</text>${ends}`;
   }
   return '';
 }
