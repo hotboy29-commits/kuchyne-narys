@@ -2405,6 +2405,21 @@ function bokSides(e){
   if(b.L) o.L = true; if(b.R) o.R = true;
   return o;
 }
+/* Sanitizace uloženého bok+ (nový i starý formát). Vrací null, když bok
+   nemá žádnou stranu – pak se do projektu vůbec neukládá. */
+function normBok(b){
+  if(!b || typeof b !== 'object') return null;
+  const sd = { L:false, R:false };
+  if(b.sides){ sd.L = !!b.sides.L; sd.R = !!b.sides.R; }
+  if(b.side === 'L' || b.L) sd.L = true;
+  if(b.side === 'R' || b.R) sd.R = true;
+  if(!sd.L && !sd.R) return null;
+  const out = { sides: sd };
+  if(b.w != null)     out.w     = clamp(+b.w || BOK_W_DFLT, 5, 60);
+  if(b.front != null) out.front = clamp(+b.front || 0, 0, 500);
+  if(b.back != null)  out.back  = clamp(+b.back  || 0, 0, 500);
+  return out;
+}
 function bokAny(e){ const sd = bokSides(e); return sd.L || sd.R; }
 function bokHas(e, side){ return !!bokSides(e)[side]; }
 function bokCfg(e){ const b = e && e.bok; return b && bokAny(e) ? b : null; }
@@ -4365,16 +4380,28 @@ function loadProject(p, {resetHistory=true}={}){
   S.project = {
     id: p.id || uid('p'),
     info: { ...newProject().info, ...(p.info||{}) },
-    walls: (p.walls||[]).map(w => ({ id:w.id||uid('w'), pts:(w.pts||[]).map(q=>({x:+q.x||0,y:+q.y||0})),
+    walls: (p.walls||[]).map(w => ({ ...w, id:w.id||uid('w'), pts:(w.pts||[]).map(q=>({x:+q.x||0,y:+q.y||0})),
                                     t:w.t||WALL_T_DEFAULT, closed:!!w.closed, name:w.name||'Zeď', side:w.side ?? null })),
-    elements: (p.elements||[]).map(e => ({ id:e.id||uid('e'), x:+e.x||0, y:+e.y||0,
-      w:+e.w||600, d:+e.d||600, name:e.name||'', note:e.note||'', qty:e.qty||1,
-      color:e.color||COLORS[0], front:e.front||'jih' })),
-    guides: (p.guides||[]).map(g => ({ id:g.id||uid('g'), a:{x:+g.a?.x||0,y:+g.a?.y||0},
+    /* ...e zachová i pole, která nejsou v seznamu níž – hlavně druh
+       (kind = DS/HS), výšku (h) a bok+ (bok). Bez toho se po načtení
+       tvářily všechny skříně jako spodní (DS). */
+    elements: (p.elements||[]).map(e => {
+      const o = { ...e, id:e.id||uid('e'), x:+e.x||0, y:+e.y||0,
+        w:+e.w||600, d:+e.d||600, name:e.name||'', note:e.note||'', qty:e.qty||1,
+        color:e.color||COLORS[0], front:e.front||'jih' };
+      const kd = String(o.kind ?? '').toLowerCase();
+      if(kd === 'upper' || kd === 'base') o.kind = kd; else delete o.kind;
+      const hv = +o.h;
+      if(hv >= 100) o.h = clamp(hv, 100, 3000); else delete o.h;
+      const nb = normBok(o.bok);
+      if(nb) o.bok = nb; else delete o.bok;
+      return o;
+    }),
+    guides: (p.guides||[]).map(g => ({ ...g, id:g.id||uid('g'), a:{x:+g.a?.x||0,y:+g.a?.y||0},
       b:{x:+g.b?.x||0,y:+g.b?.y||0}, print:g.print!==false, name:g.name||'Odstup' })),
-    windows: (p.windows||[]).map(o => ({ id:o.id||uid('o'), wallId:o.wallId, seg:+o.seg||0,
+    windows: (p.windows||[]).map(o => ({ ...o, id:o.id||uid('o'), wallId:o.wallId, seg:+o.seg||0,
       off:+o.off||0, w:Math.max(100,+o.w||600) })),
-    symbols: (p.symbols||[]).map(o => ({ id:o.id||uid('s'), x:+o.x||0, y:+o.y||0,
+    symbols: (p.symbols||[]).map(o => ({ ...o, id:o.id||uid('s'), x:+o.x||0, y:+o.y||0,
       type:symType(o.type).id, note:o.note||'', wallId:o.wallId ?? null,
       seg:+o.seg||0, along:+o.along||0, off:+o.off||0 })),
     created: p.created || new Date().toISOString()
