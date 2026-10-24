@@ -2499,6 +2499,23 @@ function normBok(b){
 }
 function bokAny(e){ const sd = bokSides(e); return sd.L || sd.R; }
 function bokHas(e, side){ return !!bokSides(e)[side]; }
+
+/* Čela do kalkulace: u každé skříně volitelně zapnutá, s ručním počtem
+   dvířek a zásuvek. Počet kusů mění jen kusovník – plocha (a tím cena)
+   je vždy šířka × výška skříně. */
+function frontCfg(e){
+  const f = e && e.fronts;
+  return {
+    on:      !!(f && f.on),
+    doors:   f && f.doors   != null ? clamp(Math.round(+f.doors   || 0), 0, 20) : 0,
+    drawers: f && f.drawers != null ? clamp(Math.round(+f.drawers || 0), 0, 20) : 0
+  };
+}
+/* Rozumný návrh počtu dvířek podle šířky skříně a max. šířky čela. */
+function autoDoors(e){
+  const maxW = Math.max(200, +pricing().doorW || 600);
+  return Math.max(1, Math.ceil(elFrontW(e) / maxW));
+}
 function bokCfg(e){ const b = e && e.bok; return b && bokAny(e) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
 function bokBack(e){
@@ -2826,6 +2843,17 @@ function renderInspector(){
         <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm (délka řady + 100 mm rezerva).</p>
       </div>
       <div class="insp-sec">
+        <h4>Čela do kalkulace</h4>
+        <label class="chk" style="margin-bottom:8px">
+          <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> počítat čela v kalkulaci
+        </label>
+        <div class="row2">
+          <label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>
+          <label class="fld"><span>Zásuvky (ks)</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+        </div>
+        <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš. Počet dvířek a zásuvek jen určí, na kolik kusů se čelo rozdělí; plocha a cena jsou vždy šířka × výška skříně. Sloupy (lednice, trouba) mají vlastní dvířka, ty se nepočítají.</p>
+      </div>
+      <div class="insp-sec">
         <h4>Barva</h4>
         <div class="swatches">${COLORS.map(c=>`<button class="sw-btn${c===e.color?' on':''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>
       </div>
@@ -2860,6 +2888,29 @@ function renderInspector(){
     bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
     $('#iH').addEventListener('change', ev => { e.h = clamp(+ev.target.value||0,100,3000); pushHistoryQuiet(); renderCanvas(); });
+    $('#iFrOn').addEventListener('change', ev => {
+      const on = !!ev.target.checked;
+      if(on){
+        e.fronts = { on:true,
+          doors:  (e.fronts && +e.fronts.doors)   || autoDoors(e),
+          drawers:(e.fronts && +e.fronts.drawers) || 0 };
+      } else {
+        e.fronts = { on:false,
+          doors:  e.fronts ? (Math.round(+e.fronts.doors)   || 0) : autoDoors(e),
+          drawers:e.fronts ? (Math.round(+e.fronts.drawers) || 0) : 0 };
+      }
+      pushHistoryQuiet(); renderInspector(); renderCanvas();
+    });
+    $('#iFrDoors').addEventListener('change', ev => {
+      e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
+      e.fronts.doors = clamp(Math.round(+ev.target.value || 0), 0, 20);
+      pushHistoryQuiet(); renderCanvas();
+    });
+    $('#iFrDrawers').addEventListener('change', ev => {
+      e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
+      e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
+      pushHistoryQuiet(); renderCanvas();
+    });
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
@@ -3223,6 +3274,12 @@ const EL_WALL_GAP = 50;    // mezera zadní hrany spodní skříně od zdi [mm]
 const UP_D_DFLT   = 320;   // hloubka horní skříně po přepnutí [mm]
 const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
 const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] na každou řadu DS
+
+/* ── verze výchozího ceníku (kvůli migraci starých projektů) ── */
+var PRICE_VER = 2;
+/* Ceny, se kterými appka začínala – pozná se podle nich neupravený ceník
+   a při změně výchozích cen se automaticky přepíše na nové. */
+var PRICE_OLD_DEFAULTS = { body:1290, front:1690, top:2490, bok:1290, back:390 };
 
 function hexRgb(h){
   const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
@@ -3948,7 +4005,9 @@ function resetProject(){
    s prořezem. Ceník je upravitelný a ukládá se k projektu. Zatím jen
    materiál – kování, práce a marže přijdou v další fázi (cenová nabídka). */
 
+
 function PRICE_DEFAULTS(){ return ({
+  v: PRICE_VER,
   vatRate: 21,          // sazba DPH [%]
   vatIncluded: true,    // ceny v ceníku jsou VČETNĚ DPH
   edgeShare: 100,       // % obvodu dílů, které se hraní
@@ -3956,11 +4015,11 @@ function PRICE_DEFAULTS(){ return ({
   doorW: 600,           // max šířka jednoho čela [mm] – z ní se počítá počet dvířek
   inPrint: true,        // přidávat kalkulaci do PDF
   groups: [
-    { id:'body',  name:'Korpus – DTD 18 mm bílá',   bw:2800, bh:2070, price:1290, waste:15 },
-    { id:'front', name:'Čela a dvířka – DTD 18 mm', bw:2800, bh:2070, price:1690, waste:15 },
-    { id:'top',   name:'Pracovní deska – 38 mm',    bw:4100, bh:600,  price:2490, waste:10 },
-    { id:'bok',   name:'Bok+ a sokl – DTD 18 mm',   bw:2800, bh:2070, price:1290, waste:15 },
-    { id:'back',  name:'Zadní díl – sololit 3 mm',  bw:2800, bh:2070, price:390,  waste:15 }
+    { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
+    { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
+    { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:600,  price:5500, waste:10 },
+    { id:'bok',   name:'Bok+ a sokl – lamino DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
+    { id:'back',  name:'Zadní díl – sololit 3 mm',         bw:2800, bh:2070, price:390,  waste:15 }
   ]
 }); }
 
@@ -3974,12 +4033,30 @@ function pricing(){
     return p;
   }
   const num = (v, d) => (v == null || v === '' || isNaN(+v)) ? d : +v;
+  /* Projekt uložený starší verzí: u položek, které mají přesně starou
+     výchozí cenu (uživatel je neupravoval), se cena přepíše na novou
+     výchozí. Ručně přepsané ceny zůstanou. */
+  if(p.v !== PRICE_VER){
+    const fresh = PRICE_DEFAULTS();
+    if(Array.isArray(p.groups)){
+      for(const g of p.groups){
+        const oldP = PRICE_OLD_DEFAULTS[g && g.id];
+        if(oldP == null || +g.price !== oldP) continue;
+        const nw = fresh.groups.find(f => f.id === g.id);
+        if(!nw) continue;
+        g.price = nw.price;
+        if(g.name === undefined || g.name === null || String(g.name).trim() === '') g.name = nw.name;
+      }
+    }
+    p.v = PRICE_VER;
+  }
   p.vatRate     = clamp(num(p.vatRate, D.vatRate), 0, 100);
   p.edgeShare   = clamp(num(p.edgeShare, D.edgeShare), 0, 100);
   p.edgePrice   = Math.max(0, num(p.edgePrice, D.edgePrice));
   p.doorW       = Math.max(200, num(p.doorW, D.doorW));
   p.vatIncluded = p.vatIncluded !== false;
   p.inPrint     = p.inPrint !== false;
+  p.v = PRICE_VER;
   p.groups = D.groups.map(d => {
     const f = (Array.isArray(p.groups) ? p.groups.find(g => g && g.id === d.id) : null) || {};
     return {
@@ -4016,10 +4093,20 @@ function materialParts(){
     add('body', tag + ' – police',         W, Math.max(200, D - 20), 2*q);
     /* zadní díl ze sololitu */
     add('back', tag + ' – zadní díl',      W, H, 1*q);
-    /* čela – jen skříně; sloup = vestavěný spotřebič (vlastní čela) */
-    if(k === 'base' || k === 'upper'){
-      const nD = Math.max(1, Math.ceil(W / Math.max(200, +P.doorW || 600)));
-      add('front', tag + ' – čelo', W / nD, H, nD*q);
+    /* čela – jen když je uživatel u skříně zapne; sloup = vestavěný
+       spotřebič (vlastní čela), u sloupů se nepočítají nikdy */
+    const FR = frontCfg(e);
+    if(FR.on && (k === 'base' || k === 'upper')){
+      let nD = FR.doors, nZ = FR.drawers;
+      if(!nD && !nZ) nD = 1;                       // zapnuto, ale nic nezadáno
+      const DRAWER_H = 200;                        // výška čela zásuvky [mm]
+      let doorH = H, drawH = 0;
+      if(nZ > 0){
+        drawH = Math.min(DRAWER_H, H * 0.8 / nZ);
+        doorH = H - nZ * drawH;
+      }
+      if(nD > 0 && doorH > 20) add('front', tag + ' – dvířka',        W / nD, doorH, nD*q);
+      if(nZ > 0 && drawH > 20) add('front', tag + ' – čelo zásuvky',  W,      drawH, nZ*q);
     }
     /* bok+ na každé zapnuté straně */
     if(bokAny(e)){
@@ -4086,6 +4173,33 @@ function priceCalc(){
 }
 
 /* ── okno s kalkulací ── */
+/* Kolik skříní má zapnutá čela (pro přehled v okně ceny). */
+function frStats(){
+  let on = 0, all = 0;
+  for(const e of S.project.elements){
+    const k = elKind3(e);
+    if(k !== 'base' && k !== 'upper') continue;
+    all += Math.max(1, Math.round(e.qty || 1));
+    if(frontCfg(e).on) on += Math.max(1, Math.round(e.qty || 1));
+  }
+  return { on, all };
+}
+/* Hromadně zapne / vypne čela u všech skříní. */
+function setAllFronts(on){
+  let n = 0;
+  for(const e of S.project.elements){
+    const k = elKind3(e);
+    if(k !== 'base' && k !== 'upper') continue;
+    const cur = frontCfg(e);
+    e.fronts = { on: !!on,
+      doors:   cur.doors   || (on ? autoDoors(e) : 0),
+      drawers: cur.drawers || 0 };
+    n++;
+  }
+  pushHistoryQuiet();
+  return n;
+}
+
 function renderPriceModal(){
   const P = pricing(), C = priceCalc();
   const rowsHtml = C.rows.map(r => `
@@ -4142,6 +4256,14 @@ function renderPriceModal(){
       </tr></tfoot>
     </table>
 
+    <div class="p-h">Čela a dvířka</div>
+    <div class="p-sub" style="gap:10px;font-size:12.5px;margin-bottom:6px" id="pFrWrap">
+      <span>V kalkulaci: <b id="pFrCount">${frStats().on}</b> z ${frStats().all} skříní má zapnutá čela</span>
+      <button class="tb" id="pFrAll" title="Zapne čela u všech spodních i horních skříní (počet dvířek podle šířky)">Zapnout u všech</button>
+      <button class="tb" id="pFrNone" title="Vypne čela u všech skříní">Vypnout u všech</button>
+    </div>
+    <p class="p-note" style="margin-top:0">Čela se nepočítají automaticky – u každé skříně je zapneš v panelu vpravo („Čela do kalkulace“) a můžeš zadat počet dvířek a zásuvek. Sloupy (lednice, trouba) čela nemají.</p>
+
     <div class="p-h">Nastavení</div>
     <div class="p-sub" style="gap:16px;font-size:12.5px">
       <label><input type="checkbox" id="pVatIncl" ${P.vatIncluded ? 'checked' : ''}> ceny v ceníku jsou včetně DPH</label>
@@ -4161,9 +4283,11 @@ function renderPriceModal(){
     </details>
 
     <div class="p-note">
-      <b>Co je v ceně:</b> deskový materiál (korpusy, čela, pracovní deska, bok+, sokl, zadní díly) a hrany.
-      Počítají se celé desky včetně prořezu, takže cena je nákupní, ne „prořezaná".
-      <b>Co v ceně není:</b> kování (panty, pojezdy, úchytky), práce, montáž a doprava – to doplníme v další fázi.
+      <b>Co je v ceně:</b> deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
+      čela – jen u skříní, kde jsou zapnutá – a hrany. Počítají se celé desky včetně
+      prořezu, takže cena je nákupní, ne „prořezaná".
+      <b>Co v ceně není:</b> kování (panty, pojezdy, úchytky), práce, montáž a doprava –
+      to doplníme v další fázi.
     </div>`;
   bindPriceInputs();
   updatePriceTotals();
@@ -4193,6 +4317,19 @@ function bindPriceInputs(){
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
+  });
+  body.addEventListener('click', ev => {
+    const b = ev.target.closest ? ev.target.closest('button') : null;
+    if(!b) return;
+    if(b.id === 'pFrAll'){
+      const n = setAllFronts(true);
+      renderPriceModal();
+      toast('Čela zapnuta u ' + n + ' skříní – počty dvířek uprav v panelu vpravo');
+    } else if(b.id === 'pFrNone'){
+      const n = setAllFronts(false);
+      renderPriceModal();
+      toast('Čela vypnuta u ' + n + ' skříní');
+    }
   });
 }
 
@@ -4288,8 +4425,8 @@ function pricePageHtml(opt){
       </div>
       <div style="flex:2;border:.6pt solid #ccc;border-radius:2mm;padding:3mm 4mm">
         <div style="font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#777">Rozsah kalkulace</div>
-        <div style="font-size:9pt;line-height:1.5">Deskový materiál (korpusy, čela, pracovní deska, bok+, sokl, zadní díly)
-          a hrany. Počítají se celé desky včetně prořezu. Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
+        <div style="font-size:9pt;line-height:1.5">Deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
+          čela u označených skříní a hrany. Počítají se celé desky včetně prořezu. Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
       </div>
     </div>
     ${foot}
@@ -4855,6 +4992,12 @@ function loadProject(p, {resetHistory=true}={}){
       if(hv >= 100) o.h = clamp(hv, 100, 3000); else delete o.h;
       const nb = normBok(o.bok);
       if(nb) o.bok = nb; else delete o.bok;
+      const fr = o.fronts;
+      if(fr && typeof fr === 'object' && fr.on){
+        o.fronts = { on:true,
+          doors:   clamp(Math.round(+fr.doors   || 0), 0, 20),
+          drawers: clamp(Math.round(+fr.drawers || 0), 0, 20) };
+      } else delete o.fronts;
       return o;
     }),
     guides: (p.guides||[]).map(g => ({ ...g, id:g.id||uid('g'), a:{x:+g.a?.x||0,y:+g.a?.y||0},
