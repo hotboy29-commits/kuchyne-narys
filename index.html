@@ -612,6 +612,8 @@ const PAPER = {
 };
 /* Tloušťky čar na papíře [mm] – technický výkres, ne fixy. */
 const PEN = { wall:0.50, el:0.35, guide:0.18, dim:0.18, tick:0.25, scale:0.35 };
+const TOP_RESERVE = 20;      // rezerva k délce pracovní desky [mm] NA KAŽDÝ KUS
+const TOP_DEPTH_DFLT = 600;  // standardní hloubka pracovní desky [mm] (635 = hlubší varianta)
 
 /* ─────────────────────────── 2. STAV ─────────────────────────── */
 
@@ -2840,7 +2842,7 @@ function renderInspector(){
           <label class="fld"><span>Hloubka boku+</span><input type="text" value="${bokAny(e)?(fmt(bokDepthOf(e))+' mm'):'—'}" disabled></label>
           <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokAny(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
         </div>
-        <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm (délka řady + 100 mm rezerva).</p>
+        <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm – dělí se na kusy podle spár skříněk a ke každému kusu se připočítává 100 mm rezerva.</p>
       </div>
       <div class="insp-sec">
         <h4>Čela do kalkulace</h4>
@@ -3273,10 +3275,10 @@ const B3D = {
 const EL_WALL_GAP = 50;    // mezera zadní hrany spodní skříně od zdi [mm]
 const UP_D_DFLT   = 320;   // hloubka horní skříně po přepnutí [mm]
 const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
-const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] na každou řadu DS
+const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] NA KAŽDÝ KUS
 
 /* ── verze výchozího ceníku (kvůli migraci starých projektů) ── */
-var PRICE_VER = 3;
+var PRICE_VER = 4;
 /* Ceny, se kterými appka začínala – pozná se podle nich neupravený ceník
    a při změně výchozích cen se automaticky přepíše na nové. */
 /* Staré výchozí ceny ze starších verzí appky – podle nich se pozná
@@ -4019,6 +4021,7 @@ function PRICE_DEFAULTS(){ return ({
   edgePrice: 12,        // Kč/m hrany (s DPH)
   doorW: 600,           // max šířka jednoho čela [mm] – z ní se počítá počet dvířek
   inPrint: true,        // přidávat kalkulaci do PDF
+  topDepth: TOP_DEPTH_DFLT, // hloubka pracovní desky [mm] – standard 600, existuje i 635
   kerf: 4,              // šířka řezu (prořez pilou) [mm] – počítá se do rozvržení
   rot: false,           // smí se díly otáčet o 90° (dekor/kresba obvykle nedovolí)
   zastena: false,       // počítat zástěnu + těsnící lištu (volitelné)
@@ -4026,7 +4029,7 @@ function PRICE_DEFAULTS(){ return ({
   groups: [
     { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
-    { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:600,  price:5500, waste:10 },
+    { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:640,  price:5500, waste:10 },
     { id:'bok',   name:'Bok+ a sokl – lamino DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
     { id:'back',  name:'Zadní díl – HDF 3 mm',             bw:2800, bh:2070, price:850,  waste:15 },
     { id:'zast',  name:'Zástěna – panel 4 100 × 640 mm',   bw:4100, bh:640,  price:5500, waste:0, lin:true },
@@ -4064,6 +4067,12 @@ function pricing(){
         if(g.name === undefined || g.name === null || String(g.name).trim() === '') g.name = nw.name;
       }
     }
+    /* deska pracovní desky: starý výchozí rozměr 4100 × 600 → 4100 × 640
+       (aby se na ni vešla i hloubka 635) */
+    if(Array.isArray(p.groups)){
+      const gt = p.groups.find(g => g && g.id === 'top');
+      if(gt && (+gt.bw === 4100) && (+gt.bh === 600)) gt.bh = 640;
+    }
     p.v = PRICE_VER;
   }
   p.vatRate     = clamp(num(p.vatRate, D.vatRate), 0, 100);
@@ -4073,6 +4082,7 @@ function pricing(){
   p.vatIncluded = p.vatIncluded !== false;
   p.inPrint     = p.inPrint !== false;
   p.kerf        = clamp(num(p.kerf, D.kerf), 0, 20);
+  p.topDepth    = clamp(num(p.topDepth, D.topDepth), 300, 1200);
   p.rot         = p.rot === true;
   p.zastena     = p.zastena === true;
   p.zastReserve = clamp(num(p.zastReserve, D.zastReserve), 0, 2000);
@@ -4119,8 +4129,9 @@ function runSegs(r){
 
 /* Rozdělí sled skříní na kusy, které se vejdou na desku.
    Kus končí vždy na spáře skříně; jen skříň širší než deska se dělí v půli. */
-function splitPieces(segs, maxPiece){
-  const M = Math.max(100, +maxPiece || 2800);
+function splitPieces(segs, maxPiece, reserve){
+  const R = Math.max(0, +reserve || 0);          // rezerva na každý kus
+  const M = Math.max(100, (+maxPiece || 2800) - R);
   const out = [];
   let cur = 0;
   for(const L of segs){
@@ -4134,26 +4145,8 @@ function splitPieces(segs, maxPiece){
     else cur += L;
   }
   if(cur > 0.5) out.push(cur);
-  return out;
-}
-
-/* Přidá rezervu (přídavek na řez/dorovnání) – nejdřív na poslední kus,
-   když se nevejde, tak na první, případně na další, které mají místo. */
-function addReserve(pieces, reserve, maxPiece){
-  let rem = +reserve || 0;
-  if(rem <= 0.5) return pieces;
-  const order = [pieces.length-1, 0];
-  for(let i=0;i<pieces.length;i++) order.push(i);
-  for(const i of order){
-    if(rem <= 0.5) break;
-    if(pieces[i] == null) continue;
-    const room = maxPiece - pieces[i];
-    if(room <= 0.5) continue;
-    const d = Math.min(room, rem);
-    pieces[i] += d; rem -= d;
-  }
-  if(rem > 0.5) pieces.push(rem);
-  return pieces;
+  /* REZERVA NA KAŽDÝ KUS – každý díl se musí nechat dorovnat */
+  return out.map(x => x + R);
 }
 
 /* Kusy soklu a pracovní desky pro jednu řadu (zaokrouhlené mm). */
@@ -4161,17 +4154,26 @@ function soklPiecesForRun(r){
   const P = pricing();
   const g = P.groups.find(x => x.id === 'bok');
   const maxPiece = Math.max(200, (g ? g.bw : 2800) - (+P.kerf || 0));
-  const pieces = splitPieces(runSegs(r), maxPiece);
-  addReserve(pieces, SOKL_RESERVE, maxPiece);
-  return pieces.map(x => Math.round(x));
+  return splitPieces(runSegs(r), maxPiece, SOKL_RESERVE).map(x => Math.round(x));
 }
 function topPiecesForRun(r){
   const P = pricing();
   const g = P.groups.find(x => x.id === 'top');
   const maxPiece = Math.max(200, (g ? g.bw : 4100) - (+P.kerf || 0));
-  const pieces = splitPieces(runSegs(r), maxPiece);
-  addReserve(pieces, 20, maxPiece);
-  return pieces.map(x => Math.round(x));
+  return splitPieces(runSegs(r), maxPiece, TOP_RESERVE).map(x => Math.round(x));
+}
+
+/* Hloubka pracovní desky: standard 600 mm (existují i 635 / 650).
+   Bere se nastavená hloubka, a kdyby byla některá spodní skříň hlubší,
+   vyhraje skříň – deska musí skříň překrýt. */
+function topDepthOfRun(r){
+  const P = pricing();
+  const horiz = (r.f === 'jih' || r.f === 'sever');
+  const perp = e => horiz ? e.d : e.w;
+  const bases = (r.el || []).filter(e => elKind3(e) === 'base');
+  const runDeep = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);
+  const baseDeep = bases.length ? Math.max(...bases.map(perp)) : runDeep;
+  return Math.max(200, Math.max(+P.topDepth || TOP_DEPTH_DFLT, baseDeep));
 }
 
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
@@ -4225,12 +4227,9 @@ function materialParts(){
     const horiz = (r.f === 'jih' || r.f === 'sever');
     const deep  = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);
     const tP = topPiecesForRun(r), sP = soklPiecesForRun(r);
-    /* hloubka desky se bere jen ze SPODNÍCH skříní – přes sloup (lednici,
-       troubu) deska nejde, kolem něj se vyřezává; sloup bývá hlubší */
-    const perp = e => horiz ? e.d : e.w;
-    const bases = (r.el || []).filter(e => elKind3(e) === 'base');
-    const baseDeep = bases.length ? Math.max(...bases.map(perp)) : deep;
-    const topDeep = Math.min(baseDeep, deep) + 20;
+    /* hloubka desky = standard 600 mm (nebo 635), ne odvozená od skříně;
+       přes sloup (lednici, troubu) deska nejde – kolem něj se vyřezává */
+    const topDeep = topDepthOfRun(r);
     tP.forEach((len, k) => add('top',
       'Pracovní deska – DS řada ' + (i+1) + (tP.length > 1 ? ' (kus ' + (k+1) + '/' + tP.length + ')' : ''),
       len, topDeep, 1));
@@ -4313,7 +4312,10 @@ function packSheets(pieces, bw, bh, allowRot, kerf){
       sheets.push(s);
       continue;
     }
-    const w = p.w + K, h = p.h + K;
+    /* řez se přidává jen tam, kde po dílu ještě zbývá místo – díl na celou
+       šířku desky (např. pracovní deska 600 na desce 600) řez nepotřebuje */
+    const w = p.w + ((p.w + K <= bw + eps) ? K : 0);
+    const h = p.h + ((p.h + K <= bh + eps) ? K : 0);
     let done = false;
     for(const s of sheets){
       if(s.oversize) continue;
@@ -4384,7 +4386,7 @@ function zastCalc(){
     const horiz = (r.f === 'jih' || r.f === 'sever');
     const along = horiz ? (r.x1 - r.x0) : (r.y1 - r.y0);   // podél stěny
     const deep  = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);   // hloubka sestavy
-    const returnD = deep + 20;                              // ohyb na hloubku desky
+    const returnD = topDepthOfRun(r);                       // ohyb na hloubku pracovní desky
     /* konce řady: v rohu s jinou řadou se ohyb nepřidává */
     const corner0 = runEndIsCorner(all, r, horiz ? r.x0 : r.y0);
     const corner1 = runEndIsCorner(all, r, horiz ? r.x1 : r.y1);
@@ -4539,6 +4541,7 @@ function renderPriceModal(){
     : `<div class="p-sub">deska
          <input class="p-in num" type="number" step="10" min="200" data-g="${r.g.id}" data-f="bw" value="${r.g.bw}"> ×
          <input class="p-in num" type="number" step="10" min="200" data-g="${r.g.id}" data-f="bh" value="${r.g.bh}"> mm
+         ${r.g.id === 'top' ? `<span style="color:var(--ink-3)">· hloubka desky ${fmt(pricing().topDepth)} mm</span>` : ''}
        </div>`;
   const rowsHtml = C.rows.map(r => `
     <tr>
@@ -4621,10 +4624,15 @@ function renderPriceModal(){
       <label><input type="checkbox" id="pVatIncl" ${P.vatIncluded ? 'checked' : ''}> ceny v ceníku jsou včetně DPH</label>
       <label>sazba DPH <input class="p-in num" id="pVat" type="number" min="0" max="100" step="1" value="${P.vatRate}"> %</label>
       <label>max šířka čela <input class="p-in num" id="pDoorW" type="number" min="200" step="50" value="${P.doorW}"> mm</label>
+      <label>hloubka prac. desky <input class="p-in num" id="pTopDepth" type="number" min="300" max="1200" step="5" value="${P.topDepth}"> mm</label>
       <label>řez pilou <input class="p-in num" id="pKerf" type="number" min="0" max="20" step="1" value="${P.kerf}"> mm</label>
       <label><input type="checkbox" id="pRot" ${P.rot ? 'checked' : ''}> otáčet díly o 90°</label>
       <label><input type="checkbox" id="pInPrint" ${P.inPrint ? 'checked' : ''}> přidat kalkulaci do PDF</label>
     </div>
+
+    <p class="p-note" style="margin-top:6px">Hloubka pracovní desky je <b>standardně 600 mm</b>
+      (hlubší varianta 635 mm, výjimečně 650). Pokud nastavíš víc, než je široká deska v ceníku,
+      appka desku zvětší, aby se na ni hloubka vešla.</p>
 
     <details class="p-det">
       <summary>Rozpis dílů (${C.parts.length} položek)</summary>
@@ -4674,6 +4682,17 @@ function bindPriceInputs(){
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
+    else if(el.id === 'pTopDepth'){
+      P.topDepth = clamp(+el.value || TOP_DEPTH_DFLT, 300, 1200);
+      const gt = P.groups.find(g => g.id === 'top');
+      if(gt && gt.bh < P.topDepth){          // deska musí být aspoň tak hluboká
+        gt.bh = Math.ceil(P.topDepth / 5) * 5;
+        const inp = document.querySelector('[data-g="top"][data-f="bh"]');
+        if(inp) inp.value = gt.bh;
+        toast('Deska pracovní desky zvětšena na ' + fmt(gt.bw) + ' × ' + fmt(gt.bh) + ' mm');
+      }
+      updatePriceTotals();
+    }
     else if(el.id === 'pKerf'){ P.kerf = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
     else if(el.id === 'pRot'){ P.rot = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pZast'){ P.zastena = !!el.checked; renderPriceModal(); save(); }
@@ -4747,7 +4766,8 @@ function pricePageHtml(opt){
   const rows = C.rows.filter(r => r.area > 0 || r.sheets > 0).map(r => {
     const sub = r.linear
       ? `${r.g.id==='tl' ? 'lišta' : 'panel'} ${fmt(r.g.bw)} mm`
-      : `deska ${fmt(r.g.bw)} × ${fmt(r.g.bh)} mm · prořez ${r.g.waste} %`;
+      : `deska ${fmt(r.g.bw)} × ${fmt(r.g.bh)} mm · prořez ${r.g.waste} %`
+        + (r.g.id === 'top' ? ` · hloubka ${fmt(pricing().topDepth)} mm` : '');
     const qty = r.linear ? `${num2(r.lenM)} m` : `${num2(r.area)} m²`;
     return `<tr>
       <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
@@ -4939,6 +4959,9 @@ function buildPrint(){
     </tr></thead>`;
     const soklHtml = (() => {
       const runs = dsRuns();
+      const _P = pricing(), _g = _P.groups.find(x => x.id === 'bok');
+      const soklBoardW = _g ? _g.bw : 2800, soklKerf = +_P.kerf || 0;
+      const soklMaxOrd = Math.max(200, soklBoardW - soklKerf - SOKL_RESERVE);
       if(!runs.length) return '';
       let t = 0; const rows = runs.map((r,i) => {
         const pcs = soklPiecesForRun(r);
@@ -4947,7 +4970,7 @@ function buildPrint(){
           ? '<div style="color:#666;font-size:7.5pt">kusy: ' + pcs.map(x=>fmt(x)).join(' + ') + ' mm</div>' : '';
         return `<tr><td>DS řada ${i+1} (${r.n} spodních skříněk)${kusy}</td>
           <td class="num">${fmt(R(r.len))}</td>
-          <td class="num">${SOKL_RESERVE}</td>
+          <td class="num">${SOKL_RESERVE}${pcs.length > 1 ? ' na kus' : ''}</td>
           <td class="num">${pcs.length > 1 ? pcs.length + ' ks · ' : ''}${fmt(obj)}</td></tr>`;
       }).join('');
       return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Sokl (DS) – čelní, výška 150 mm, tl. 18 mm</b></div>
@@ -4955,7 +4978,12 @@ function buildPrint(){
           <thead><tr><th>Sestava</th><th class="num">Délka řady (mm)</th><th class="num">Rezerva (mm)</th><th class="num">Objednat (mm)</th></tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr><td colspan="3">Celkem objednat</td><td class="num">${fmt(t)}</td></tr></tfoot>
-        </table>`;
+        </table>
+        <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
+          Řada se dělí na kusy podle spár skříněk – nejdelší objednaný kus je ${fmt(soklMaxOrd)} mm
+          (deska ${fmt(soklBoardW)} − ${fmt(soklKerf)} mm řez − ${SOKL_RESERVE} mm rezerva).
+          Rezerva ${SOKL_RESERVE} mm se připočítává <b>na každý kus</b>.
+        </div>`;
     })();
     let tables = '';
     if(listDS.length) tables += `
