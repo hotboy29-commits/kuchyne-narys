@@ -3278,7 +3278,7 @@ const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
 const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] NA KAŽDÝ KUS
 
 /* ── verze výchozího ceníku (kvůli migraci starých projektů) ── */
-var PRICE_VER = 4;
+var PRICE_VER = 5;
 /* Ceny, se kterými appka začínala – pozná se podle nich neupravený ceník
    a při změně výchozích cen se automaticky přepíše na nové. */
 /* Staré výchozí ceny ze starších verzí appky – podle nich se pozná
@@ -4024,16 +4024,17 @@ function PRICE_DEFAULTS(){ return ({
   topDepth: TOP_DEPTH_DFLT, // hloubka pracovní desky [mm] – standard 600, existuje i 635
   kerf: 4,              // šířka řezu (prořez pilou) [mm] – počítá se do rozvržení
   rot: false,           // smí se díly otáčet o 90° (dekor/kresba obvykle nedovolí)
-  zastena: false,       // počítat zástěnu + těsnící lištu (volitelné)
-  zastReserve: 100,     // rezerva k délce zástěny na každou řadu [mm]
+  zastena: false,       // počítat zástěnu (samostatná položka)
+  tl: false,            // počítat TL – těsnící lištu (samostatná položka)
+  zastReserve: 100,     // rezerva k délce zástěny/TL na každou řadu [mm]
   groups: [
     { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
-    { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:640,  price:5500, waste:10 },
+    { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:640,  price:5500, waste:10, half:true },
     { id:'bok',   name:'Bok+ a sokl – lamino DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
     { id:'back',  name:'Zadní díl – HDF 3 mm',             bw:2800, bh:2070, price:850,  waste:15 },
-    { id:'zast',  name:'Zástěna – panel 4 100 × 640 mm',   bw:4100, bh:640,  price:5500, waste:0, lin:true },
-    { id:'tl',    name:'TL – těsnící lišta 4 100 mm',      bw:4100, bh:0,    price:1200, waste:0, lin:true }
+    { id:'zast',  name:'Zástěna – panel 4 100 × 640 mm',   bw:4100, bh:640,  price:5500, waste:0, lin:true, half:true },
+    { id:'tl',    name:'TL – těsnící lišta 4 100 mm',      bw:4100, bh:0,    price:1200, waste:0, lin:true, half:true }
   ]
 }); }
 
@@ -4067,6 +4068,9 @@ function pricing(){
         if(g.name === undefined || g.name === null || String(g.name).trim() === '') g.name = nw.name;
       }
     }
+    /* starší projekty měly zástěnu a TL pod jedním zaškrtnutím – když byl
+       zapnutý, zapne se i TL (uživatel si to pak může vypnout) */
+    if(p.tl === undefined) p.tl = p.zastena === true;
     /* deska pracovní desky: starý výchozí rozměr 4100 × 600 → 4100 × 640
        (aby se na ni vešla i hloubka 635) */
     if(Array.isArray(p.groups)){
@@ -4085,6 +4089,7 @@ function pricing(){
   p.topDepth    = clamp(num(p.topDepth, D.topDepth), 300, 1200);
   p.rot         = p.rot === true;
   p.zastena     = p.zastena === true;
+  p.tl          = p.tl === true;
   p.zastReserve = clamp(num(p.zastReserve, D.zastReserve), 0, 2000);
   p.v = PRICE_VER;
   p.groups = D.groups.map(d => {
@@ -4096,7 +4101,8 @@ function pricing(){
       bh:    d.lin ? Math.max(0, num(f.bh, d.bh)) : Math.max(200, num(f.bh, d.bh)),
       price: Math.max(0, num(f.price, d.price)),
       waste: clamp(num(f.waste, d.waste), 0, 100),
-      lin:   !!d.lin
+      lin:   !!d.lin,
+      half:  !!d.half
     };
   });
   return p;
@@ -4347,12 +4353,90 @@ function packSheets(pieces, bw, bh, allowRot, kerf){
    Počítá se po celých panelech (zástěna) a celých lištách (TL) – obě
    položky mají standardní délku 4 100 mm. */
 
+/* ── objednávání po půlkách ─────────────────────────────────────────────
+   Pracovní deska, zástěna i TL se dodávají v délkách 4 100 mm, ale objednat
+   se dají i půlky (2 050 mm). Když je potřeba 4 500 mm, objedná se
+   1,5 desky = 4 100 + 2 050 mm.
+
+   Počet se NESMÍ počítat jen z celkové délky (4 200 mm → 1,5 desky), protože
+   dva kusy po 2 100 mm se do půlky 2 050 nevejdou a jsou potřeba dvě desky.
+   Proto se kusy opravdu skládají: hledá se nejmenší počet půlek, do kterých
+   se všechny kusy vcelku vejdou. */
+
+/* Vejde se seznam délek do daných kapacit? (nejdelší kusy první, backtracking) */
+function lensPackable(lens, caps){
+  if(!lens.length) return true;
+  const L = lens[0], rest = lens.slice(1);
+  const tried = [];
+  for(let i=0;i<caps.length;i++){
+    const c = caps[i];
+    if(c + 1e-9 < L) continue;
+    if(tried.some(t => Math.abs(t - c) < 1e-9)) continue;   // stejná kapacita = stejný výsledek
+    tried.push(c);
+    const nx = caps.slice(); nx[i] = c - L;
+    nx.sort((a,b) => b - a);
+    if(lensPackable(rest, nx)) return true;
+  }
+  return false;
+}
+
+/* Nejmenší počet CELÝCH desek (může být 0,5; 1; 1,5 …) na seznam délek kusů. */
+function minBoardsInHalves(lengths, boardLen){
+  const B = Math.max(200, +boardLen || 4100);
+  const H = B / 2;                                   // půlka
+  const lens = (lengths || []).filter(l => l > 0.5).sort((a,b) => b - a);
+  if(!lens.length) return 0;
+  const total = lens.reduce((a,b) => a + b, 0);
+  let n = Math.max(1, Math.ceil(total / H - 1e-9));  // nejmenší možný počet půlek podle délky
+  const maxN = lens.length * 2;                      // každý kus vlastní deska
+  for(; n <= maxN; n++){
+    const caps = [];
+    for(let i=0;i<Math.floor(n/2);i++) caps.push(B);
+    if(n % 2) caps.push(H);
+    if(lensPackable(lens, caps)) return n / 2;
+  }
+  return lens.length;                                // pojistka
+}
+
+/* Rozdělí délku na kusy, které se vejdou na jeden panel/lištu – plné
+   délky a zbytek na konci (10 100 → 4 100 + 4 100 + 1 900). Rovnoměrné
+   dělení by zbytečně nutilo kupovat víc, než je potřeba. */
+function splitLen(len, maxL){
+  const L = Math.max(0, +len || 0), M = Math.max(200, +maxL || 4100);
+  if(L <= 0) return [];
+  const out = [];
+  let rest = Math.round(L);
+  while(rest > M + 1e-9){ out.push(M); rest -= M; }
+  if(rest > 0.5) out.push(rest);
+  return out;
+}
+
+/* 1,5 → „1,5“; 2 → „2“ */
+function fmtQty(q){
+  const v = Math.round((+q || 0) * 2) / 2;
+  return Number.isInteger(v) ? String(v) : v.toFixed(1).replace('.', ',');
+}
+/* jednotka podle počtu: 1 panel, 1,5 panelu, 2 panely, 5 panelů */
+function qtyUnit(q, forms){
+  const v = Math.round((+q || 0) * 2) / 2;
+  if(!Number.isInteger(v)) return forms.dec;
+  if(v === 1) return forms.one;
+  return v >= 5 ? forms.many : forms.few;
+}
+const QTY_FORMS = {
+  top:  { one:'deska', few:'desky', many:'desek',  dec:'desky'  },
+  zast: { one:'panel', few:'panely', many:'panelů', dec:'panelu' },
+  tl:   { one:'lišta', few:'lišty', many:'lišt',   dec:'lišty'  }
+};
+
 function zastCalc(){
   const P = pricing();
-  if(!P.zastena) return null;
+  const wantZ = P.zastena === true;      // zástěna je samostatná položka
+  const wantT = P.tl === true;           // TL (těsnící lišta) taky
+  if(!wantZ && !wantT) return null;
   const gZ = P.groups.find(g => g.id === 'zast');
   const gT = P.groups.find(g => g.id === 'tl');
-  if(!gZ || !gT) return null;
+  if((wantZ && !gZ) || (wantT && !gT)) return null;
   const reserve = clamp(+P.zastReserve || 0, 0, 2000);
   const panelL  = Math.max(200, +gZ.bw || 4100);     // délka panelu zástěny
   const stripL  = Math.max(200, +gT.bw || 4100);     // délka lišty TL
@@ -4368,15 +4452,23 @@ function zastCalc(){
     totalLen += len;
     runs.push({ i:i+1, along, deep, reserve, len });
   });
-  /* Panely (i lišty) se kupují po kusech 4 100 mm a kusy z různých řad se
-     dají vyříznout z jednoho panelu – proto se počet počítá z CELKOVÉ délky,
-     ne zvlášť pro každou řadu (L 2 700 + 1 000 = 3 700 → 1 panel, ne 2). */
-  const nZ = totalLen > 0 ? Math.ceil(totalLen / panelL) : 0;
-  const nT = totalLen > 0 ? Math.ceil(totalLen / stripL) : 0;
+  /* Panely i lišty jdou objednat po půlkách a kusy z různých řad se dají
+     vyříznout z jednoho kusu – počítá se proto skládáním kusů, ne zvlášť
+     pro každou řadu (L 2 700 + 1 000 = 3 700 → 1 panel, ne 2). */
+  /* dlouhou řadu nejde objednat vcelku – rozdělí se na kusy jako sokl */
+  let piecesZ = [], piecesT = [];
+  runs.forEach(r => {
+    r.piecesZ = splitLen(r.len, panelL);
+    r.piecesT = splitLen(r.len, stripL);
+    piecesZ = piecesZ.concat(r.piecesZ);
+    piecesT = piecesT.concat(r.piecesT);
+  });
+  const nZ = wantZ ? minBoardsInHalves(piecesZ, panelL) : 0;
+  const nT = wantT ? minBoardsInHalves(piecesT, stripL) : 0;
   return {
-    runs, totalLen, nZ, nT, gZ, gT,
-    totalZ: nZ * (+gZ.price || 0),
-    totalT: nT * (+gT.price || 0),
+    runs, totalLen, nZ, nT, gZ, gT, wantZ, wantT,
+    totalZ: wantZ ? nZ * (+gZ.price || 0) : 0,
+    totalT: wantT ? nT * (+gT.price || 0) : 0,
     reserve, panelL, stripL
   };
 }
@@ -4405,6 +4497,20 @@ function priceCalc(){
   const rows = P.groups.filter(g => !g.lin).map(g => {
     const a  = area[g.id] || 0;
     const ba = (g.bw * g.bh) / 1e6;                       // plocha jedné desky [m²]
+    /* PRACOVNÍ DESKA: objednává se po půlkách a počítá se z DÉLKY kusů,
+       ne z plochy – 4 500 mm délky = 1,5 desky (viz minBoardsInHalves). */
+    if(g.half){
+      const pieces = byGroup[g.id] || [];
+      const lens = [];
+      pieces.forEach(pt => { for(let i=0;i<Math.max(0, Math.round(pt.qty || 0));i++) lens.push(+pt.w); });
+      const totalLen = lens.reduce((x,y) => x + y, 0);
+      const nPieces = lens.length;
+      const qty = minBoardsInHalves(lens, g.bw);
+      return { g, area:a, need:0, boardArea:ba, sheets:qty, qty, byLen:true,
+               totalLen, nPieces, oversized: lens.some(l => l > (+g.bw || 4100) + 1e-6),
+               nSplit:0, sheetsArea:0, sheetsPack:0, byArea:false,
+               total: qty * (+g.price || 0) };
+    }
     const need = a * (1 + (+g.waste || 0) / 100);         // včetně prořezu
     const pieces = byGroup[g.id] || [];
     const nPieces = pieces.reduce((s2, pt) => s2 + Math.max(0, Math.round(pt.qty || 0)), 0);
@@ -4424,10 +4530,10 @@ function priceCalc(){
   /* zástěna a TL se počítají z DÉLKY, ne z plochy */
   const Z = zastCalc();
   if(Z){
-    rows.push({ g:Z.gZ, area:0, need:0, boardArea:0, sheets:Z.nZ,
-                total:Z.totalZ, lenM:Z.totalLen/1000, linear:true });
-    rows.push({ g:Z.gT, area:0, need:0, boardArea:0, sheets:Z.nT,
-                total:Z.totalT, lenM:Z.totalLen/1000, linear:true });
+    if(Z.wantZ) rows.push({ g:Z.gZ, area:0, need:0, boardArea:0, sheets:Z.nZ, qty:Z.nZ,
+                total:Z.totalZ, lenM:Z.totalLen/1000, totalLen:Z.totalLen, linear:true });
+    if(Z.wantT) rows.push({ g:Z.gT, area:0, need:0, boardArea:0, sheets:Z.nT, qty:Z.nT,
+                total:Z.totalT, lenM:Z.totalLen/1000, totalLen:Z.totalLen, linear:true });
   }
 
   const edgeTotal = edgeM * (+P.edgePrice || 0);
@@ -4499,9 +4605,24 @@ function theadRuns(Z){
         <td class="num">${fmt(Z.runs.reduce((a,r)=>a+r.reserve,0))}</td>
         <td class="num"><b>${fmt(Math.round(Z.totalLen))}</b> mm</td></tr></tfoot>
     </table>
-    <p class="p-note" style="margin:0 0 8px">Z celkové délky ${fmt(Math.round(Z.totalLen))} mm vychází
-      <b>${Z.nZ} ${Z.nZ===1?'panel':Z.nZ<5?'panely':'panelů'}</b> zástěny
-      a <b>${Z.nT} ${Z.nT===1?'lišta':Z.nT<5?'lišty':'lišt'}</b> TL (kusy z různých řad se vyříznou z jednoho kusu).</p>`;
+    <p class="p-note" style="margin:0 0 8px">Z délky ${fmt(Math.round(Z.totalLen))} mm vychází${''}
+      ${Z.wantZ ? `<b>${fmtQty(Z.nZ)} ${qtyUnit(Z.nZ, QTY_FORMS.zast)}</b> zástěny` : ''}${Z.wantZ && Z.wantT ? ' a' : ''}${Z.wantT ? ` <b>${fmtQty(Z.nT)} ${qtyUnit(Z.nT, QTY_FORMS.tl)}</b> TL` : ''}.
+      Kusy z různých řad se vyříznou z jednoho kusu a objednat se dá i půlka (2 050 mm).</p>`;
+}
+
+/* Buňka „kolik objednat“ – u desek/panelů jde objednat i půlka (1,5). */
+function qtyCell(r){
+  if(r.byLen || r.linear){
+    const q = r.qty != null ? r.qty : r.sheets;
+    const unit = qtyUnit(q, QTY_FORMS[r.g.id] || QTY_FORMS.top);
+    const extra = r.totalLen ? `<div style="font-size:10.5px;color:var(--ink-3)">${fmt(Math.round(r.totalLen))} mm celkem</div>` : '';
+    return `<b>${fmtQty(q)}</b> ${unit}${extra}`;
+  }
+  return `<b>${r.sheets}</b> ks`
+    + ((r.sheetsArea !== r.sheetsPack)
+        ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : '')
+    + (r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : '')
+    + (r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : '');
 }
 
 function renderPriceModal(){
@@ -4525,7 +4646,7 @@ function renderPriceModal(){
       <td class="num" id="pPieces_${r.g.id}">${r.linear ? '—' : r.nPieces + ' ks'}</td>
       <td class="num">${r.linear ? '—'
         : `<input class="p-in num" type="number" step="1" min="0" max="100" data-g="${r.g.id}" data-f="waste" value="${r.g.waste}"> %`}</td>
-      <td class="num" id="pSheets_${r.g.id}"><b>${r.sheets}</b> ks${
+      <td class="num" id="pSheets_${r.g.id}">${qtyCell(r)}${
         (!r.linear && r.sheetsArea !== r.sheetsPack)
           ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : ''
       }${r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : ''}${r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : ''}</td>
@@ -4546,7 +4667,7 @@ function renderPriceModal(){
         <small id="pSumHint">${C.vatIncluded ? 'včetně DPH' : 'bez DPH'} ${fmt(C.rate)} %</small></div>
       <div><span>Bez DPH</span><b id="pSumBase">${kc(C.base)}</b><small>základ daně</small></div>
       <div><span>DPH</span><b id="pSumVat">${kc(C.vat)}</b><small>${fmt(C.rate)} %</small></div>
-      <div><span>Desek celkem</span><b id="pSumSheets">${C.sheets} ks</b><small>včetně prořezu</small></div>
+      <div><span>Desek celkem</span><b id="pSumSheets">${fmtQty(C.sheets)} ks</b><small>včetně prořezu a půlek</small></div>
     </div>
 
     <div class="p-h">Deskový materiál</div>
@@ -4580,9 +4701,14 @@ function renderPriceModal(){
     <p class="p-note" style="margin-top:0">Čela se nepočítají automaticky – u každé skříně je zapneš v panelu vpravo („Čela do kalkulace“) a můžeš zadat počet dvířek a zásuvek. Sloupy (lednice, trouba) čela nemají.</p>
 
     <div class="p-h">Zástěna a těsnící lišta</div>
-    <label class="chk" style="margin-bottom:6px">
-      <input type="checkbox" id="pZast" ${P.zastena ? 'checked' : ''}> počítat zástěnu + TL (těsnící lištu)
+    <label class="chk" style="margin-bottom:4px">
+      <input type="checkbox" id="pZast" ${P.zastena ? 'checked' : ''}> zástěna (panel za skříňkami)
     </label>
+    <label class="chk" style="margin-bottom:6px">
+      <input type="checkbox" id="pTL" ${P.tl ? 'checked' : ''}> TL – těsnící lišta
+    </label>
+    <p class="p-note" style="margin:0 0 6px">Zástěna a TL jsou dvě samostatné položky – zákazník může chtít
+      jen TL bez zástěny a naopak. Do ceny se počítá jen to, co je zaškrtnuté.</p>
     <p class="p-sub" style="margin:0 0 4px">
       Délka zástěny = délka řady skříněk + rezerva
       <input class="p-in num" id="pZastRes" type="number" min="0" max="2000" step="10" value="${P.zastReserve}"> mm
@@ -4622,7 +4748,8 @@ function renderPriceModal(){
       bere se větší číslo z plošného výpočtu s prořezem a ze skutečného rozvržení. Plošný odhad sám
       podcení, když je mezi díly něco přes celou výšku desky (např. zadní díl sloupu 600 × 2030).
       <b>Co je v ceně:</b> deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
-      čela – jen u skříní, kde jsou zapnutá –, zástěna s TL (je-li zapnutá) a hrany. Počítají se celé desky včetně
+      čela – jen u skříní, kde jsou zapnutá –, zástěna a TL (každá zvlášť, je-li zapnutá) a hrany. Pracovní deska,
+      zástěna a TL se dají objednat i po půlkách (4 100 mm → půlka 2 050 mm). Počítají se celé desky včetně
       prořezu, takže cena je nákupní, ne „prořezaná".
       <b>Co v ceně není:</b> kování (panty, pojezdy, úchytky), práce, montáž a doprava –
       to doplníme v další fázi.
@@ -4669,6 +4796,7 @@ function bindPriceInputs(){
     else if(el.id === 'pKerf'){ P.kerf = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
     else if(el.id === 'pRot'){ P.rot = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pZast'){ P.zastena = !!el.checked; renderPriceModal(); save(); }
+    else if(el.id === 'pTL'){   P.tl = !!el.checked;      renderPriceModal(); save(); }
     else if(el.id === 'pZastRes'){ P.zastReserve = clamp(+el.value || 0, 0, 2000); updatePriceTotals(); }
   });
   body.addEventListener('click', ev => {
@@ -4694,11 +4822,7 @@ function updatePriceTotals(){
     if(a) a.textContent = r.linear ? (num2(r.lenM) + ' m') : (num2(r.area) + ' m²');
     const pc = $('#pPieces_' + r.g.id); if(pc) pc.textContent = r.linear ? '—' : (r.nPieces + ' ks');
     const sh = $('#pSheets_' + r.g.id);
-    if(sh) sh.innerHTML = '<b>' + r.sheets + '</b> ks'
-      + ((!r.linear && r.sheetsArea !== r.sheetsPack)
-          ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : '')
-      + (r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : '')
-      + (r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : '');
+    if(sh) sh.innerHTML = qtyCell(r);
     const t = $('#pTotal_' + r.g.id);  if(t) t.innerHTML = '<b>' + kc(r.total) + '</b>';
   }
   const em = $('#pEdgeM');    if(em) em.textContent = num2(C.edgeM);
@@ -4706,7 +4830,7 @@ function updatePriceTotals(){
   const st = $('#pSumTotal'); if(st) st.textContent = kc(C.total);
   const sb = $('#pSumBase');  if(sb) sb.textContent = kc(C.base);
   const sv = $('#pSumVat');   if(sv) sv.textContent = kc(C.vat);
-  const ss = $('#pSumSheets'); if(ss) ss.textContent = C.sheets + ' ks';
+  const ss = $('#pSumSheets'); if(ss) ss.textContent = fmtQty(C.sheets) + ' ks';
   const ft = $('#pFootTotal'); if(ft) ft.innerHTML = '<b>' + kc(C.total) + '</b>';
   const sh = $('#pSumHint');  if(sh) sh.textContent = (C.vatIncluded ? 'včetně DPH' : 'bez DPH') + ' ' + fmt(C.rate) + ' %';
   save();
@@ -4739,13 +4863,15 @@ function pricePageHtml(opt){
   const rows = C.rows.filter(r => r.area > 0 || r.sheets > 0).map(r => {
     const sub = r.linear
       ? `${r.g.id==='tl' ? 'lišta' : 'panel'} ${fmt(r.g.bw)} mm`
+        + ` · ${fmt(Math.round(r.totalLen))} mm celkem`
       : `deska ${fmt(r.g.bw)} × ${fmt(r.g.bh)} mm · prořez ${r.g.waste} %`
-        + (r.g.id === 'top' ? ` · hloubka ${fmt(pricing().topDepth)} mm` : '');
+        + (r.g.id === 'top' ? ` · hloubka ${fmt(pricing().topDepth)} mm` : '')
+        + (r.byLen ? ` · ${fmt(Math.round(r.totalLen))} mm délky` : '');
     const qty = r.linear ? `${num2(r.lenM)} m` : `${num2(r.area)} m²`;
     return `<tr>
-      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
+      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear || r.byLen ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
       <td class="num">${qty}</td>
-      <td class="num">${r.sheets}</td>
+      <td class="num">${fmtQty(r.qty != null ? r.qty : r.sheets)}</td>
       <td class="num">${fmt(r.g.price)}</td>
       <td class="num">${fmt(r.total)}</td>
     </tr>`;
@@ -4793,7 +4919,7 @@ function pricePageHtml(opt){
       <div style="flex:2;border:.6pt solid #ccc;border-radius:2mm;padding:3mm 4mm">
         <div style="font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#777">Rozsah kalkulace</div>
         <div style="font-size:9pt;line-height:1.5">Deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
-          čela u označených skříní, zástěnu s těsnící lištou (je-li zapnutá) a hrany.
+          čela u označených skříní, zástěnu a těsnící lištu (každou zvlášť, je-li zapnutá) a hrany.
           Počítají se celé desky, panely a lišty – počet desek vychází ze skutečného rozvržení dílů
           s řezem pilou (a nikdy méně, než kolik vyjde plošně s prořezem). Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
       </div>
