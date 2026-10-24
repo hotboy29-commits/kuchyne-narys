@@ -274,6 +274,34 @@ body{
 .sheet footer .tb{border:1px solid var(--line);background:var(--surface)}
 .sheet footer .tb.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 
+/* ───────── kalkulace materiálu ───────── */
+.sheet.wide{width:min(1000px,100%)}
+.p-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0 0 16px}
+.p-sum>div{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.p-sum span{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3)}
+.p-sum b{font-size:16px;font-variant-numeric:tabular-nums;color:var(--ink)}
+.p-sum small{font-size:11px;color:var(--ink-3)}
+@media (max-width:760px){.p-sum{grid-template-columns:1fr 1fr}}
+.p-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.p-tbl th{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);
+  text-align:left;border-bottom:1px solid var(--line);padding:6px;font-weight:700}
+.p-tbl td{border-bottom:1px solid var(--line);padding:7px 6px;vertical-align:top}
+.p-tbl .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.p-in{width:100%;border:1px solid var(--line-2);border-radius:7px;padding:6px 7px;font:inherit;background:#fff;color:var(--ink)}
+.p-in.num{width:78px;text-align:right}
+.p-name{font-weight:600}
+.p-sub{margin-top:4px;font-size:11.5px;color:var(--ink-3);display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.p-sub .p-in.num{width:66px;padding:3px 5px;font-size:11.5px}
+.p-h{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--ink-3);margin:20px 0 6px}
+.p-note{font-size:12px;color:var(--ink-3);line-height:1.55;margin-top:12px}
+details.p-det{margin-top:16px;border-top:1px solid var(--line);padding-top:10px}
+details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
+.p-tbl.small{font-size:11.5px}
+.p-tbl.small td{padding:4px 6px}
+.p-scroll{max-height:260px;overflow:auto;margin-top:8px}
+
 /* ───────── toast ───────── */
 .toast{
   position:fixed;left:50%;bottom:70px;transform:translate(-50%,14px);
@@ -362,7 +390,7 @@ body{
 
 @media print{
   html,body{overflow:visible;background:#fff;height:auto}
-  .app,.toast,#fileInput,#modalProject,#modalRoom{display:none !important}
+  .app,.toast,#fileInput,#modalProject,#modalRoom,#modalPrice{display:none !important}
   #printRoot{display:block}
   .pr-page{margin:0;box-shadow:none}
 }
@@ -432,6 +460,7 @@ body{
       <button class="tb" id="btnImport" title="Načíst ze souboru JSON">↥<span class="lb">Načíst</span></button>
       <button class="tb" id="btnSave" title="Uložit do souboru JSON">↧<span class="lb">Uložit</span></button>
       <button class="tb" id="btnPng" title="3D pohledy jako PNG – připravený vstup pro AI vizualizaci (Nano Banana…)">🖼️<span class="lb">PNG</span></button>
+      <button class="tb" id="btnPrice" title="Kalkulace materiálu – cena">💵<span class="lb">Cena</span></button>
       <button class="tb primary" id="btnPdf" title="Export do PDF">⎙<span class="lb">PDF</span></button>
     </div>
 
@@ -528,6 +557,21 @@ body{
   </div>
 </div>
 
+<!-- ── modal: kalkulace materiálu ── -->
+<div class="modal hidden" id="modalPrice">
+  <div class="sheet wide">
+    <header><h2>Kalkulace materiálu</h2>
+      <p>Ceny i rozměry desek můžeš přepsat – uloží se k projektu. Počítají se celé desky včetně prořezu.</p></header>
+    <div id="priceBody"></div>
+    <footer>
+      <button class="tb" id="btnPriceReset" title="Vrátí ceny na výchozí hodnoty">Výchozí ceny</button>
+      <button class="tb" id="btnPriceClose">Zavřít</button>
+      <button class="tb" id="btnPricePrint">⎙ Tisk kalkulace</button>
+      <button class="tb primary" id="btnPriceSave">Uložit</button>
+    </footer>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div id="printRoot"></div>
 
@@ -599,6 +643,7 @@ function newProject(){
     walls: [],
     elements: [],
     guides: [],
+    pricing: PRICE_DEFAULTS(),
     created: new Date().toISOString()
   };
 }
@@ -2660,7 +2705,8 @@ const hist = { preDrag: null };
 
 function snapshot(){ return JSON.stringify({
   walls:S.project.walls, elements:S.project.elements, guides:S.project.guides,
-  windows:S.project.windows, symbols:S.project.symbols, info:S.project.info }); }
+  windows:S.project.windows, symbols:S.project.symbols, info:S.project.info,
+  pricing:S.project.pricing }); }
 function pushHistory(){
   const s = snapshot();
   if(history[historyIndex] === s){ save(); return; }
@@ -2700,6 +2746,7 @@ function restore(s){
   S.project.windows = o.windows || [];
   S.project.symbols = o.symbols || [];
   if(o.info) S.project.info = { ...S.project.info, ...o.info };
+  if(o.pricing) S.project.pricing = o.pricing;
   if(S.sel){
     const k = S.sel.kind;
     const list = k==='el'?S.project.elements : k==='wall'?S.project.walls : S.project.guides;
@@ -3885,6 +3932,7 @@ function resetProject(){
   S.project.guides = []; S.project.windows = []; S.project.symbols = [];
   S.project.info = n.info;
   S.project.created = n.created;
+  S.project.pricing = PRICE_DEFAULTS();
   S.sel = null; S.draft = null; S.measure = null; S.layer = 'all';
   updLayerUI();
   $('#projTitle').textContent = 'Nový nárys';
@@ -3892,6 +3940,371 @@ function resetProject(){
   try{ STORE.setItem(STORE_KEY, JSON.stringify(S.project)); }catch(err){}   // hned přepíše uložený nárys
   render();
   toast('Nový prázdný projekt');
+}
+
+/* ═════════════════════ 18. KALKULACE MATERIÁLU (CENA) ═════════════════════
+   Z rozměrů na plátně spočítá spotřebu materiálu – desky (korpusy, čela,
+   pracovní deska, bok+, sokl, zadní díly) a hrany. Počítá CELÉ desky
+   s prořezem. Ceník je upravitelný a ukládá se k projektu. Zatím jen
+   materiál – kování, práce a marže přijdou v další fázi (cenová nabídka). */
+
+function PRICE_DEFAULTS(){ return ({
+  vatRate: 21,          // sazba DPH [%]
+  vatIncluded: true,    // ceny v ceníku jsou VČETNĚ DPH
+  edgeShare: 100,       // % obvodu dílů, které se hraní
+  edgePrice: 12,        // Kč/m hrany (s DPH)
+  doorW: 600,           // max šířka jednoho čela [mm] – z ní se počítá počet dvířek
+  inPrint: true,        // přidávat kalkulaci do PDF
+  groups: [
+    { id:'body',  name:'Korpus – DTD 18 mm bílá',   bw:2800, bh:2070, price:1290, waste:15 },
+    { id:'front', name:'Čela a dvířka – DTD 18 mm', bw:2800, bh:2070, price:1690, waste:15 },
+    { id:'top',   name:'Pracovní deska – 38 mm',    bw:4100, bh:600,  price:2490, waste:10 },
+    { id:'bok',   name:'Bok+ a sokl – DTD 18 mm',   bw:2800, bh:2070, price:1290, waste:15 },
+    { id:'back',  name:'Zadní díl – sololit 3 mm',  bw:2800, bh:2070, price:390,  waste:15 }
+  ]
+}); }
+
+/* Ceník projektu – vždy bezpečně normalizovaný (i po načtení staršího souboru). */
+function pricing(){
+  const D = PRICE_DEFAULTS();
+  let p = S.project && S.project.pricing;
+  if(!p || typeof p !== 'object'){
+    p = D;
+    if(S.project) S.project.pricing = p;
+    return p;
+  }
+  const num = (v, d) => (v == null || v === '' || isNaN(+v)) ? d : +v;
+  p.vatRate     = clamp(num(p.vatRate, D.vatRate), 0, 100);
+  p.edgeShare   = clamp(num(p.edgeShare, D.edgeShare), 0, 100);
+  p.edgePrice   = Math.max(0, num(p.edgePrice, D.edgePrice));
+  p.doorW       = Math.max(200, num(p.doorW, D.doorW));
+  p.vatIncluded = p.vatIncluded !== false;
+  p.inPrint     = p.inPrint !== false;
+  p.groups = D.groups.map(d => {
+    const f = (Array.isArray(p.groups) ? p.groups.find(g => g && g.id === d.id) : null) || {};
+    return {
+      id:    d.id,
+      name:  (f.name && String(f.name).trim()) || d.name,
+      bw:    Math.max(200, num(f.bw, d.bw)),
+      bh:    Math.max(200, num(f.bh, d.bh)),
+      price: Math.max(0, num(f.price, d.price)),
+      waste: clamp(num(f.waste, d.waste), 0, 100)
+    };
+  });
+  return p;
+}
+
+/* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
+function materialParts(){
+  const P = pricing();
+  const parts = [];
+  const add = (group, label, w, h, qty) => {
+    if(!(w > 0) || !(h > 0) || !(qty > 0)) return;
+    parts.push({ group, label, w:Math.round(w), h:Math.round(h), qty });
+  };
+
+  for(const e of S.project.elements){
+    const k = elKind3(e);
+    const q = Math.max(1, Math.round(e.qty || 1));
+    const W = elFrontW(e), D = elFrontD(e), H = elH3(e);
+    const tag = (e.name || (k === 'upper' ? 'Horní skříň' : k === 'column' ? 'Sloup' : 'Spodní skříň'))
+              + (q > 1 ? ' (' + q + '×)' : '');
+    /* korpus: 2 bočnice, dno, horní deska, 2 police */
+    add('body', tag + ' – bočnice',        D, H, 2*q);
+    add('body', tag + ' – dno',            W, D, 1*q);
+    add('body', tag + ' – horní deska',    W, D, 1*q);
+    add('body', tag + ' – police',         W, Math.max(200, D - 20), 2*q);
+    /* zadní díl ze sololitu */
+    add('back', tag + ' – zadní díl',      W, H, 1*q);
+    /* čela – jen skříně; sloup = vestavěný spotřebič (vlastní čela) */
+    if(k === 'base' || k === 'upper'){
+      const nD = Math.max(1, Math.ceil(W / Math.max(200, +P.doorW || 600)));
+      add('front', tag + ' – čelo', W / nD, H, nD*q);
+    }
+    /* bok+ na každé zapnuté straně */
+    if(bokAny(e)){
+      const nb = (bokHas(e,'L') ? 1 : 0) + (bokHas(e,'R') ? 1 : 0);
+      add('bok', tag + ' – bok+', bokDepthOf(e), bokH(e), nb*q);
+    }
+  }
+
+  /* pracovní deska a sokl pod souvislými řadami DS */
+  dsRuns().forEach((r, i) => {
+    const horiz = (r.f === 'jih' || r.f === 'sever');
+    const along = horiz ? (r.x1 - r.x0) : (r.y1 - r.y0);
+    const deep  = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);
+    add('top', 'Pracovní deska – DS řada ' + (i+1), along + 20, deep + 20, 1);
+    add('bok', 'Sokl – DS řada ' + (i+1),           along + SOKL_RESERVE, B3D.sokl, 1);
+  });
+
+  return parts;
+}
+
+const num2 = n => (Math.round(n*100)/100).toLocaleString('cs-CZ',
+  { minimumFractionDigits:2, maximumFractionDigits:2 }).replace(/\u00A0|\u202F/g, ' ');
+const kc = n => Math.round(n).toLocaleString('cs-CZ').replace(/\u00A0|\u202F/g, ' ') + ' Kč';
+
+/* Výpočet: plocha → celé desky s prořezem → cena; hrany z obvodů dílů. */
+function priceCalc(){
+  const P = pricing();
+  const parts = materialParts();
+  const area = {};
+  let edgeM = 0;
+  for(const pt of parts){
+    area[pt.group] = (area[pt.group] || 0) + (pt.w * pt.h / 1e6) * pt.qty;
+    if(pt.group !== 'back')                       // sololitové záda se nehraní
+      edgeM += 2 * (pt.w + pt.h) / 1000 * pt.qty;
+  }
+  edgeM = edgeM * (P.edgeShare / 100);
+
+  const rows = P.groups.map(g => {
+    const a  = area[g.id] || 0;
+    const ba = (g.bw * g.bh) / 1e6;                       // plocha jedné desky [m²]
+    const need = a * (1 + (+g.waste || 0) / 100);         // včetně prořezu
+    const sheets = (a > 0 && ba > 0) ? Math.ceil(need / ba) : 0;
+    return { g, area:a, need, boardArea:ba, sheets, total:sheets * (+g.price || 0) };
+  });
+
+  const edgeTotal = edgeM * (+P.edgePrice || 0);
+  const materialTotal = rows.reduce((s2, r) => s2 + r.total, 0) + edgeTotal;
+  const rate = +P.vatRate || 0;
+  let base, vat, total;
+  if(P.vatIncluded){                 // ceny už DPH obsahují
+    total = materialTotal;
+    base  = total / (1 + rate/100);
+    vat   = total - base;
+  } else {                           // k cenám se DPH připočte
+    base  = materialTotal;
+    vat   = base * rate/100;
+    total = base + vat;
+  }
+  return {
+    parts, rows, edgeM, edgeTotal, materialTotal,
+    base, vat, total, rate, vatIncluded:P.vatIncluded,
+    sheets: rows.reduce((s2, r) => s2 + r.sheets, 0)
+  };
+}
+
+/* ── okno s kalkulací ── */
+function renderPriceModal(){
+  const P = pricing(), C = priceCalc();
+  const rowsHtml = C.rows.map(r => `
+    <tr>
+      <td>
+        <input class="p-in p-name" data-g="${r.g.id}" data-f="name" value="${esc(r.g.name)}">
+        <div class="p-sub">deska
+          <input class="p-in num" type="number" step="10" min="200" data-g="${r.g.id}" data-f="bw" value="${r.g.bw}"> ×
+          <input class="p-in num" type="number" step="10" min="200" data-g="${r.g.id}" data-f="bh" value="${r.g.bh}"> mm
+        </div>
+      </td>
+      <td class="num" id="pArea_${r.g.id}">${num2(r.area)} m²</td>
+      <td class="num"><input class="p-in num" type="number" step="1" min="0" max="100" data-g="${r.g.id}" data-f="waste" value="${r.g.waste}"> %</td>
+      <td class="num" id="pSheets_${r.g.id}"><b>${r.sheets}</b> ks</td>
+      <td class="num"><input class="p-in num" type="number" step="10" min="0" data-g="${r.g.id}" data-f="price" value="${r.g.price}"></td>
+      <td class="num" id="pTotal_${r.g.id}"><b>${kc(r.total)}</b></td>
+    </tr>`).join('');
+
+  const partsRows = C.parts.map(pt => `<tr>
+      <td>${esc(pt.label)}</td>
+      <td class="num">${pt.qty}×</td>
+      <td class="num">${fmt(pt.w)} × ${fmt(pt.h)}</td>
+      <td class="num">${num2(pt.w * pt.h / 1e6 * pt.qty)} m²</td>
+    </tr>`).join('');
+
+  $('#priceBody').innerHTML = `
+    <div class="p-sum">
+      <div><span>Materiál celkem</span><b id="pSumTotal">${kc(C.total)}</b>
+        <small id="pSumHint">${C.vatIncluded ? 'včetně DPH' : 'bez DPH'} ${fmt(C.rate)} %</small></div>
+      <div><span>Bez DPH</span><b id="pSumBase">${kc(C.base)}</b><small>základ daně</small></div>
+      <div><span>DPH</span><b id="pSumVat">${kc(C.vat)}</b><small>${fmt(C.rate)} %</small></div>
+      <div><span>Desek celkem</span><b id="pSumSheets">${C.sheets} ks</b><small>včetně prořezu</small></div>
+    </div>
+
+    <div class="p-h">Deskový materiál</div>
+    <table class="p-tbl">
+      <thead><tr>
+        <th>Materiál</th><th class="num">Plocha</th><th class="num">Prořez</th>
+        <th class="num">Desky</th><th class="num">Kč / deska</th><th class="num">Celkem</th>
+      </tr></thead>
+      <tbody>${rowsHtml}
+        <tr>
+          <td><b>Hrana ABS</b><div class="p-sub">obvod dílů × podíl hranění</div></td>
+          <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m</td>
+          <td class="num"><input class="p-in num" id="pEdgeShare" type="number" min="0" max="100" step="5" value="${P.edgeShare}"> %</td>
+          <td class="num">—</td>
+          <td class="num"><input class="p-in num" id="pEdgePrice" type="number" min="0" step="1" value="${P.edgePrice}"></td>
+          <td class="num" id="pEdgeTotal"><b>${kc(C.edgeTotal)}</b></td>
+        </tr>
+      </tbody>
+      <tfoot><tr>
+        <td colspan="5"><b>Materiál celkem</b></td>
+        <td class="num"><b id="pFootTotal">${kc(C.total)}</b></td>
+      </tr></tfoot>
+    </table>
+
+    <div class="p-h">Nastavení</div>
+    <div class="p-sub" style="gap:16px;font-size:12.5px">
+      <label><input type="checkbox" id="pVatIncl" ${P.vatIncluded ? 'checked' : ''}> ceny v ceníku jsou včetně DPH</label>
+      <label>sazba DPH <input class="p-in num" id="pVat" type="number" min="0" max="100" step="1" value="${P.vatRate}"> %</label>
+      <label>max šířka čela <input class="p-in num" id="pDoorW" type="number" min="200" step="50" value="${P.doorW}"> mm</label>
+      <label><input type="checkbox" id="pInPrint" ${P.inPrint ? 'checked' : ''}> přidat kalkulaci do PDF</label>
+    </div>
+
+    <details class="p-det">
+      <summary>Rozpis dílů (${C.parts.length} položek)</summary>
+      <div class="p-scroll">
+        <table class="p-tbl small">
+          <thead><tr><th>Díl</th><th class="num">Ks</th><th class="num">Rozměr (mm)</th><th class="num">Plocha</th></tr></thead>
+          <tbody>${partsRows}</tbody>
+        </table>
+      </div>
+    </details>
+
+    <div class="p-note">
+      <b>Co je v ceně:</b> deskový materiál (korpusy, čela, pracovní deska, bok+, sokl, zadní díly) a hrany.
+      Počítají se celé desky včetně prořezu, takže cena je nákupní, ne „prořezaná".
+      <b>Co v ceně není:</b> kování (panty, pojezdy, úchytky), práce, montáž a doprava – to doplníme v další fázi.
+    </div>`;
+  bindPriceInputs();
+  updatePriceTotals();
+}
+
+function bindPriceInputs(){
+  const body = $('#priceBody');
+  if(!body || body._pbound) return;
+  body._pbound = true;
+  body.addEventListener('input', ev => {
+    const el = ev.target, P = pricing();
+    if(el.dataset && el.dataset.g){
+      const g = P.groups.find(x => x.id === el.dataset.g);
+      if(g){
+        const f = el.dataset.f;
+        if(f === 'name') g.name = String(el.value).slice(0, 60) || g.name;
+        else if(f === 'bw' || f === 'bh') g[f] = clamp(+el.value || 0, 200, 20000);
+        else if(f === 'waste') g.waste = clamp(+el.value || 0, 0, 100);
+        else if(f === 'price') g.price = Math.max(0, +el.value || 0);
+        updatePriceTotals();
+      }
+      return;
+    }
+    if(el.id === 'pEdgePrice'){ P.edgePrice = Math.max(0, +el.value || 0); updatePriceTotals(); }
+    else if(el.id === 'pEdgeShare'){ P.edgeShare = clamp(+el.value || 0, 0, 100); updatePriceTotals(); }
+    else if(el.id === 'pVat'){ P.vatRate = clamp(+el.value || 0, 0, 100); updatePriceTotals(); }
+    else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
+    else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
+    else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
+  });
+}
+
+/* Přepočítá jen čísla v otevřeném okně – fokus v poli zůstane. */
+function updatePriceTotals(){
+  const C = priceCalc();
+  for(const r of C.rows){
+    const a = $('#pArea_' + r.g.id);   if(a) a.textContent = num2(r.area) + ' m²';
+    const sh = $('#pSheets_' + r.g.id); if(sh) sh.innerHTML = '<b>' + r.sheets + '</b> ks';
+    const t = $('#pTotal_' + r.g.id);  if(t) t.innerHTML = '<b>' + kc(r.total) + '</b>';
+  }
+  const em = $('#pEdgeM');    if(em) em.textContent = num2(C.edgeM);
+  const et = $('#pEdgeTotal'); if(et) et.innerHTML = '<b>' + kc(C.edgeTotal) + '</b>';
+  const st = $('#pSumTotal'); if(st) st.textContent = kc(C.total);
+  const sb = $('#pSumBase');  if(sb) sb.textContent = kc(C.base);
+  const sv = $('#pSumVat');   if(sv) sv.textContent = kc(C.vat);
+  const ss = $('#pSumSheets'); if(ss) ss.textContent = C.sheets + ' ks';
+  const ft = $('#pFootTotal'); if(ft) ft.innerHTML = '<b>' + kc(C.total) + '</b>';
+  const sh = $('#pSumHint');  if(sh) sh.textContent = (C.vatIncluded ? 'včetně DPH' : 'bez DPH') + ' ' + fmt(C.rate) + ' %';
+  save();
+}
+
+function openPriceModal(){
+  if(!S.project.elements.length){ toast('Nejdřív nakresli aspoň jednu skříň'); return; }
+  renderPriceModal();
+  $('#modalPrice').classList.remove('hidden');
+}
+function closePriceModal(){ $('#modalPrice').classList.add('hidden'); }
+function resetPricing(){
+  S.project.pricing = PRICE_DEFAULTS();
+  renderPriceModal();
+  save();
+  toast('Ceník vrácen na výchozí ceny');
+}
+function savePricing(){
+  pricing();
+  save();
+  toast('Kalkulace uložena do projektu – najdeš ji i v PDF');
+}
+
+/* ── kalkulace jako stránka pro tisk / PDF ── */
+function pricePageHtml(opt){
+  opt = opt || {};
+  const C = priceCalc(), info = S.project.info;
+  const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ',
+    { day:'numeric', month:'long', year:'numeric' });
+  const rows = C.rows.filter(r => r.area > 0 || r.sheets > 0).map(r => `<tr>
+      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">deska ${fmt(r.g.bw)} × ${fmt(r.g.bh)} mm · prořez ${r.g.waste} %</span></td>
+      <td class="num">${num2(r.area)}</td>
+      <td class="num">${r.sheets}</td>
+      <td class="num">${fmt(r.g.price)}</td>
+      <td class="num">${fmt(r.total)}</td>
+    </tr>`).join('');
+  const foot = opt.page
+    ? `<div class="pr-foot"><span>${esc(info.name || 'Projekt')} – kalkulace materiálu</span><span>Strana ${opt.page} / ${opt.total}</span></div>`
+    : '';
+  return `
+  <section class="pr-page">
+    <div class="pr-head">
+      <div><span class="pr-kicker">Příloha</span><h2>Kalkulace materiálu</h2></div>
+      <div class="pr-meta">${esc(info.name || '')}<br>${dateCs}${info.client ? '<br>' + esc(info.client) : ''}</div>
+    </div>
+
+    <table class="pr-table">
+      <thead><tr>
+        <th>Materiál</th><th class="num">Plocha (m²)</th><th class="num">Desky (ks)</th>
+        <th class="num">Kč / deska</th><th class="num">Celkem (Kč)</th>
+      </tr></thead>
+      <tbody>${rows}
+        <tr>
+          <td>Hrana ABS – obvod dílů ${num2(C.edgeM)} m × ${fmt(pricing().edgePrice)} Kč/m
+            (hraní ${pricing().edgeShare} %)</td>
+          <td class="num">—</td><td class="num">—</td><td class="num">—</td>
+          <td class="num">${fmt(C.edgeTotal)}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr><td colspan="4">Materiál celkem ${C.vatIncluded ? 'včetně DPH' : 'bez DPH'}</td>
+            <td class="num">${fmt(C.materialTotal)}</td></tr>
+        ${C.vatIncluded
+          ? `<tr><td colspan="4">z toho DPH ${fmt(C.rate)} %</td><td class="num">${fmt(C.vat)}</td></tr>
+             <tr><td colspan="4">Bez DPH</td><td class="num">${fmt(C.base)}</td></tr>
+             <tr><td colspan="4"><b>Celkem s DPH</b></td><td class="num"><b>${fmt(C.total)}</b></td></tr>`
+          : `<tr><td colspan="4">DPH ${fmt(C.rate)} %</td><td class="num">${fmt(C.vat)}</td></tr>
+             <tr><td colspan="4"><b>Celkem s DPH</b></td><td class="num"><b>${fmt(C.total)}</b></td></tr>`}
+      </tfoot>
+    </table>
+
+    <div style="margin-top:6mm;display:flex;gap:6mm">
+      <div style="flex:1;border:.6pt solid #ccc;border-radius:2mm;padding:3mm 4mm">
+        <div style="font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#777">Desek celkem</div>
+        <div style="font-size:15pt;font-weight:700">${C.sheets} ks</div>
+      </div>
+      <div style="flex:2;border:.6pt solid #ccc;border-radius:2mm;padding:3mm 4mm">
+        <div style="font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#777">Rozsah kalkulace</div>
+        <div style="font-size:9pt;line-height:1.5">Deskový materiál (korpusy, čela, pracovní deska, bok+, sokl, zadní díly)
+          a hrany. Počítají se celé desky včetně prořezu. Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
+      </div>
+    </div>
+    ${foot}
+  </section>`;
+}
+
+function printPriceOnly(){
+  if(!S.project.elements.length){ toast('Není co počítat – nakresli aspoň jednu skříň'); return; }
+  const P = PAPER[S.project.info.paper] || PAPER.A4L;
+  $('#printRoot').innerHTML = `<style>
+    @page { size: ${P.w}mm ${P.h}mm; margin: 0; }
+    .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
+  </style>` + pricePageHtml();
+  toast('V dialogu tisku zvol „Uložit jako PDF“');
+  setTimeout(() => window.print(), 250);
 }
 
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
@@ -3930,7 +4343,8 @@ function buildPrint(){
   const fHS = e => { const k = elKind3(e); return k==='upper' || k==='column'; };
   const showDS = els.some(fDS);
   const showHS = els.some(fHS);
-  const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0);
+  const showPrice = !!(els.length && pricing().inPrint);
+  const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0) + (showPrice?1:0);
   let pg = 1;
   const drawOne = (kicker, title, sub, filter, fname) => {
     pg++;
@@ -4065,6 +4479,9 @@ function buildPrint(){
       <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – výpis prvků</span><span>Strana ${(++pg)} / ${nPages}</span></div>
     </section>`);
   }
+
+  /* 4) kalkulace materiálu (jen když je co počítat) */
+  if(showPrice) pages.push(pricePageHtml({ page: ++pg, total: nPages }));
 
   /* Rozměr stránky musí odpovídat zvolenému papíru – jinak tiskárna výkres
      přeškáluje a čáry přestanou sedět. */
@@ -4353,6 +4770,12 @@ function bindUi(){
   $('#btnZoomOut').onclick = () => zoomBy(1/1.25);
   $('#btnFit').onclick = () => fitView();
   $('#btnSave').onclick = () => { save(); exportJson(); toast('Uloženo do souboru JSON'); };
+  $('#btnPrice').onclick = openPriceModal;
+  $('#btnPriceClose').onclick = closePriceModal;
+  $('#btnPriceSave').onclick = () => { savePricing(); closePriceModal(); };
+  $('#btnPricePrint').onclick = printPriceOnly;
+  $('#btnPriceReset').onclick = resetPricing;
+  $('#modalPrice').addEventListener('click', ev => { if(ev.target.id === 'modalPrice') closePriceModal(); });
   $('#btnPdf').onclick = doExportPdf;
   $('#btnPng').onclick = doExportPng;
   $('#btnImport').onclick = () => $('#fileInput').click();
@@ -4441,6 +4864,7 @@ function loadProject(p, {resetHistory=true}={}){
     symbols: (p.symbols||[]).map(o => ({ ...o, id:o.id||uid('s'), x:+o.x||0, y:+o.y||0,
       type:symType(o.type).id, note:o.note||'', wallId:o.wallId ?? null,
       seg:+o.seg||0, along:+o.along||0, off:+o.off||0 })),
+    pricing: (p.pricing && typeof p.pricing === 'object') ? p.pricing : PRICE_DEFAULTS(),
     created: p.created || new Date().toISOString()
   };
   S.sel = null;
