@@ -3276,10 +3276,15 @@ const UP_H_DFLT   = 710;   // výška horní skříně po přepnutí [mm]
 const SOKL_RESERVE = 100;  // rezerva k délce soklu [mm] na každou řadu DS
 
 /* ── verze výchozího ceníku (kvůli migraci starých projektů) ── */
-var PRICE_VER = 2;
+var PRICE_VER = 3;
 /* Ceny, se kterými appka začínala – pozná se podle nich neupravený ceník
    a při změně výchozích cen se automaticky přepíše na nové. */
+/* Staré výchozí ceny ze starších verzí appky – podle nich se pozná
+   neupravená položka a přepíše se na aktuální výchozí cenu. */
 var PRICE_OLD_DEFAULTS = { body:1290, front:1690, top:2490, bok:1290, back:390 };
+var PRICE_OLD_NAMES = { back:'Zadní díl – sololit 3 mm' };
+/* aktuální výchozí ceny – pro migraci z jakékoli starší verze */
+var PRICE_NEW_COMING = { body:2400, front:2400, top:5500, bok:2400, back:850 };
 
 function hexRgb(h){
   const m = /^#?([0-9a-f]{6})$/i.exec(String(h||'').trim());
@@ -4019,7 +4024,7 @@ function PRICE_DEFAULTS(){ return ({
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
     { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:600,  price:5500, waste:10 },
     { id:'bok',   name:'Bok+ a sokl – lamino DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
-    { id:'back',  name:'Zadní díl – sololit 3 mm',         bw:2800, bh:2070, price:390,  waste:15 }
+    { id:'back',  name:'Zadní díl – HDF 3 mm',             bw:2800, bh:2070, price:850,  waste:15 }
   ]
 }); }
 
@@ -4038,13 +4043,18 @@ function pricing(){
      výchozí. Ručně přepsané ceny zůstanou. */
   if(p.v !== PRICE_VER){
     const fresh = PRICE_DEFAULTS();
+    const OLD_PRICES = [PRICE_OLD_DEFAULTS, { body:2400, front:2400, top:5500, bok:2400, back:390 }];
     if(Array.isArray(p.groups)){
       for(const g of p.groups){
-        const oldP = PRICE_OLD_DEFAULTS[g && g.id];
-        if(oldP == null || +g.price !== oldP) continue;
+        if(!g || !g.id) continue;
         const nw = fresh.groups.find(f => f.id === g.id);
         if(!nw) continue;
-        g.price = nw.price;
+        /* cena: přepiš, jen když je to některá ze starých výchozích hodnot */
+        const isOldDefault = OLD_PRICES.some(t => t[g.id] != null && +g.price === t[g.id]);
+        if(isOldDefault) g.price = PRICE_NEW_COMING[g.id] != null ? PRICE_NEW_COMING[g.id] : nw.price;
+        /* název: starý výchozí název („sololit“) přejmenuj na nový („HDF“) */
+        const oldName = PRICE_OLD_NAMES[g.id];
+        if(oldName && String(g.name || '').trim() === oldName) g.name = nw.name;
         if(g.name === undefined || g.name === null || String(g.name).trim() === '') g.name = nw.name;
       }
     }
@@ -4091,8 +4101,8 @@ function materialParts(){
     add('body', tag + ' – dno',            W, D, 1*q);
     add('body', tag + ' – horní deska',    W, D, 1*q);
     add('body', tag + ' – police',         W, Math.max(200, D - 20), 2*q);
-    /* zadní díl ze sololitu */
-    add('back', tag + ' – zadní díl',      W, H, 1*q);
+    /* zadní díl z HDF */
+    add('back', tag + ' – zadní díl (HDF)', W, H, 1*q);
     /* čela – jen když je uživatel u skříně zapne; sloup = vestavěný
        spotřebič (vlastní čela), u sloupů se nepočítají nikdy */
     const FR = frontCfg(e);
@@ -4139,7 +4149,7 @@ function priceCalc(){
   let edgeM = 0;
   for(const pt of parts){
     area[pt.group] = (area[pt.group] || 0) + (pt.w * pt.h / 1e6) * pt.qty;
-    if(pt.group !== 'back')                       // sololitové záda se nehraní
+    if(pt.group !== 'back')                       // HDF záda se nehraní
       edgeM += 2 * (pt.w + pt.h) / 1000 * pt.qty;
   }
   edgeM = edgeM * (P.edgeShare / 100);
