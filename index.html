@@ -4150,6 +4150,32 @@ function materialParts(){
      délka řady + 2 × hloubka pracovní desky + rezerva
    Počítá se po celých panelech (zástěna) a celých lištách (TL) – obě
    položky mají standardní délku 4 100 mm. */
+/* Jak blízko musí být konec řady k druhé (kolmé) řadě, aby to byl roh [mm]. */
+const ZAST_CORNER_TOL = 150;
+
+/* Je konec řady `r` na souřadnici `at` (podél její délky) ROH s jinou řadou?
+   Roh = tam navazuje kolmá řada skříněk. Zástěna v rohu jen ohne kolem zdi,
+   žádný návrat na hloubku pracovní desky se tam NEPŘIDÁVÁ – jinak by se
+   v L/U tvaru počítal dvakrát (jednou na konci každé řady). */
+function runEndIsCorner(runs, r, at){
+  const tol = ZAST_CORNER_TOL;
+  const rH = (r.f === 'jih' || r.f === 'sever');        // řada jde po ose X
+  for(const b of runs){
+    if(b === r) continue;
+    const bH = (b.f === 'jih' || b.f === 'sever');
+    if(bH === rH) continue;                             // jen kolmé řady
+    if(rH){
+      /* r po ose X (konec = X), b po ose Y (jeho hloubka je v X) */
+      if(at >= b.x0 - tol && at <= b.x1 + tol &&
+         b.y0 <= r.y1 + tol && b.y1 >= r.y0 - tol) return true;
+    } else {
+      if(at >= b.y0 - tol && at <= b.y1 + tol &&
+         b.x0 <= r.x1 + tol && b.x1 >= r.x0 - tol) return true;
+    }
+  }
+  return false;
+}
+
 function zastCalc(){
   const P = pricing();
   if(!P.zastena) return null;
@@ -4159,24 +4185,30 @@ function zastCalc(){
   const reserve = clamp(+P.zastReserve || 0, 0, 2000);
   const panelL  = Math.max(200, +gZ.bw || 4100);     // délka panelu zástěny
   const stripL  = Math.max(200, +gT.bw || 4100);     // délka lišty TL
+  const all = dsRuns();
   const runs = [];
-  let totalLen = 0, nZ = 0, nT = 0;
-  dsRuns().forEach((r, i) => {
+  let totalLen = 0, nZ = 0, nT = 0, nReturns = 0;
+  all.forEach((r, i) => {
     const horiz = (r.f === 'jih' || r.f === 'sever');
     const along = horiz ? (r.x1 - r.x0) : (r.y1 - r.y0);   // podél stěny
     const deep  = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);   // hloubka sestavy
     const returnD = deep + 20;                              // ohyb na hloubku desky
-    const len = along + 2*returnD + reserve;
+    /* konce řady: v rohu s jinou řadou se ohyb nepřidává */
+    const corner0 = runEndIsCorner(all, r, horiz ? r.x0 : r.y0);
+    const corner1 = runEndIsCorner(all, r, horiz ? r.x1 : r.y1);
+    const nRet = (corner0 ? 0 : 1) + (corner1 ? 0 : 1);
+    const len = along + nRet*returnD + reserve;
     const pcsZ = Math.ceil(len / panelL);
     const pcsT = Math.ceil(len / stripL);
-    totalLen += len; nZ += pcsZ; nT += pcsT;
-    runs.push({ i:i+1, along, returnD, reserve, len, pcsZ, pcsT });
+    totalLen += len; nZ += pcsZ; nT += pcsT; nReturns += nRet;
+    runs.push({ i:i+1, along, deep, returnD, reserve, len, pcsZ, pcsT,
+                nRet, corner0, corner1 });
   });
   return {
     runs, totalLen, nZ, nT, gZ, gT,
     totalZ: nZ * (+gZ.price || 0),
     totalT: nT * (+gT.price || 0),
-    reserve, panelL, stripL
+    reserve, panelL, stripL, nReturns
   };
 }
 
@@ -4265,20 +4297,26 @@ function setAllFronts(on){
 /* Malá tabulka: jak se zástěna spočítala po jednotlivých řadách DS. */
 function theadRuns(Z){
   if(!Z || !Z.runs.length) return '';
-  const rows = Z.runs.map(r => `<tr>
-      <td>DS řada ${r.i}</td>
+  const rows = Z.runs.map(r => {
+    const rohy = (r.corner0 ? 1 : 0) + (r.corner1 ? 1 : 0);
+    const badge = rohy === 2 ? ' <span style="color:var(--ink-3);font-weight:400">(2 rohy)</span>'
+                : rohy === 1 ? ' <span style="color:var(--ink-3);font-weight:400">(roh)</span>' : '';
+    return `<tr>
+      <td>DS řada ${r.i}${badge}</td>
       <td class="num">${fmt(Math.round(r.along))}</td>
-      <td class="num">2 × ${fmt(Math.round(r.returnD))}</td>
+      <td class="num">${r.nRet ? (r.nRet + ' × ' + fmt(Math.round(r.returnD))) : '—'}</td>
       <td class="num">${fmt(r.reserve)}</td>
       <td class="num"><b>${fmt(Math.round(r.len))}</b> mm</td>
       <td class="num">${r.pcsZ} / ${r.pcsT}</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   return `
     <table class="p-tbl small" style="margin-bottom:8px">
-      <thead><tr><th>Řada</th><th class="num">Podél stěny</th><th class="num">Ohyby (2×)</th>
+      <thead><tr><th>Řada</th><th class="num">Podél stěny</th><th class="num">Ohyby</th>
         <th class="num">Rezerva</th><th class="num">Délka zástěny</th><th class="num">Panely / lišty</th></tr></thead>
       <tbody>${rows}</tbody>
-      <tfoot><tr><td colspan="4">Celkem</td>
+      <tfoot><tr><td colspan="3">Celkem (${Z.nReturns} ohyby)</td>
+        <td class="num">${fmt(Z.runs.reduce((a,r)=>a+r.reserve,0))}</td>
         <td class="num"><b>${fmt(Math.round(Z.totalLen))}</b> mm</td>
         <td class="num"><b>${Z.nZ} / ${Z.nT}</b></td></tr></tfoot>
     </table>`;
@@ -4358,10 +4396,12 @@ function renderPriceModal(){
     <label class="chk" style="margin-bottom:6px">
       <input type="checkbox" id="pZast" ${P.zastena ? 'checked' : ''}> počítat zástěnu + TL (těsnící lištu)
     </label>
-    <p class="p-sub" style="margin:0 0 6px">
-      Délka = délka řady + 2× ohyb na hloubku pracovní desky + rezerva
+    <p class="p-sub" style="margin:0 0 4px">
+      Délka = délka řady + ohyb na hloubku pracovní desky (na volných koncích) + rezerva
       <input class="p-in num" id="pZastRes" type="number" min="0" max="2000" step="10" value="${P.zastReserve}"> mm
     </p>
+    <p class="p-note" style="margin:0 0 6px">V rozích (kuchyně do L nebo U) se ohyb <b>nepřidává</b> –
+      zástěna tam navazuje na druhou stěnu, takže se 600 mm nepočítá dvakrát.</p>
     ${C.zast ? theadRuns(C.zast) : '<p class="p-note" style="margin-top:0">Zástěna se zatím nepočítá – zapni ji, když ji má kuchyně mít.</p>'}
 
     <div class="p-h">Nastavení</div>
