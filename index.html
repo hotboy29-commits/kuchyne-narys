@@ -3477,7 +3477,7 @@ function dsRuns(){
     let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity;
     for(const e of r.el){ x0=Math.min(x0,e.x); y0=Math.min(y0,e.y); x1=Math.max(x1,e.x+e.w); y1=Math.max(y1,e.y+e.d); }
     const len = (r.f==='jih'||r.f==='sever') ? (x1-x0) : (y1-y0);
-    out.push({ f:r.f, face:r.face, len, x0, y0, x1, y1, n:r.n });
+    out.push({ f:r.f, face:r.face, len, x0, y0, x1, y1, n:r.n, el:r.el });
   }
   return out;
 }
@@ -4092,6 +4092,88 @@ function pricing(){
   return p;
 }
 
+/* ── DĚLENÍ DLOUHÝCH DÍLŮ NA SPÁRY SKŘÍNÍ ────────────────────────────
+   Sokl ani pracovní deska nemohou být delší než deska, ze které se řežou.
+   Když je řada delší, rozdělí se na víc kusů – a hranice kusů se trefí
+   na spáru mezi skříněmi (spára v soklu pak sedí na spáru korpusů). */
+
+/* Délky jednotlivých skříní v řadě, včetně mezer mezi nimi.
+   Součet = délka celé řady. */
+function runSegs(r){
+  const horiz = (r.f === 'jih' || r.f === 'sever');
+  const list = (r.el || []).map(e => {
+    const a = horiz ? e.x : e.y;
+    const b = horiz ? (e.x + e.w) : (e.y + e.d);
+    return { a, b };
+  }).sort((p,q) => p.a - q.a);
+  if(!list.length) return [ Math.max(0, r.len) ];
+  const runEnd = horiz ? r.x1 : r.y1;
+  const out = [];
+  for(let i=0;i<list.length;i++){
+    const start = list[i].a;
+    const end = (i+1 < list.length) ? list[i+1].a : Math.max(list[i].b, runEnd);
+    out.push(Math.max(0, end - start));
+  }
+  return out;
+}
+
+/* Rozdělí sled skříní na kusy, které se vejdou na desku.
+   Kus končí vždy na spáře skříně; jen skříň širší než deska se dělí v půli. */
+function splitPieces(segs, maxPiece){
+  const M = Math.max(100, +maxPiece || 2800);
+  const out = [];
+  let cur = 0;
+  for(const L of segs){
+    if(L > M + 0.5){                      // jediná skříň širší než deska
+      if(cur > 0.5){ out.push(cur); cur = 0; }
+      const n = Math.ceil(L / M);
+      for(let i=0;i<n;i++) out.push(L / n);
+      continue;
+    }
+    if(cur + L > M + 0.5){ out.push(cur); cur = L; }
+    else cur += L;
+  }
+  if(cur > 0.5) out.push(cur);
+  return out;
+}
+
+/* Přidá rezervu (přídavek na řez/dorovnání) – nejdřív na poslední kus,
+   když se nevejde, tak na první, případně na další, které mají místo. */
+function addReserve(pieces, reserve, maxPiece){
+  let rem = +reserve || 0;
+  if(rem <= 0.5) return pieces;
+  const order = [pieces.length-1, 0];
+  for(let i=0;i<pieces.length;i++) order.push(i);
+  for(const i of order){
+    if(rem <= 0.5) break;
+    if(pieces[i] == null) continue;
+    const room = maxPiece - pieces[i];
+    if(room <= 0.5) continue;
+    const d = Math.min(room, rem);
+    pieces[i] += d; rem -= d;
+  }
+  if(rem > 0.5) pieces.push(rem);
+  return pieces;
+}
+
+/* Kusy soklu a pracovní desky pro jednu řadu (zaokrouhlené mm). */
+function soklPiecesForRun(r){
+  const P = pricing();
+  const g = P.groups.find(x => x.id === 'bok');
+  const maxPiece = Math.max(200, (g ? g.bw : 2800) - (+P.kerf || 0));
+  const pieces = splitPieces(runSegs(r), maxPiece);
+  addReserve(pieces, SOKL_RESERVE, maxPiece);
+  return pieces.map(x => Math.round(x));
+}
+function topPiecesForRun(r){
+  const P = pricing();
+  const g = P.groups.find(x => x.id === 'top');
+  const maxPiece = Math.max(200, (g ? g.bw : 4100) - (+P.kerf || 0));
+  const pieces = splitPieces(runSegs(r), maxPiece);
+  addReserve(pieces, 20, maxPiece);
+  return pieces.map(x => Math.round(x));
+}
+
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
 function materialParts(){
   const P = pricing();
@@ -4136,13 +4218,25 @@ function materialParts(){
     }
   }
 
-  /* pracovní deska a sokl pod souvislými řadami DS */
+  /* pracovní deska a sokl pod souvislými řadami DS
+     Když je řada delší než deska, rozdělí se na kusy – hranice se trefí
+     na spáru mezi skříněmi (sokl 3 000 mm → např. 2 400 + 700). */
   dsRuns().forEach((r, i) => {
     const horiz = (r.f === 'jih' || r.f === 'sever');
-    const along = horiz ? (r.x1 - r.x0) : (r.y1 - r.y0);
     const deep  = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);
-    add('top', 'Pracovní deska – DS řada ' + (i+1), along + 20, deep + 20, 1);
-    add('bok', 'Sokl – DS řada ' + (i+1),           along + SOKL_RESERVE, B3D.sokl, 1);
+    const tP = topPiecesForRun(r), sP = soklPiecesForRun(r);
+    /* hloubka desky se bere jen ze SPODNÍCH skříní – přes sloup (lednici,
+       troubu) deska nejde, kolem něj se vyřezává; sloup bývá hlubší */
+    const perp = e => horiz ? e.d : e.w;
+    const bases = (r.el || []).filter(e => elKind3(e) === 'base');
+    const baseDeep = bases.length ? Math.max(...bases.map(perp)) : deep;
+    const topDeep = Math.min(baseDeep, deep) + 20;
+    tP.forEach((len, k) => add('top',
+      'Pracovní deska – DS řada ' + (i+1) + (tP.length > 1 ? ' (kus ' + (k+1) + '/' + tP.length + ')' : ''),
+      len, topDeep, 1));
+    sP.forEach((len, k) => add('bok',
+      'Sokl – DS řada ' + (i+1) + (sP.length > 1 ? ' (kus ' + (k+1) + '/' + sP.length + ')' : ''),
+      len, B3D.sokl, 1));
   });
 
   return parts;
@@ -4847,11 +4941,14 @@ function buildPrint(){
       const runs = dsRuns();
       if(!runs.length) return '';
       let t = 0; const rows = runs.map((r,i) => {
-        const obj = R(r.len + SOKL_RESERVE); t += obj;
-        return `<tr><td>DS řada ${i+1} (${r.n} spodních skříněk)</td>
+        const pcs = soklPiecesForRun(r);
+        const obj = pcs.reduce((a,b)=>a+b,0); t += obj;
+        const kusy = pcs.length > 1
+          ? '<div style="color:#666;font-size:7.5pt">kusy: ' + pcs.map(x=>fmt(x)).join(' + ') + ' mm</div>' : '';
+        return `<tr><td>DS řada ${i+1} (${r.n} spodních skříněk)${kusy}</td>
           <td class="num">${fmt(R(r.len))}</td>
           <td class="num">${SOKL_RESERVE}</td>
-          <td class="num">${fmt(obj)}</td></tr>`;
+          <td class="num">${pcs.length > 1 ? pcs.length + ' ks · ' : ''}${fmt(obj)}</td></tr>`;
       }).join('');
       return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Sokl (DS) – čelní, výška 150 mm, tl. 18 mm</b></div>
         <table class="pr-table" style="margin-top:1mm">
