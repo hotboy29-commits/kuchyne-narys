@@ -2210,62 +2210,94 @@ function moveSegment(wall, i, dx, dy){
 }
 
 /**
- * Srovná zeď do pravých úhlů BEZ ZMĚNY DÉLEK.
+ * Srovná zeď do pravých úhlů.
  *
- * Každý úsek si nechá svou naměřenou délku, změní se jen jeho směr —
- * a to vždy na nejbližší násobek 90° počítaný od směru PRVNÍHO úseku.
- * Díky společné referenci jsou sousední úseky buď rovnoběžné, nebo kolmé,
- * nikdy ne „téměř".
+ * Každý úsek si nechá svou naměřenou délku, změní se jen jeho směr — a to
+ * na nejbližší násobek 90°. Orientace celého půdorysu zůstává TAKOVÁ, JAK
+ * BYL NAKRESLENÝ: nákres se pootočí jen o průměrnou odchylku (váženou
+ * délkou stran), tedy nanejvýš o 45°. Neotáčí se podle nejdelší stěny —
+ * místnost nakreslená na výšku zůstane na výšku.
  *
- * Celý nákres se navíc otočí tak, aby NEJDELŠÍ stěna ležela přesně
- * vodorovně — rovnoběžně s dlouhou stranou papíru. Půdorys tak není
- * pootočený a dá se s ním pohodlně pracovat i tisknout.
+ * U uzavřené místnosti se srovnají i závěrečná strana a obvod se dorovná,
+ * aby se opravdu zavřel; když nakreslené délky protilehlých stran nesedí,
+ * upraví se o pár mm ta nejdelší (a uživatel to dostane do hlášky).
  *
- * Vrátí rozdíl v mm, o který se uzavřený obvod po srovnání nezavře
- * (0 = zavřel se přesně). Délky nikdy nepřepisujeme — nesedí-li protilehlé
- * strany, řekneme to uživateli a on si délky upraví sám.
+ * Vrací { gap, adj }:
+ *   gap – o kolik mm se obvod před dorovnáním nesešel (0 = seděl)
+ *   adj – [{ i, delta }] úpravy délek úseků, aby obvod zavřel
  */
 function orthogonalizeWall(wall){
   const n = wall.pts.length;
-  if(n < 2) return 0;
+  if(n < 2) return { gap:0, adj:[] };
   const Q = Math.PI/2;
+  const isClosed = !!wall.closed && n > 2;
+  const count = isClosed ? n : n - 1;      // uzavřený obvod má i závěrečnou stranu
   const segs = [];
-  for(let i=0;i<n-1;i++){
-    const a = wall.pts[i], b = wall.pts[i+1];
+  for(let i=0;i<count;i++){
+    const a = wall.pts[i], b = wall.pts[(i+1) % n];
     const dx = b.x-a.x, dy = b.y-a.y;
-    segs.push({ len:Math.hypot(dx,dy), ang:Math.atan2(dy,dx) });
-  }
-  /* společná reference = první úsek – sousední úseky pak vycházejí
-     buď rovnoběžné, nebo kolmé */
-  const base = segs[0].ang;
-  for(const sg of segs) sg.dir = base + Math.round((sg.ang - base)/Q)*Q;
-
-  /* otoč celý nákres, aby NEJDELŠÍ stěna ležela přesně vodorovně
-     (rovnoběžně s papírem) – pootočený půdorys se špatně kótuje i tiskne */
-  let m = 0;
-  for(let i=1;i<segs.length;i++) if(segs[i].len > segs[m].len) m = i;
-  let rot = segs[m].dir % Math.PI;
-  if(rot > Q) rot -= Math.PI;
-  if(rot < -Q) rot += Math.PI;
-  for(const sg of segs) sg.dir -= rot;
-
-  /* délky bereme z původních úseků a přenášíme je do nových směrů */
-  const p0 = wall.pts[0];
-  let x = p0.x, y = p0.y;
-  for(let i=0;i<segs.length;i++){
-    x = R(x + Math.cos(segs[i].dir)*segs[i].len);
-    y = R(y + Math.sin(segs[i].dir)*segs[i].len);
-    wall.pts[i+1] = { x, y };
+    segs.push({ i, len:Math.hypot(dx,dy), ang:Math.atan2(dy,dx) });
   }
 
-  /* u uzavřeného obvodu změříme, o kolik se konec rozešel se začátkem */
+  /* Průměrná odchylka stran od nejbližšího násobku 90° (vážená délkou) =
+     o kolik je půdorys pootočený. Srovnáme ho jen o tuhle malou hodnotu,
+     takže zůstane ve stejné orientaci, v jaké ho uživatel nakreslil. */
+  const wrapQ = a => { const r = ((a % Q) + Q) % Q; return r > Q/2 ? r - Q : r; };
+  let sx = 0, sy = 0;
+  for(const sg of segs){
+    if(!(sg.len > 1)) continue;
+    const a2 = 2*wrapQ(sg.ang);              // dvojnásobek kvůli znaménku ±45°
+    sx += Math.cos(a2)*sg.len;
+    sy += Math.sin(a2)*sg.len;
+  }
+  const alpha = (sx || sy) ? Math.atan2(sy, sx)/2 : 0;   // (-45°; 45°]
+  /* výsledný směr každé strany = násobek 90° → vše je přesně vodorovné
+     nebo svislé a sousední strany jsou vždy rovnoběžné, nebo kolmé */
+  for(const sg of segs) sg.dir = Math.round((sg.ang - alpha)/Q)*Q;
+
+  const p0 = { x:wall.pts[0].x, y:wall.pts[0].y };
+  const endPt = () => {
+    let x = p0.x, y = p0.y;
+    for(const sg of segs){ x += Math.cos(sg.dir)*sg.len; y += Math.sin(sg.dir)*sg.len; }
+    return { x, y };
+  };
+
+  /* Uzavřený obvod: dorovnání délek protilehlých stran tak, aby se obvod
+     zavřel. Mění se nejvýš dva nejdelší úseky (jeden v X, jeden v Y)
+     a jen o skutečný rozdíl – typicky pár mm. */
+  const adj = [];
   let gap = 0;
-  if(wall.closed && n > 2){
-    const last = wall.pts[n-1];
-    gap = Math.round(Math.hypot(p0.x-last.x, p0.y-last.y));
+  if(isClosed){
+    const e0 = endPt();
+    const dx = e0.x - p0.x, dy = e0.y - p0.y;
+    const fixAxis = (axis, err) => {
+      if(Math.abs(err) < 0.5) return;         // rozdíl do půl milimetru ignoruj
+      const cands = segs
+        .filter(sg => Math.abs(axis === 'x' ? Math.cos(sg.dir) : Math.sin(sg.dir)) > 0.5)
+        .sort((a,b) => b.len - a.len);
+      for(const sg of cands){
+        const u = axis === 'x' ? Math.cos(sg.dir) : Math.sin(sg.dir);
+        const d = -err / u;                   // přesně ubere/přidá přebytek v ose
+        if(sg.len + d >= 1){ sg.len += d; adj.push({ i:sg.i, delta:Math.round(d) }); return; }
+      }
+    };
+    fixAxis('x', dx);
+    fixAxis('y', dy);
+    const e1 = endPt();
+    gap = Math.round(Math.hypot(e1.x - p0.x, e1.y - p0.y));
+  }
+
+  /* přenos délek do nových směrů – body se přepíšou z počátku */
+  let x = p0.x, y = p0.y;
+  for(const sg of segs){
+    x += Math.cos(sg.dir)*sg.len;
+    y += Math.sin(sg.dir)*sg.len;
+    const idx = (sg.i + 1) % n;
+    if(idx === 0) continue;                  // závěrečná strana ústí zpět do počátku
+    wall.pts[idx] = { x:R(x), y:R(y) };
   }
   render();
-  return gap;
+  return { gap, adj };
 }
 
 /**
@@ -2933,11 +2965,16 @@ function renderInspector(){
     $('#gMake').onclick = () => guideFromWall(w, Math.max(0, +$('#gDist').value||0), $('#gSide').value);
     $('#wFlip').onclick = () => { w.side = -wallSide(w); pushHistory(); render(); };
     $('#wOrtho').onclick = () => {
-      const gap = orthogonalizeWall(w);
+      const res = orthogonalizeWall(w);
       pushHistory();
-      toast(gap > 1
-        ? `Srovnáno do pravých úhlů. Délky jsem nechal být, ale obvod se nezavírá – chybí ${fmt(gap)} mm. Uprav délky protilehlých stran.`
-        : 'Srovnáno do pravých úhlů a otočeno rovnoběžně s papírem, délky zůstaly stejné');
+      const adjTxt = res.adj.length
+        ? ' Aby obvod zavřel, upravil jsem délku: ' +
+          res.adj.map(a => `úsek ${a.i+1} ${a.delta > 0 ? '+' : ''}${fmt(a.delta)} mm`).join(', ') + '.'
+        : '';
+      const gapTxt = res.gap > 1
+        ? ` Obvod se ale pořád nesešel o ${fmt(res.gap)} mm – zkontroluj délky protilehlých stran.`
+        : '';
+      toast('Srovnáno do pravých úhlů – orientace zůstala, jak jsi ji nakreslil.' + adjTxt + gapTxt);
     };
     $('#wClose').onclick = () => { w.closed = !w.closed; pushHistory(); render(); };
     $('#wDel').onclick = deleteSelection;
