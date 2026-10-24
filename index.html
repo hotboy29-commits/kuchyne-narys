@@ -4019,6 +4019,8 @@ function PRICE_DEFAULTS(){ return ({
   edgePrice: 12,        // Kč/m hrany (s DPH)
   doorW: 600,           // max šířka jednoho čela [mm] – z ní se počítá počet dvířek
   inPrint: true,        // přidávat kalkulaci do PDF
+  kerf: 4,              // šířka řezu (prořez pilou) [mm] – počítá se do rozvržení
+  rot: false,           // smí se díly otáčet o 90° (dekor/kresba obvykle nedovolí)
   zastena: false,       // počítat zástěnu + těsnící lištu (volitelné)
   zastReserve: 100,     // rezerva k délce zástěny na každou řadu [mm]
   groups: [
@@ -4070,6 +4072,8 @@ function pricing(){
   p.doorW       = Math.max(200, num(p.doorW, D.doorW));
   p.vatIncluded = p.vatIncluded !== false;
   p.inPrint     = p.inPrint !== false;
+  p.kerf        = clamp(num(p.kerf, D.kerf), 0, 20);
+  p.rot         = p.rot === true;
   p.zastena     = p.zastena === true;
   p.zastReserve = clamp(num(p.zastReserve, D.zastReserve), 0, 2000);
   p.v = PRICE_VER;
@@ -4142,6 +4146,100 @@ function materialParts(){
   });
 
   return parts;
+}
+
+/* ── ROZVRŽENÍ DÍLŮ NA DESKY (skutečné skládání, ne jen plocha) ──────────
+   Plošný výpočet nestačí: když je mezi díly např. 600 × 2030 mm (zadní díl
+   sloupu), vezme celou výšku desky a zbytek plochy je nepoužitelný.
+   Proto se díly opravdu skládají na desku – guillotinovým řezem, s mezerou
+   na pilu (kerf). Počet desek = max(plošný výpočet s prořezem, rozvržení).
+
+   Vrací pole desek; každá má seznam volných obdélníků a umístěných dílů. */
+function packSheets(pieces, bw, bh, allowRot, kerf){
+  const K = Math.max(0, +kerf || 0);
+  const eps = 1e-6;
+  const maxL = Math.max(bw, bh);          // nejdelší rozměr desky
+  const minS = Math.min(bw, bh);          // nejkratší rozměr desky
+
+  /* 1) příprava dílů: co se na desku nevejde vcelku, rozdělí se na části
+        (v realitě se sokl i jiné dlouhé díly nastavují) – a označí se to. */
+  const list = [];
+  for(const pt of pieces){
+    const q = Math.max(0, Math.round(+pt.qty || 0));
+    for(let i=0;i<q;i++){
+      let w = +pt.w, h = +pt.h;
+      const fitsRaw = (w + K <= bw + eps && h + K <= bh + eps)
+                   || (allowRot && w + K <= bh + eps && h + K <= bw + eps);
+      if(!fitsRaw){
+        const long = Math.max(w, h), short = Math.min(w, h);
+        if(short + K > minS + eps){
+          list.push({ w, h, label:pt.label, oversize:true });
+          continue;
+        }
+        const parts = Math.max(2, Math.ceil((long + K) / maxL));
+        if(w >= h){ w = long / parts; h = short; } else { w = short; h = long / parts; }
+        for(let k=0;k<parts;k++)
+          list.push({ w, h, label:pt.label, split:true, partOf:parts });
+      } else {
+        list.push({ w, h, label:pt.label });
+      }
+    }
+  }
+
+  /* 2) co největší díly první */
+  list.sort((a,b) => (b.w*b.h) - (a.w*a.h) || (b.h - a.h) || (b.w - a.w));
+
+  const sheets = [];
+  const fits = (r, w, h) => w <= r.w + eps && h <= r.h + eps;
+
+  const findFree = (s, w, h) => {
+    let bi = -1, bestA = Infinity;
+    for(let i=0;i<s.free.length;i++){
+      const r = s.free[i];
+      if(!fits(r, w, h)) continue;
+      const a = r.w * r.h;
+      if(a < bestA - eps){ bestA = a; bi = i; }
+    }
+    return bi;
+  };
+  const place = (s, i, w, h, rot, p) => {
+    const r = s.free.splice(i,1)[0];
+    const rightW = r.w - w, topH = r.h - h;
+    if(rightW > eps) s.free.push({ x:r.x + w, y:r.y, w:rightW, h:r.h });
+    if(topH > eps)   s.free.push({ x:r.x, y:r.y + h, w:w, h:topH });
+    s.placed.push({ w, h, x:r.x, y:r.y, rot:!!rot, label:p.label,
+                    split:!!p.split, partOf:p.partOf || 1 });
+  };
+
+  /* 3) skládání: nejdřív zkus položit díl do existující desky, pak novou */
+  for(const p of list){
+    if(p.oversize){
+      const s = { free:[{ x:0, y:0, w:bw, h:bh }], placed:[], oversize:true };
+      s.placed.push({ w:p.w, h:p.h, oversize:true, label:p.label });
+      sheets.push(s);
+      continue;
+    }
+    const w = p.w + K, h = p.h + K;
+    let done = false;
+    for(const s of sheets){
+      if(s.oversize) continue;
+      let i = findFree(s, w, h);
+      if(i < 0 && allowRot) i = findFree(s, h, w);
+      if(i >= 0){
+        if(fits(s.free[i], w, h)) place(s, i, w, h, false, p);
+        else place(s, i, h, w, true, p);
+        done = true; break;
+      }
+    }
+    if(done) continue;
+
+    const s = { free:[{ x:0, y:0, w:bw, h:bh }], placed:[], oversize:false };
+    if(fits(s.free[0], w, h)) place(s, 0, w, h, false, p);
+    else if(allowRot && fits(s.free[0], h, w)) place(s, 0, h, w, true, p);
+    else { s.oversize = true; s.placed.push({ w:p.w, h:p.h, oversize:true, label:p.label }); }
+    sheets.push(s);
+  }
+  return sheets;
 }
 
 /* ── zástěna + těsnící lišta (TL) ────────────────────────────────────────
@@ -4229,12 +4327,28 @@ function priceCalc(){
   }
   edgeM = edgeM * (P.edgeShare / 100);
 
+  /* po dílech pro každou skupinu – kvůli rozvržení na desky */
+  const byGroup = {};
+  for(const pt of parts) (byGroup[pt.group] = byGroup[pt.group] || []).push(pt);
+
   const rows = P.groups.filter(g => !g.lin).map(g => {
     const a  = area[g.id] || 0;
     const ba = (g.bw * g.bh) / 1e6;                       // plocha jedné desky [m²]
     const need = a * (1 + (+g.waste || 0) / 100);         // včetně prořezu
-    const sheets = (a > 0 && ba > 0) ? Math.ceil(need / ba) : 0;
-    return { g, area:a, need, boardArea:ba, sheets, total:sheets * (+g.price || 0) };
+    const pieces = byGroup[g.id] || [];
+    const nPieces = pieces.reduce((s2, pt) => s2 + Math.max(0, Math.round(pt.qty || 0)), 0);
+    /* plošný odhad (s prořezem) */
+    const sheetsArea = (a > 0 && ba > 0) ? Math.ceil(need / ba) : 0;
+    /* skutečné rozvržení dílů na desku – vždy bereme to větší */
+    const packs = nPieces ? packSheets(pieces, g.bw, g.bh, P.rot, P.kerf) : [];
+    const sheetsPack = packs.length;
+    const oversize = packs.some(pk => pk.oversize);
+    const nSplit = packs.reduce((a,pk) => a + pk.placed.filter(q => q.split).length, 0);
+    const sheets = Math.max(sheetsArea, sheetsPack);
+    return { g, area:a, need, boardArea:ba, sheets, sheetsArea, sheetsPack,
+             nPieces, oversized:oversize, nSplit,
+             byArea: sheetsArea >= sheetsPack,
+             total:sheets * (+g.price || 0) };
   });
   /* zástěna a TL se počítají z DÉLKY, ne z plochy */
   const Z = zastCalc();
@@ -4339,9 +4453,13 @@ function renderPriceModal(){
         ${dimCell(r)}
       </td>
       <td class="num" id="pArea_${r.g.id}">${r.linear ? (num2(r.lenM) + ' m') : (num2(r.area) + ' m²')}</td>
+      <td class="num" id="pPieces_${r.g.id}">${r.linear ? '—' : r.nPieces + ' ks'}</td>
       <td class="num">${r.linear ? '—'
         : `<input class="p-in num" type="number" step="1" min="0" max="100" data-g="${r.g.id}" data-f="waste" value="${r.g.waste}"> %`}</td>
-      <td class="num" id="pSheets_${r.g.id}"><b>${r.sheets}</b> ks</td>
+      <td class="num" id="pSheets_${r.g.id}"><b>${r.sheets}</b> ks${
+        (!r.linear && r.sheetsArea !== r.sheetsPack)
+          ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : ''
+      }${r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : ''}${r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : ''}</td>
       <td class="num"><input class="p-in num" type="number" step="10" min="0" data-g="${r.g.id}" data-f="price" value="${r.g.price}"></td>
       <td class="num" id="pTotal_${r.g.id}"><b>${kc(r.total)}</b></td>
     </tr>`).join('');
@@ -4365,7 +4483,7 @@ function renderPriceModal(){
     <div class="p-h">Deskový materiál</div>
     <table class="p-tbl">
       <thead><tr>
-        <th>Materiál</th><th class="num">Plocha</th><th class="num">Prořez</th>
+        <th>Materiál</th><th class="num">Plocha</th><th class="num">Dílů</th><th class="num">Prořez</th>
         <th class="num">Desky</th><th class="num">Kč / deska</th><th class="num">Celkem</th>
       </tr></thead>
       <tbody>${rowsHtml}
@@ -4409,6 +4527,8 @@ function renderPriceModal(){
       <label><input type="checkbox" id="pVatIncl" ${P.vatIncluded ? 'checked' : ''}> ceny v ceníku jsou včetně DPH</label>
       <label>sazba DPH <input class="p-in num" id="pVat" type="number" min="0" max="100" step="1" value="${P.vatRate}"> %</label>
       <label>max šířka čela <input class="p-in num" id="pDoorW" type="number" min="200" step="50" value="${P.doorW}"> mm</label>
+      <label>řez pilou <input class="p-in num" id="pKerf" type="number" min="0" max="20" step="1" value="${P.kerf}"> mm</label>
+      <label><input type="checkbox" id="pRot" ${P.rot ? 'checked' : ''}> otáčet díly o 90°</label>
       <label><input type="checkbox" id="pInPrint" ${P.inPrint ? 'checked' : ''}> přidat kalkulaci do PDF</label>
     </div>
 
@@ -4423,6 +4543,9 @@ function renderPriceModal(){
     </details>
 
     <div class="p-note">
+      <b>Jak se počítají desky:</b> díly se skutečně rozkládají na desku (včetně řezu pilou) –
+      bere se větší číslo z plošného výpočtu s prořezem a ze skutečného rozvržení. Plošný odhad sám
+      podcení, když je mezi díly něco přes celou výšku desky (např. zadní díl sloupu 600 × 2030).
       <b>Co je v ceně:</b> deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
       čela – jen u skříní, kde jsou zapnutá –, zástěna s TL (je-li zapnutá) a hrany. Počítají se celé desky včetně
       prořezu, takže cena je nákupní, ne „prořezaná".
@@ -4457,6 +4580,8 @@ function bindPriceInputs(){
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
+    else if(el.id === 'pKerf'){ P.kerf = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
+    else if(el.id === 'pRot'){ P.rot = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pZast'){ P.zastena = !!el.checked; renderPriceModal(); save(); }
     else if(el.id === 'pZastRes'){ P.zastReserve = clamp(+el.value || 0, 0, 2000); updatePriceTotals(); }
   });
@@ -4481,7 +4606,13 @@ function updatePriceTotals(){
   for(const r of C.rows){
     const a = $('#pArea_' + r.g.id);
     if(a) a.textContent = r.linear ? (num2(r.lenM) + ' m') : (num2(r.area) + ' m²');
-    const sh = $('#pSheets_' + r.g.id); if(sh) sh.innerHTML = '<b>' + r.sheets + '</b> ks';
+    const pc = $('#pPieces_' + r.g.id); if(pc) pc.textContent = r.linear ? '—' : (r.nPieces + ' ks');
+    const sh = $('#pSheets_' + r.g.id);
+    if(sh) sh.innerHTML = '<b>' + r.sheets + '</b> ks'
+      + ((!r.linear && r.sheetsArea !== r.sheetsPack)
+          ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : '')
+      + (r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : '')
+      + (r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : '');
     const t = $('#pTotal_' + r.g.id);  if(t) t.innerHTML = '<b>' + kc(r.total) + '</b>';
   }
   const em = $('#pEdgeM');    if(em) em.textContent = num2(C.edgeM);
@@ -4525,7 +4656,7 @@ function pricePageHtml(opt){
       : `deska ${fmt(r.g.bw)} × ${fmt(r.g.bh)} mm · prořez ${r.g.waste} %`;
     const qty = r.linear ? `${num2(r.lenM)} m` : `${num2(r.area)} m²`;
     return `<tr>
-      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}</span></td>
+      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
       <td class="num">${qty}</td>
       <td class="num">${r.sheets}</td>
       <td class="num">${fmt(r.g.price)}</td>
@@ -4576,7 +4707,8 @@ function pricePageHtml(opt){
         <div style="font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#777">Rozsah kalkulace</div>
         <div style="font-size:9pt;line-height:1.5">Deskový materiál (korpusy, pracovní deska, bok+, sokl, zadní díly),
           čela u označených skříní, zástěnu s těsnící lištou (je-li zapnutá) a hrany.
-          Počítají se celé desky, panely a lišty včetně prořezu. Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
+          Počítají se celé desky, panely a lišty – počet desek vychází ze skutečného rozvržení dílů
+          s řezem pilou (a nikdy méně, než kolik vyjde plošně s prořezem). Kování, práce, montáž ani doprava nejsou zahrnuty.</div>
       </div>
     </div>
     ${foot}
