@@ -627,8 +627,9 @@ const FRONT_T_DFLT  = 18;                     // tloušťka dvířek / čela zá
 /* ── blende (výplň do rohu, dilatace mezi skříněmi do L/U) ───────────────
    ČTVEREC 50 × 50 mm. Leží v rohu, kde se potkají dvě kolmé řady, a dotýká
    se líce obou skříní. Dvířka obou skříní jsou od blende 2 mm a od konce
-   skříně taky 2 mm → u skříně 600 mm vyjdou dvířka 546 mm
-   (600 − 50 − 2 − 2). Roh se hledá sám z geometrie půdorysu. */
+   skříně taky 2 mm. Líc blende je v rovině dveří – přesahuje korpus
+   sousední skříně o tloušťku dvířka (18 mm), takže s nimi tvoří jednu
+   rovinu. Roh se hledá sám z geometrie půdorysu. */
 const BLENDE_W_DFLT = 50;      // blende podél čela [mm]
 const BLENDE_D_DFLT = 50;      // blende do hloubky [mm]
 const BLENDE_GAP    = 2;       // mezera blende ↔ dvířka [mm]
@@ -2551,7 +2552,8 @@ function autoDoors(e){
 /* ── BLENDE V ROHU – počítá se sama z půdorysu ────────────────────────────
    Blende je čtverec 50 × 50 mm. Sedí v rohu, kde se potkají dvě kolmé řady
    (čelní roviny se protnou), a dotýká se líce obou skříní. Dvířka jsou od
-   blende 2 mm a od konce skříně taky 2 mm → skříň 600 mm má dvířka 546 mm.
+   blende 2 mm a od konce skříně taky 2 mm. Líc blende je v rovině dveří
+   (přesahuje korpus o 18 mm = tloušťku dvířka).
    Nic se nezadává, žádné zaškrtávátko u skříně: rohy se najdou z geometrie. */
 function blendeSize(){
   const P = pricing();
@@ -2599,7 +2601,12 @@ function blendeCornersCalc(P, on){
   const W = Math.max(0, +P.blendeW || 0), D = Math.max(0, +P.blendeD || 0);
   if(!(W > 0) || !(D > 0)) return [];
   const ds = S.project.elements.filter(e => {
-    const k = elKind3(e); return k === 'base' || k === 'column';
+    const k = elKind3(e);
+    if(k !== 'base' && k !== 'column') return false;
+    /* Dvířka (18 mm), blende (50 mm) nebo lišty nejsou skříně – kdyby se
+       počítaly, vznikaly by z nich falešné rohy. Skříň má v půdorysu
+       nejméně 120 mm v obou směrech. */
+    return Math.min(e.w, e.d) >= 120;
   });
   const out = [], seen = new Set();
   for(let i = 0; i < ds.length; i++) for(let j = i + 1; j < ds.length; j++){
@@ -2617,8 +2624,12 @@ function blendeCornersCalc(P, on){
     const px = FB.face, py = FA.face;                    // protnutí čelních rovin
     if(px < FA.a0 - 120 || px > FA.a1 + 120) continue;   // protnutí musí být u skříně
     if(py < FB.a0 - 120 || py > FB.a1 + 120) continue;
-    /* blende leží PŘED lícem obou skříní a sahá od protnutí k sousední řadě */
-    const x = FB.f === 'východ' ? px : px - W;
+    /* Líc blende je v ROVINĚ DVEŘÍ sousední řady: blende přesahuje její
+       korpus o tloušťku dvířka (18 mm), takže s dvířky tvoří jednu rovinu.
+       Druhým směrem blende vyplňuje 50mm mezeru mezi řadami – dotýká se
+       líce jedné skříně i konce druhé. */
+    const T = FRONT_T_DFLT;
+    const x = FB.f === 'východ' ? px + T - W : px - T;
     const y = FA.f === 'jih'    ? py : py - D;
     const key = Math.round(x) + ':' + Math.round(y);
     if(seen.has(key)) continue;
@@ -2685,8 +2696,8 @@ function frontPieces(e){
   nD = Math.max(0, Math.min(20, nD));
   nZ = Math.max(0, Math.min(20, nZ));
 
-  /* blende v rohu ubere z čela 50 mm + 2 mm mezera; druhé 2 mm jsou
-     v DOOR_EDGE → skříň 600 mm = dvířka 546 mm (600 − 50 − 2 − 2) */
+  /* blende v rohu ubere z čela jen to, co je za rovinou dveří; dvířka
+     jsou od ní 2 mm a 2 mm od konce skříně (skříň 600 v rohu = 578 mm) */
   const BI = blendeForEl(e), BS = blendeSize();
   const cutL = BI.cutL, cutR = BI.cutR;
   const usable = Math.max(100, W - cutL - cutR);
@@ -5511,8 +5522,8 @@ function buildPrint(){
         </table>
         <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
           Šířka čela = šířka skříně − 4 mm (600 → 596; na dvě dvířka 297; myčka 450 → 446).
-          V rohu u blende ${P.blendeW} × ${P.blendeD} mm je čelo kratší o blende a 2 mm mezeru
-          (skříň 600 mm v rohu → dvířka ${600 - P.blendeW - 4} mm).
+          V rohu je líc blende v rovině dveří a čelo je od ní 2 mm;
+          skříň 600 mm v rohu → dvířka ${600 - 18 - 4} mm.
           Výška dvířek ${fmt(P.doorH)} mm, čela zásuvek od spodu ${(P.drawerStack||[]).join(' / ')}
           mm s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm (dvě zásuvky 350 + 350 s mezerou 4 mm).
           U sloupů jsou uvedené jen spodní výsuvy, zbytek čel se doměřuje.
