@@ -2628,16 +2628,15 @@ function blendeCornersCalc(P, on){
        korpus o tloušťku dvířka (18 mm), takže s dvířky tvoří jednu rovinu. */
     const T = FRONT_T_DFLT;
     const x = FB.f === 'východ' ? px + T - W : px - T;
-    /* Druhým směrem blende vyplňuje mezeru mezi řadami. Nikdy ale nesmí
-       vlézt do skříně – hrana skříně se musí chytat na její líc. Když je
-       mezera menší než 50 mm, blende se zkrátí na její velikost; když se
-       řady dotýkají, není co vyplňovat a blende se tam nedělá. */
+    /* Druhým směrem se blende zarovná LÍCEM NA HRANU sousední skříně a vždy
+       zůstane 50 mm hluboká – nikdy se nekrátí. Když je mezera mezi řadami
+       menší než 50 mm, blende zajede zadní částí do rohu (pod čelo rohové
+       skříně), ale skříň, která se na ni chytá, do ní nikdy nevlézá. */
     const dir  = FA.f === 'jih' ? 1 : -1;          // směr do místnosti
     const near = FA.f === 'jih' ? FB.a0 : FB.a1;   // hrana sousední skříně
     const gap  = (near - py) * dir;                // mezera mezi řadami
-    if(!(gap > 0)) continue;                       // řady na sebe → žádná blende
-    const dUse = Math.min(D, gap);
-    const y    = dir > 0 ? near - dUse : near;
+    if(!(gap > 0)) continue;                       // řady na sebe → není co vyplňovat
+    const y    = dir > 0 ? near - D : near;        // líc na hraně skříně, hloubka vždy 50
     const key = Math.round(x) + ':' + Math.round(y);
     if(seen.has(key)) continue;
     seen.add(key);
@@ -2646,7 +2645,7 @@ function blendeCornersCalc(P, on){
     const cuts = {};
     cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
     cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
-    out.push({ x:R(x), y:R(y), w:W, h:Math.round(dUse), els:[A.id, B.id], cuts });
+    out.push({ x:R(x), y:R(y), w:W, h:D, els:[A.id, B.id], cuts });
   }
   return out;
 }
