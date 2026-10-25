@@ -614,6 +614,18 @@ const PAPER = {
 const PEN = { wall:0.50, el:0.35, guide:0.18, dim:0.18, tick:0.25, scale:0.35 };
 const TOP_RESERVE = 20;      // rezerva k délce pracovní desky [mm] NA KAŽDÝ KUS
 const TOP_DEPTH_DFLT = 600;  // standardní hloubka pracovní desky [mm] (635 = hlubší varianta)
+/* ── čela (dvířka a čela zásuvek) – reálné rozměry ──────────────────────
+   Výška dvířek je u spodních i horních skříní 704 mm.
+   Šířka dvířek = šířka skříně − 4 mm (2 mm na každé straně):
+   skříň 600 → dvířka 596, myčka 600 → 596, myčka 450 → 446.
+   Když jsou dvířka dvě, mezi nimi je 2 mm: (600 − 4 − 2) / 2 = 297.
+   Čela zásuvek od spodu 350 / 223 / 125 mm s mezerou 3 mm → 704 mm.
+   (350 + 3 + 223 + 3 + 125 = 704) */
+const DOOR_H_DFLT   = 704;                    // výška dvířek [mm]
+const DOOR_EDGE     = 4;                      // úbytek na šířku celkem (2+2) [mm]
+const DOOR_GAP_W    = 2;                      // mezera mezi dvířky vedle sebe [mm]
+const DRAWER_GAP    = 3;                      // mezera mezi čely nad sebou [mm]
+const DRAWER_STACK_DFLT = [350, 223, 125];    // čela zásuvek od spodu [mm]
 
 /* ─────────────────────────── 2. STAV ─────────────────────────── */
 
@@ -2503,8 +2515,8 @@ function bokAny(e){ const sd = bokSides(e); return sd.L || sd.R; }
 function bokHas(e, side){ return !!bokSides(e)[side]; }
 
 /* Čela do kalkulace: u každé skříně volitelně zapnutá, s ručním počtem
-   dvířek a zásuvek. Počet kusů mění jen kusovník – plocha (a tím cena)
-   je vždy šířka × výška skříně. */
+   dvířek a zásuvek. Rozměry se počítají reálně (viz frontPieces):
+   šířka skříně − 4 mm na šířku, výška 704 mm, zásuvky 350/223/125. */
 function frontCfg(e){
   const f = e && e.fronts;
   return {
@@ -2518,6 +2530,64 @@ function autoDoors(e){
   const maxW = Math.max(200, +pricing().doorW || 600);
   return Math.max(1, Math.ceil(elFrontW(e) / maxW));
 }
+/* Reálné rozměry čel jedné skříně.
+   Vrací { doors:[výšky], drawers:[výšky od spodu], wDoor, wDraw, total, ok }.
+   - šířka dvířek  = (W − 4 − (n−1)×2) / n     → 600 mm skříň = 596, na půl 297
+   - šířka zásuvky = W − 4                     → 600 mm skříň = 596
+   - výška dvířek  = 704 mm (DS i HS)
+   - čela zásuvek od spodu 350 / 223 / 125 mm, mezera 3 mm; horní čelo
+     (poslední zásuvka nebo dvířka nad nimi) vždy dorovná do 704 mm */
+function frontPieces(e){
+  const P = pricing();
+  const W = elFrontW(e);
+  const total = Math.max(100, +P.doorH || DOOR_H_DFLT);
+  const gap   = +P.drawerGap >= 0 ? +P.drawerGap : DRAWER_GAP;
+  const stack = (Array.isArray(P.drawerStack) && P.drawerStack.length) ? P.drawerStack : DRAWER_STACK_DFLT;
+
+  const FR = frontCfg(e);
+  let nD = FR.doors, nZ = FR.drawers;
+  if(!nD && !nZ) nD = 1;                       // zapnuto, ale nic nezadáno
+  nD = Math.max(0, Math.min(20, nD));
+  nZ = Math.max(0, Math.min(20, nZ));
+
+  const wDoor = nD > 0 ? Math.max(50, Math.round((W - DOOR_EDGE - (nD - 1) * DOOR_GAP_W) / nD)) : 0;
+  const wDraw = Math.max(50, Math.round(W - DOOR_EDGE));
+
+  const nSlots   = nZ + (nD > 0 ? 1 : 0);          // čel nad sebou
+  const gapTotal = Math.max(0, nSlots - 1) * gap;
+
+  const drawers = [];
+  let used = 0;
+  for(let i = 0; i < nZ; i++){
+    const top = (i === nZ - 1) && nD === 0;        // nad poslední zásuvkou nic není
+    let h = top ? (total - used - gapTotal)
+                : (stack[i] != null ? stack[i] : stack[stack.length - 1]);
+    h = Math.round(Math.max(20, h));
+    drawers.push(h);
+    used += h;
+  }
+  let doorH = 0;
+  if(nD > 0){
+    doorH = Math.round(total - used - gapTotal);
+    if(doorH < 20) doorH = 0;                      // nevychází – dvířka se nedají
+  }
+  return { doors: nD > 0 && doorH > 0 ? Array.from({length:nD}, () => doorH) : [],
+           drawers, wDoor, wDraw, total, ok: drawers.length === nZ && (nD === 0 || doorH > 0) };
+}
+
+/* Text „596 × 704 mm × 2“ / „350 / 223 / 125 × 596 mm“ pro inspektor. */
+function frontSizesText(e){
+  const FP = frontPieces(e);
+  const out = [];
+  if(FP.doors.length) out.push('dvířka ' + fmt(FP.wDoor) + ' × ' + fmt(FP.doors[0]) + ' mm' +
+    (FP.doors.length > 1 ? ' (' + FP.doors.length + ' ks vedle sebe)' : ''));
+  if(FP.drawers.length) out.push('výsuvy ' + fmt(FP.wDraw) + ' × ' + FP.drawers.map(h => fmt(h)).join(' / ') + ' mm');
+  if(!out.length) return '—';
+  const sum = FP.drawers.reduce((a,b) => a + b, 0) + (FP.doors.length ? FP.doors[0] : 0)
+            + Math.max(0, FP.drawers.length + (FP.doors.length ? 1 : 0) - 1) * pricing().drawerGap;
+  return out.join(' · ') + ' · celkem na výšku ' + fmt(Math.round(sum)) + ' mm';
+}
+
 function bokCfg(e){ const b = e && e.bok; return b && bokAny(e) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
 function bokBack(e){
@@ -2853,7 +2923,12 @@ function renderInspector(){
           <label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>
           <label class="fld"><span>Zásuvky (ks)</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
-        <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš. Počet dvířek a zásuvek jen určí, na kolik kusů se čelo rozdělí; plocha a cena jsou vždy šířka × výška skříně. Sloupy (lednice, trouba) mají vlastní dvířka, ty se nepočítají.</p>
+        <p class="hint" style="margin-top:6px"><b>Rozměry čel:</b> ${frontSizesText(e)}</p>
+        <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš.
+          Šířka čela = šířka skříně − 4 mm (600 → 596, na dvě 297, myčka 450 → 446),
+          výška dvířek je vždy 704 mm, čela zásuvek od spodu ${(pricing().drawerStack||[]).join(' / ')} mm
+          s mezerou ${pricing().drawerGap} mm – dohromady vždy 704 mm.
+          Sloupy (lednice, trouba) mají vlastní dvířka, ty se nepočítají.</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -4020,6 +4095,9 @@ function PRICE_DEFAULTS(){ return ({
   edgeShare: 100,       // % obvodu dílů, které se hraní
   edgePrice: 12,        // Kč/m hrany (s DPH)
   doorW: 600,           // max šířka jednoho čela [mm] – z ní se počítá počet dvířek
+  doorH: DOOR_H_DFLT,   // výška dvířek [mm] – DS i HS 704
+  drawerGap: DRAWER_GAP,     // mezera mezi čely nad sebou [mm]
+  drawerStack: [350, 223, 125],  // čela zásuvek od spodu [mm]
   inPrint: true,        // přidávat kalkulaci do PDF
   topDepth: TOP_DEPTH_DFLT, // hloubka pracovní desky [mm] – standard 600, existuje i 635
   kerf: 4,              // šířka řezu (prořez pilou) [mm] – počítá se do rozvržení
@@ -4083,6 +4161,10 @@ function pricing(){
   p.edgeShare   = clamp(num(p.edgeShare, D.edgeShare), 0, 100);
   p.edgePrice   = Math.max(0, num(p.edgePrice, D.edgePrice));
   p.doorW       = Math.max(200, num(p.doorW, D.doorW));
+  p.doorH       = clamp(num(p.doorH, D.doorH), 100, 2000);
+  p.drawerGap   = clamp(num(p.drawerGap, D.drawerGap), 0, 20);
+  p.drawerStack = (Array.isArray(p.drawerStack) && p.drawerStack.length ? p.drawerStack : D.drawerStack)
+                    .map(v => Math.max(20, +v || 0)).filter(v => v > 0);
   p.vatIncluded = p.vatIncluded !== false;
   p.inPrint     = p.inPrint !== false;
   p.kerf        = clamp(num(p.kerf, D.kerf), 0, 20);
@@ -4208,16 +4290,12 @@ function materialParts(){
        spotřebič (vlastní čela), u sloupů se nepočítají nikdy */
     const FR = frontCfg(e);
     if(FR.on && (k === 'base' || k === 'upper')){
-      let nD = FR.doors, nZ = FR.drawers;
-      if(!nD && !nZ) nD = 1;                       // zapnuto, ale nic nezadáno
-      const DRAWER_H = 200;                        // výška čela zásuvky [mm]
-      let doorH = H, drawH = 0;
-      if(nZ > 0){
-        drawH = Math.min(DRAWER_H, H * 0.8 / nZ);
-        doorH = H - nZ * drawH;
+      const FP = frontPieces(e);
+      if(FP.doors.length){
+        add('front', tag + ' – dvířka ' + FP.wDoor + ' × ' + FP.doors[0], FP.wDoor, FP.doors[0], FP.doors.length*q);
       }
-      if(nD > 0 && doorH > 20) add('front', tag + ' – dvířka',        W / nD, doorH, nD*q);
-      if(nZ > 0 && drawH > 20) add('front', tag + ' – čelo zásuvky',  W,      drawH, nZ*q);
+      FP.drawers.forEach((h, i) => add('front',
+        tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q));
     }
     /* bok+ na každé zapnuté straně */
     if(bokAny(e)){
@@ -4698,7 +4776,11 @@ function renderPriceModal(){
       <button class="tb" id="pFrAll" title="Zapne čela u všech spodních i horních skříní (počet dvířek podle šířky)">Zapnout u všech</button>
       <button class="tb" id="pFrNone" title="Vypne čela u všech skříní">Vypnout u všech</button>
     </div>
-    <p class="p-note" style="margin-top:0">Čela se nepočítají automaticky – u každé skříně je zapneš v panelu vpravo („Čela do kalkulace“) a můžeš zadat počet dvířek a zásuvek. Sloupy (lednice, trouba) čela nemají.</p>
+    <p class="p-note" style="margin-top:0">Čela se nepočítají automaticky – u každé skříně je zapneš v panelu vpravo („Čela do kalkulace“) a můžeš zadat počet dvířek a zásuvek.
+      Rozměry se počítají reálně: <b>výška dvířek ${fmt(P.doorH)} mm</b>, šířka = šířka skříně − 4 mm
+      (600 → 596; na dvě dvířka 297; myčka 450 → 446). Čela zásuvek od spodu
+      <b>${(P.drawerStack||[]).join(' / ')} mm</b> s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm.
+      Sloupy (lednice, trouba) čela nemají – mají vlastní dvířka.</p>
 
     <div class="p-h">Zástěna a těsnící lišta</div>
     <label class="chk" style="margin-bottom:4px">
@@ -4723,6 +4805,10 @@ function renderPriceModal(){
       <label><input type="checkbox" id="pVatIncl" ${P.vatIncluded ? 'checked' : ''}> ceny v ceníku jsou včetně DPH</label>
       <label>sazba DPH <input class="p-in num" id="pVat" type="number" min="0" max="100" step="1" value="${P.vatRate}"> %</label>
       <label>max šířka čela <input class="p-in num" id="pDoorW" type="number" min="200" step="50" value="${P.doorW}"> mm</label>
+      <label>výška dvířek <input class="p-in num" id="pDoorH" type="number" min="100" max="2000" step="1" value="${P.doorH}"> mm</label>
+      <label>mezera čel <input class="p-in num" id="pDrawerGap" type="number" min="0" max="20" step="0.5" value="${P.drawerGap}"> mm</label>
+      <label>čela zásuvek od spodu
+        <input class="p-in" id="pDrawerStack" type="text" style="width:110px" value="${(P.drawerStack||[]).join(',')}"> mm</label>
       <label>hloubka prac. desky <input class="p-in num" id="pTopDepth" type="number" min="300" max="1200" step="5" value="${P.topDepth}"> mm</label>
       <label>řez pilou <input class="p-in num" id="pKerf" type="number" min="0" max="20" step="1" value="${P.kerf}"> mm</label>
       <label><input type="checkbox" id="pRot" ${P.rot ? 'checked' : ''}> otáčet díly o 90°</label>
@@ -4780,6 +4866,13 @@ function bindPriceInputs(){
     else if(el.id === 'pEdgeShare'){ P.edgeShare = clamp(+el.value || 0, 0, 100); updatePriceTotals(); }
     else if(el.id === 'pVat'){ P.vatRate = clamp(+el.value || 0, 0, 100); updatePriceTotals(); }
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
+    else if(el.id === 'pDoorH'){ P.doorH = clamp(+el.value || DOOR_H_DFLT, 100, 2000); updatePriceTotals(); }
+    else if(el.id === 'pDrawerGap'){ P.drawerGap = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
+    else if(el.id === 'pDrawerStack'){
+      const st = String(el.value).split(/[^0-9.]+/).map(Number).filter(v => v > 0);
+      if(st.length) P.drawerStack = st.map(v => Math.round(v));
+      updatePriceTotals();
+    }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
     else if(el.id === 'pTopDepth'){
@@ -5084,6 +5177,35 @@ function buildPrint(){
           Rezerva ${SOKL_RESERVE} mm se připočítává <b>na každý kus</b>.
         </div>`;
     })();
+    /* Čela – rozměry k objednání (dvířka a čela zásuvek po velikostech) */
+    const frontsHtml = (() => {
+      const P = pricing();
+      const fp = materialParts().filter(pt => pt.group === 'front');
+      if(!fp.length) return '';
+      const map = new Map();
+      for(const pt of fp){
+        const key = pt.w + '×' + pt.h;
+        if(!map.has(key)) map.set(key, { w:pt.w, h:pt.h, qty:0 });
+        map.get(key).qty += pt.qty;
+      }
+      const list = [...map.values()].sort((a,b) => (b.w - a.w) || (b.h - a.h));
+      const rows = list.map(o => {
+        const typ = (o.h === Math.round(P.doorH)) ? 'dvířka' : 'čelo zásuvky';
+        return `<tr><td>${typ}</td><td class="num">${fmt(o.w)}</td><td class="num">${fmt(o.h)}</td><td class="num">${o.qty} ks</td></tr>`;
+      }).join('');
+      const total = list.reduce((a,o) => a + o.qty, 0);
+      return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Čela – rozměry k objednání</b></div>
+        <table class="pr-table" style="margin-top:1mm">
+          <thead><tr><th>Druh</th><th class="num">Šířka (mm)</th><th class="num">Výška (mm)</th><th class="num">Počet</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="3">Celkem čel</td><td class="num">${total} ks</td></tr></tfoot>
+        </table>
+        <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
+          Šířka čela = šířka skříně − 4 mm (600 → 596; na dvě dvířka 297; myčka 450 → 446).
+          Výška dvířek ${fmt(P.doorH)} mm, čela zásuvek od spodu ${(P.drawerStack||[]).join(' / ')}
+          mm s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm.
+        </div>`;
+    })();
     let tables = '';
     if(listDS.length) tables += `
       <div class="pr-sub" style="margin-top:2mm"><b style="font-size:12.5px">A · Spodní sestava (DS) – spodní skříňky + sloupy</b>${nCols?` <span style="font-weight:400;color:#666">(${nCols} ${nCols===1?'sloup':'sloupy'})</span>`:''}</div>
@@ -5093,7 +5215,7 @@ function buildPrint(){
       <div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">B · Horní sestava (HS) – horní skříňky</b>${nCols?` <span style="font-weight:400;color:#666">(sloupy jsou vykázané v sekci DS – kreslí se i do výkresu HS)</span>`:''}</div>
       <table class="pr-table">${tableHead}<tbody>${listHS.map((e,i)=>rowFor(e,i)).join('')}</tbody>
       <tfoot><tr><td colspan="5">Celková šířka HS</td><td class="num">${fmt(totalHS)}</td><td></td></tr></tfoot></table>`;
-    tables += soklHtml;
+    tables += soklHtml + frontsHtml;
     pages.push(`
     <section class="pr-page">
       <div class="pr-head">
