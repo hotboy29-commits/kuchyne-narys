@@ -371,6 +371,18 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 .pr-meta{font-size:8.5pt;color:#555;text-align:right;line-height:1.5}
 .pr-drawing{display:flex;justify-content:center;align-items:center}
 .pr-drawing svg{max-width:100%;height:auto}
+/* Výkresová strana: úzké okraje a kompaktní hlavička, aby půdorys dostal
+   co nejvíc papíru (na A4L ~277 × 158 mm místo dřívějších ~150 × 90 mm). */
+.pr-page.draw{padding:7mm 9mm 8mm;display:flex;flex-direction:column}
+.pr-page.draw .pr-drawing{flex:1 1 auto;min-height:0}
+.pr-page.draw .pr-head{padding-bottom:1.6mm;margin-bottom:2.2mm;align-items:center}
+.pr-page.draw .pr-head h2{font-size:10.5pt;margin:0}
+.pr-page.draw .pr-kicker{font-size:6pt;letter-spacing:.16em;margin-bottom:.6mm}
+.pr-page.draw .pr-meta{font-size:6.5pt;line-height:1.3}
+.pr-page.draw .pr-legend{margin-top:2mm;padding-top:1.2mm;font-size:6.8pt;gap:1.4mm 4.5mm}
+.pr-page.draw .pr-legend .lg .sw{width:2.6mm;height:2.6mm}
+.pr-page.draw .pr-notes-inline{margin-top:1.4mm;font-size:7pt;line-height:1.35}
+.pr-page.draw .pr-foot{padding-top:1.2mm;font-size:6.5pt}
 .pr-legend{display:flex;flex-wrap:wrap;gap:4mm 7mm;margin-top:5mm;font-size:8.5pt;color:#333;
   border-top:.6pt solid #ccc;padding-top:3mm}
 .lg{display:inline-flex;align-items:center;gap:2mm}
@@ -5560,15 +5572,21 @@ function buildPrint(){
   const showPrice = !!(els.length && pricing().inPrint);
   const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0) + (showPrice?1:0);
   let pg = 1;
+  /* Kolik papíru zbývá na samotný půdorys: strana mínus okraje, hlavička,
+     legenda, poznámky a patička. Podle toho se výkres dopočítá. */
+  const DBOX = { padX: 9, padTop: 7, padBot: 8, head: 12.5, legend: 8.5, foot: 6 };
+  const boxW = P.w - DBOX.padX * 2;
+  const boxH = P.h - DBOX.padTop - DBOX.padBot - DBOX.head - DBOX.legend - DBOX.foot
+             - (info.notes ? 7 : 0) - 3;                    // 3 mm rezerva
   const drawOne = (kicker, title, sub, filter, fname) => {
     pg++;
     pages.push(`
-  <section class="pr-page">
+  <section class="pr-page draw">
     <div class="pr-head">
       <div><span class="pr-kicker">${kicker}</span><h2>${title} – ${esc(info.name || 'Název projektu')}</h2></div>
       <div class="pr-meta">${esc(info.client || '')}<br>${dateCs} · Kóty v mm · ${sub}</div>
     </div>
-    <div class="pr-drawing">${drawingSvg(P, { filter })}</div>
+    <div class="pr-drawing">${drawingSvg(P, { filter, boxW, boxH })}</div>
     <div class="pr-legend">${legendHtml(filter)}</div>
     ${info.notes ? `<div class="pr-notes-inline"><b>Poznámky:</b> ${esc(info.notes)}</div>` : ''}
     <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – ${fname}</span><span>Strana ${pg} / ${nPages}</span></div>
@@ -5774,13 +5792,25 @@ function legendHtml(filter){
 function drawingSvg(P, opt){
   const filter = (opt && opt.filter) || null;
   const b = contentBBox({ skipGuides:true, filter });
-  if(!b) return `<svg viewBox="0 0 ${P.w} ${P.h}"></svg>`;
-  const M = 12;                                  // okraj [mm papíru]
-  const iw = P.w - M*2, ih = P.h - M*2;
-  const pad = 1250;                              // místo na kóty [mm skutečnosti]
-  const k = Math.min(iw / (b.w + pad*2), ih / (b.h + pad*2));
-  const ox = M + (iw - (b.w + pad*2)*k)/2 - (b.x - pad)*k;
-  const oy = M + (ih - (b.h + pad*2)*k)/2 - (b.y - pad)*k;
+  /* Pole, do kterého se má výkres vejít [mm papíru]. Když ho volající
+     nezadá, vezme se celá stránka bez okraje. */
+  const boxW = Math.max(60, (opt && opt.boxW) || (P.w - 24));
+  const boxH = Math.max(60, (opt && opt.boxH) || (P.h - 24));
+  if(!b) return `<svg width="${boxW}mm" height="${boxH}mm" viewBox="0 0 ${boxW} ${boxH}" xmlns="http://www.w3.org/2000/svg"></svg>`;
+  /* Místo na kóty se odvozuje z velikosti výkresu – dřív tu byl pevný okraj
+     1 250 mm na každou stranu, a ten zahubil celý výkres: z 3 600 mm řady
+     zbyla na papíře hrstka milimetrů. Teď kóty dostanou jen tolik místa,
+     kolik potřebují, a zbytek papíru patří výkresu. */
+  /* Okraje se drží v MILIMETRECH PAPÍRU (ne v milimetrech kuchyně) – díky
+     tomu je výkres vždy stejně „těsný“ a velká kuchyně neplýtvá papírem.
+     Vlevo/vpravo 13 mm na kóty, nahoře/dole 11 mm. */
+  const MX = 14, MY = 15;                              // okraj [mm papíru]
+  const k  = Math.min((boxW - 2*MX) / b.w, (boxH - 2*MY) / b.h);
+  const padX = MX / k, padY = MY / k;                  // stejný okraj přepočtený do mm kuchyně
+  const OFF_EL = 3.5 / k;                              // kóta šířky skříně – 3,5 mm od skříně
+  const ODS    = 8.5 / k;                              // kóta místnosti – 8,5 mm od skříně
+  const vw = (b.w + padX*2) * k, vh = (b.h + padY*2) * k;   // rozměr výkresu [mm papíru]
+  const ox = -(b.x - padX) * k, oy = -(b.y - padY) * k;
   const sw = pen => R(pen/k);                    // mm papíru → user units
   const fs = mm => R(mm/k);                      // výška písma [mm papíru]
 
@@ -5818,9 +5848,15 @@ function drawingSvg(P, opt){
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
       const cx = e.x+e.w/2, cy = e.y+e.d/2;
       const size = fs(clamp(capPx*k*0.30, 2.0, 3.4));
-      parts.push(`<text x="${R(cx)}" y="${R(cy)}" text-anchor="middle" dominant-baseline="middle"
+      const withDim = capPx*k >= 13 && e.w*k >= 16;
+      parts.push(`<text x="${R(cx)}" y="${R(cy + (withDim ? -size*0.45 : 0))}" text-anchor="middle" dominant-baseline="middle"
         font-size="${size}" font-weight="700" fill="#0d1117"
         style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
+      if(withDim){
+        parts.push(`<text x="${R(cx)}" y="${R(cy + size*1.05)}" text-anchor="middle" dominant-baseline="middle"
+          font-size="${fs(clamp(size*k*0.66, 1.7, 2.6))}" fill="#374151"
+          style="font-family:Helvetica,Arial,sans-serif">${fmt(e.w)} × ${fmt(e.d)}</text>`);
+      }
     }
   }
 
@@ -5857,7 +5893,6 @@ function drawingSvg(P, opt){
     if(x0<Infinity) wbR = { x:x0, y:y0, w:x1-x0, h:y1-y0 };
   }
   const rcx = wbR ? wbR.x + wbR.w/2 : 0, rcy = wbR ? wbR.y + wbR.h/2 : 0;
-  const OFF_EL = 360;                        // odsazení kóty od skříně [mm]
   for(const e of S.project.elements){
     if(filter && !filter(e)) continue;
     const front = e.front || 'jih';
@@ -5876,12 +5911,13 @@ function drawingSvg(P, opt){
   }
   // vnější kóty místnosti – odsazené DÁL od výkresu, skříně mají vlastní prostor
   if(wbR){
-    parts.push(dimPrint(wbR.x, wbR.y-950, wbR.x+wbR.w, wbR.y-950, 'x', k, 1.1, '#334155'));
-    parts.push(dimPrint(wbR.x-950, wbR.y, wbR.x-950, wbR.y+wbR.h, 'y', k, 1.1, '#334155'));
+    const od = ODS;
+    parts.push(dimPrint(wbR.x, wbR.y-od, wbR.x+wbR.w, wbR.y-od, 'x', k, 1.1, '#334155'));
+    parts.push(dimPrint(wbR.x-od, wbR.y, wbR.x-od, wbR.y+wbR.h, 'y', k, 1.1, '#334155'));
   }
   // měřítko
   /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
-  const bx = b.x + b.w - 1000, by = b.y + b.h + 700;
+  const bx = b.x + b.w - 1000, by = b.y + b.h + 7 / k;   // 7 mm pod výkresem
   parts.push(`<line x1="${bx}" y1="${by}" x2="${bx+1000}" y2="${by}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
   parts.push(`<line x1="${bx}" y1="${by-60}" x2="${bx}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
   parts.push(`<line x1="${bx+1000}" y1="${by-60}" x2="${bx+1000}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
@@ -5889,7 +5925,7 @@ function drawingSvg(P, opt){
     style="font-family:Helvetica,Arial,sans-serif">MĚŘÍTKO · úsečka = 1 000 mm</text>`);
 
   parts.push(`</g>`);
-  return `<svg viewBox="0 0 ${P.w} ${P.h}" width="${P.w}mm" height="${P.h}mm" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
+  return `<svg viewBox="0 0 ${R(vw)} ${R(vh)}" width="${R(vw)}mm" height="${R(vh)}mm" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
 }
 
 /** Kóta v souřadnicích skutečnosti, tloušťky/písmo přepočtené z mm papíru. */
