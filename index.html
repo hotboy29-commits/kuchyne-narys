@@ -2591,14 +2591,20 @@ function rectsCrossM(a, b){
    než na 50 mm, celá řada se srovná tak, aby mezera byla přesně 50 mm.
    Řada se posouvá podél svého čela, takže jí zůstává hloubka i odstup od zdi. */
 let blendeShifted = {};        // id prvku → naposledy provedený posun řady
-/* Prvky stejné řady jako skříň b (stejné čelo + stejná hloubka řady). */
+/* Blende se počítá zvlášť pro spodní řadu (DS) a zvlášť pro horní (HS) –
+   dvě kolmé řady DS a dvě kolmé řady HS jsou dva samostatné rohy. */
+function blendeClass(e){ return elKind3(e) === 'upper' ? 'u' : 'b'; }
+/* Prvky stejné řady jako skříň b (stejné čelo + stejná hloubka + stejná
+   výška řady – spodní a horní skříně se navzájem neposouvají). */
 function blendeRowElements(b){
   const fi = elFaceInfo(b);
   const d0 = fi.horiz ? b.y : b.x;
   const d1 = d0 + (fi.horiz ? b.d : b.w);
+  const cls = blendeClass(b);
   return S.project.elements.filter(e => {
     const fe = elFaceInfo(e);
     if(fe.f !== fi.f) return false;
+    if(blendeClass(e) !== cls) return false;
     const e0 = fe.horiz ? e.y : e.x;
     const e1 = e0 + (fe.horiz ? e.d : e.w);
     return Math.min(e1, d1) - Math.max(e0, d0) > 60;   // stejná hloubka = stejná řada
@@ -2613,13 +2619,14 @@ function blendeEnforceGap(){
     let moved = false;
     const ds = S.project.elements.filter(e => {
       const k = elKind3(e);
-      if(k !== 'base' && k !== 'column') return false;
+      if(k !== 'base' && k !== 'column' && k !== 'upper') return false;
       return Math.min(e.w, e.d) >= 120;               // blende/dvířka nejsou skříně
     });
     for(let i = 0; i < ds.length && !moved; i++) for(let j = i + 1; j < ds.length; j++){
       const a = ds[i], b = ds[j];
       const fa = elFaceInfo(a), fb = elFaceInfo(b);
       if(fa.horiz === fb.horiz) continue;             // jen kolmá čela
+      if(blendeClass(a) !== blendeClass(b)) continue; // DS a HS se nemíchají
       const A  = fa.horiz ? a : b;
       const B  = fa.horiz ? b : a;
       const FA = fa.horiz ? fa : fb;
@@ -2644,7 +2651,8 @@ function blendeEnforceGap(){
       let bad = false;
       for(const e of row) for(const o of S.project.elements){
         if(ids.has(o.id)) continue;
-        if(o.kind === 'front' || o.kind === 'blende') continue;
+        /* horní skříně leží v půdorysu nad spodními – to není kolize */
+        if(blendeClass(o) !== blendeClass(e)) continue;
         if(rectsCrossM({ x:e.x, y:e.y, w:e.w, h:e.d }, { x:o.x, y:o.y, w:o.w, h:o.d })) bad = true;
       }
       if(bad){
@@ -2678,7 +2686,7 @@ function blendeCornersCalc(P, on){
   if(!(W > 0) || !(D > 0)) return [];
   const ds = S.project.elements.filter(e => {
     const k = elKind3(e);
-    if(k !== 'base' && k !== 'column') return false;
+    if(k !== 'base' && k !== 'column' && k !== 'upper') return false;
     /* Dvířka (18 mm), blende (50 mm) nebo lišty nejsou skříně – kdyby se
        počítaly, vznikaly by z nich falešné rohy. Skříň má v půdorysu
        nejméně 120 mm v obou směrech. */
@@ -2689,6 +2697,7 @@ function blendeCornersCalc(P, on){
     const a = ds[i], b = ds[j];
     const fa = elFaceInfo(a), fb = elFaceInfo(b);
     if(fa.horiz === fb.horiz) continue;                  // jen kolmá čela
+    if(blendeClass(a) !== blendeClass(b)) continue;      // DS a HS se nemíchají
     const A  = fa.horiz ? a : b;
     const B  = fa.horiz ? b : a;
     const FA = fa.horiz ? fa : fb;                       // FA = vodorovné čelo
@@ -2713,7 +2722,7 @@ function blendeCornersCalc(P, on){
     const gap  = (near - py) * dir;                // mezera mezi řadami
     if(!(gap > 0)) continue;                       // řady na sebe → není co vyplňovat
     const y    = dir > 0 ? near - D : near;        // líc na hraně skříně, hloubka vždy 50
-    const key = Math.round(x) + ':' + Math.round(y);
+    const key = blendeClass(A) + ':' + Math.round(x) + ':' + Math.round(y);
     if(seen.has(key)) continue;
     seen.add(key);
     /* Dvířka jsou vždy na straně OD sousední řady: blende sedí na té straně
@@ -2721,7 +2730,7 @@ function blendeCornersCalc(P, on){
     const cuts = {};
     cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
     cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
-    out.push({ x:R(x), y:R(y), w:W, h:D, els:[A.id, B.id], cuts });
+    out.push({ x:R(x), y:R(y), w:W, h:D, els:[A.id, B.id], cuts, kind:blendeClass(A) });
   }
   return out;
 }
@@ -2973,11 +2982,14 @@ function frontsMarkup(){
   }
   /* blende v rohu – čtverec 50 × 50, tmavě červený */
   for(const b of blendeCorners()){
+    /* horní (HS) blende se kreslí přerušovaně – v půdorysu leží nad spodní řadou */
+    const uB = b.kind === 'u';
     out += `<rect x="${R(b.x)}" y="${R(b.y)}" width="${Math.max(R(b.w),0.5)}" height="${Math.max(R(b.h),0.5)}"
-      fill="#dc2626" stroke="#7f1d1d" stroke-width="${1.4/z}" pointer-events="none"/>`;
+      fill="${uB ? '#fca5a5' : '#dc2626'}" stroke="${uB ? '#b91c1c' : '#7f1d1d'}" stroke-width="${1.4/z}"
+      ${uB ? 'stroke-dasharray="' + (6/z) + ' ' + (4/z) + '"' : ''} pointer-events="none"/>`;
     if(Math.min(b.w, b.h) * z > 34){
       out += `<text x="${R(b.x + b.w/2)}" y="${R(b.y + b.h/2)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${clamp(Math.min(b.w, b.h) * 0.40, 60, 220)}" font-weight="700" fill="#fff"
+        font-size="${clamp(Math.min(b.w, b.h) * 0.40, 60, 220)}" font-weight="700" fill="${uB ? '#7f1d1d' : '#fff'}"
         pointer-events="none" style="font-family:Helvetica,Arial,sans-serif">B</text>`;
     }
   }
@@ -3277,7 +3289,7 @@ function renderInspector(){
           const BI = blendeForEl(e), BS = blendeSize();
           if(BI.on)
             return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px">
-              <b style="color:#b91c1c">Blende v rohu ${BS.w} × ${BS.d} mm.</b>
+              <b style="color:#b91c1c">Blende v ${blendeClass(e)==='u' ? 'horním' : 'dolním'} rohu ${BS.w} × ${BS.d} mm.</b>
               Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
               na druhém konci skříně taky 2 mm.<br>
               Mezera mezi řadami je vždy ${BS.d} mm – stejně jako blende, takže do žádné skříně nevlézá.
@@ -4692,10 +4704,15 @@ function materialParts(){
 
   /* BLENDE – jedna na každý roh, kde se potkají dvě kolmé řady.
      Je to svislý hranol 50 × 50, výška = výška sousedních skříní. */
-  blendeCorners().forEach((b, i) => {
+  let _nBlD = 0, _nBlH = 0;
+  blendeCorners().forEach(b => {
     const hs = b.els.map(id => { const e2 = getEl(id); return e2 ? elH3(e2) : 0; });
     const hB = Math.max(...hs, 0) || BOK_H_DS;
-    add('front', 'Blende do rohu ' + (i+1) + ' – ' + b.w + ' × ' + b.h + ' mm (hřbet ' + fmt(Math.round(hB)) + ')',
+    /* spodní a horní rohy se počítají zvlášť – horní blende je jinak vysoká */
+    const isU = b.kind === 'u';
+    const n = isU ? (++_nBlH) : (++_nBlD);
+    add('front', (isU ? 'Blende do horního rohu ' : 'Blende do rohu ') + n + ' – ' +
+        b.w + ' × ' + b.h + ' mm (hřbet ' + fmt(Math.round(hB)) + ')',
         Math.max(b.w, b.h), hB, 1);
   });
 
@@ -5747,8 +5764,10 @@ function drawingSvg(P, opt){
   }
   // blende v rohu – čtverec 50 × 50
   for(const b of blendeCorners()){
+    const uB = b.kind === 'u';
     parts.push(`<rect x="${R(b.x)}" y="${R(b.y)}" width="${R(b.w)}" height="${R(b.h)}"
-      fill="#dc2626" stroke="#7f1d1d" stroke-width="${sw(0.16)}"/>`);
+      fill="${uB ? '#fca5a5' : '#dc2626'}" stroke="${uB ? '#b91c1c' : '#7f1d1d'}" stroke-width="${sw(0.16)}"
+      ${uB ? 'stroke-dasharray="' + sw(1.2) + ' ' + sw(0.8) + '"' : ''}/>`);
   }
 
   // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
