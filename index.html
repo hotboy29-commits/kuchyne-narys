@@ -555,6 +555,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Podlaha</span><input id="fDecor_floor" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld span2"><span>Výška zástěny tam, kde není horní skříňka (mm, volitelné)</span><input id="fSplashHeight" type="number" min="1" max="2500" placeholder="Prázdné = k výchozí spodní hraně HS"></label>
       <label class="fld span2"><span>Poznámky</span><textarea id="fNotes" rows="3" placeholder="Materiál, kování, termín, atypická řešení…"></textarea></label>
     </div>
     <footer>
@@ -4348,16 +4349,24 @@ function projectPngViews(){
   const dirs = Object.keys(weight).sort((a,b)=>weight[b]-weight[a]);
   if(!dirs.length) dirs.push('jih');
   const out = [];
-  const add = (f,delta,el,label) => out.push({name:(out.length+1)+'_cela_'+out.length,az:((az[f]??180)+delta+360)%360,el,desc:label});
-  // Protilehlá ramena nelze vidět čelně z jedné kamery: každé má svůj pohled.
-  dirs.slice(0,4).forEach(f=>add(f,0,18,'Čelní pohled – '+f));
+  const addAngle=(angle,el,label)=>out.push({name:(out.length+1)+'_kuchyn',az:(angle+360)%360,el,desc:label});
   if(dirs.length===1){
-    add(dirs[0],-28,28,'Čela – šikmý pohled zleva');
-    add(dirs[0],28,28,'Čela – šikmý pohled zprava');
-  }
-  while(out.length<4){
-    const f=dirs[(out.length-1)%dirs.length];
-    add(f,0,38,'Čela – zvýšený pohled '+f);
+    const a=az[dirs[0]]??180;
+    addAngle(a,12,'Čelní pohled');
+    addAngle(a-28,24,'Čela – šikmý pohled zleva');
+    addAngle(a+28,24,'Čela – šikmý pohled zprava');
+    addAngle(a,38,'Zvýšený přehled kuchyně');
+  }else{
+    // Úhel mezi sousedními rameny ukáže jejich čela společně.
+    let pair=null;
+    for(const f of dirs)for(const h of dirs){
+      const delta=((az[h]-az[f]+540)%360)-180;
+      if(Math.abs(delta)===90&&!pair)pair=[az[f]+delta/2,f,h];
+    }
+    const overview=pair?pair[0]:(az[dirs[0]]??180);
+    addAngle(overview,24,'Celkový pohled na čela kuchyně');
+    dirs.slice(0,2).forEach(f=>addAngle(az[f],12,'Čelní pohled ramene – '+f));
+    addAngle(dirs.length>2?az[dirs[2]]:overview,dirs.length>2?12:38,dirs.length>2?'Čelní pohled třetího ramene':'Zvýšený přehled kuchyně');
   }
   return out;
 }
@@ -4401,69 +4410,216 @@ function pngStyle(mat){
   return { c:[0.78,0.79,0.83], a:1 };              // skříně – neutrální světle šedá
 }
 
-/* Nakreslí jeden pohled scény do canvasu a vrátí base64 PNG (bez hlavičky). */
-function renderPngView(sc, az, el){
-  const W = 1500, H = 1500;
-  const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-
-  const E = el * Math.PI/180, A = az * Math.PI/180;
-  /* směr od počátku ke kameře */
-  const d = [Math.cos(E)*Math.sin(A), Math.cos(E)*Math.cos(A), Math.sin(E)];
-  /* g = směr pohledu (od kamery k počátku) */
-  const g = [-d[0], -d[1], -d[2]];
-  let right, upv;
-  if(el > 89){ right = [1,0,0]; upv = [0,1,0]; }        // pohled shora, sever nahoru
-  else {
-    right = nrm3(cross3([0,0,1], g));                   // doprava na obrazovce
-    if(!(Math.abs(right[0])+Math.abs(right[1])+Math.abs(right[2]) > 0.5)) right = [1,0,0];
-    upv = nrm3(cross3(g, right));                       // nahoru na obrazovce
-  }
-
-  /* plochy + světelný stín (přibližný 3D dojem) */
-  const light = nrm3([0.5, 0.3, 0.8]);
-  const polys = [];
-  for(const f of sc.facs){
-    const pts = f.v.map(i => sc.verts[i]);
-    if(pts.length < 3) continue;
-    const n0 = nrm3(cross3(vec3(pts[0], pts[1]), vec3(pts[0], pts[2])));
-    const bright = 0.58 + 0.42 * Math.abs(dot3(n0, light));
-    let dep = 0; for(const p of pts) dep += dot3(p, d); dep /= pts.length;
-    polys.push({ pts, dep, bright, mat:f.mat });
-  }
-  polys.sort((a,b) => a.dep - b.dep);                   // daleké nejdřív
-
-  /* rozsah pro vystředění */
-  let x0=Infinity, x1=-Infinity, y0=Infinity, y1=-Infinity;
-  for(const p of polys) for(const q of p.pts){
-    const X = dot3(q, right), Y = dot3(q, upv);
-    if(X<x0)x0=X; if(X>x1)x1=X; if(Y<y0)y0=Y; if(Y>y1)y1=Y;
-  }
-  if(!isFinite(x0)) return '';
-  const mrg = 90;
-  const scale = Math.min((W-2*mrg)/(x1-x0 || 1), (H-2*mrg)/(y1-y0 || 1));
-  const mx = (x0+x1)/2, my = (y0+y1)/2;
-  const px = p => (dot3(p, right) - mx) * scale + W/2;
-  const py = p => H/2 - (dot3(p, upv)   - my) * scale;
-
-  for(const poly of polys){
-    const st = pngStyle(poly.mat);
-    const r = Math.round(clamp(st.c[0]*poly.bright,0,1)*255);
-    const gg = Math.round(clamp(st.c[1]*poly.bright,0,1)*255);
-    const b = Math.round(clamp(st.c[2]*poly.bright,0,1)*255);
-    ctx.beginPath();
-    for(let i=0;i<poly.pts.length;i++){
-      const X = px(poly.pts[i]), Y = py(poly.pts[i]);
-      if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y);
+/* Exportní pracovní desky: skutečná hloubka a napojení sousedních kolmých řad.
+   Nákupní rezervy ani prořez se do viditelných rozměrů nepřidávají. */
+function pngCounterRuns(){
+  const rows=[];
+  for(const e of S.project.elements){
+    if(elKind3(e)!=='base')continue;
+    const f=e.front||'jih', horizontal=isHorizFront(f), depth=topDepthOfRun({f,el:[e]});
+    const wall=wallFaceBehind(e);
+    let back=wall;
+    if(back==null)back=f==='jih'?e.y-EL_WALL_GAP:f==='sever'?e.y+e.d+EL_WALL_GAP:f==='východ'?e.x-EL_WALL_GAP:e.x+e.w+EL_WALL_GAP;
+    let x0=e.x,x1=e.x+e.w,y0=e.y,y1=e.y+e.d;
+    if(f==='jih'){y0=back;y1=back+depth;}
+    else if(f==='sever'){y1=back;y0=back-depth;}
+    else if(f==='východ'){x0=back;x1=back+depth;}
+    else{x1=back;x0=back-depth;}
+    for(const b of bokRects(e)){
+      if(horizontal){x0=Math.min(x0,b.x);x1=Math.max(x1,b.x+b.w);}
+      else{y0=Math.min(y0,b.y);y1=Math.max(y1,b.y+b.h);}
     }
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(' + r + ',' + gg + ',' + b + ',' + st.a + ')';
-    ctx.fill();
+    const z0=elZ0(e)+elH3(e);
+    rows.push({f,horizontal,x0,y0,x1,y1,z0,z1:z0+B3D.counterT,back,el:[e]});
   }
-  return cv.toDataURL('image/png').split(',')[1] || '';
+  // Sloup/lednice přeruší desku; skupiny se tvoří pouze ze spodních skříní.
+  const runs=[];
+  for(const r of rows.sort((a,b)=>(a.horizontal?a.x0:a.y0)-(b.horizontal?b.x0:b.y0))){
+    const same=runs.find(q=>q.f===r.f&&Math.abs(q.back-r.back)<1&&Math.abs(q.z0-r.z0)<1&&
+      (r.horizontal?r.x0<=q.x1+90&&r.x1>=q.x0-90:r.y0<=q.y1+90&&r.y1>=q.y0-90)&&
+      !S.project.elements.some(e=>elKind3(e)==='column'&&e.x<Math.max(q.x1,r.x1)&&e.x+e.w>Math.min(q.x0,r.x0)&&e.y<Math.max(q.y1,r.y1)&&e.y+e.d>Math.min(q.y0,r.y0)));
+    if(same){same.x0=Math.min(same.x0,r.x0);same.y0=Math.min(same.y0,r.y0);same.x1=Math.max(same.x1,r.x1);same.y1=Math.max(same.y1,r.y1);same.el.push(...r.el);}
+    else runs.push({...r});
+  }
+  for(const h of runs.filter(r=>r.horizontal))for(const v of runs.filter(r=>!r.horizontal)){
+    if(Math.abs(h.z0-v.z0)>1)continue;
+    const nearX=Math.max(h.x0,v.x0)<=Math.min(h.x1,v.x1)+90;
+    const nearY=Math.max(h.y0,v.y0)<=Math.min(h.y1,v.y1)+90;
+    if(!nearX||!nearY)continue;
+    // Jen malé montážní mezery u skutečného kolmého rohu, ne vzdálené ostrůvky.
+    const hy0=h.y0,hy1=h.y1,vx0=v.x0,vx1=v.x1;
+    if(v.y0>=hy0&&v.y0<=hy1+90&&v.y1>hy1)v.y0=hy0;
+    if(v.y1<=hy1&&v.y1>=hy0-90&&v.y0<hy0)v.y1=hy1;
+    if(h.x0>=vx0&&h.x0<=vx1+90&&h.x1>vx1)h.x0=vx0;
+    if(h.x1<=vx1&&h.x1>=vx0-90&&h.x0<vx0)h.x1=vx1;
+  }
+  return runs;
+}
+/* Sjednocení obdélníků do neprolínající se mřížky – žádná díra v rohu,
+   žádné zdvojené desky ani obrysová čára přes souvislou horní plochu. */
+function pngCounterMesh(sc,runs){
+  const groups={};for(const r of runs)(groups[r.z0+':'+r.z1]||= []).push(r);
+  for(const rows of Object.values(groups)){
+    const xs=[...new Set(rows.flatMap(r=>[r.x0,r.x1]))].sort((a,b)=>a-b);
+    const ys=[...new Set(rows.flatMap(r=>[r.y0,r.y1]))].sort((a,b)=>a-b);
+    const filled=(i,j)=>i>=0&&j>=0&&i<xs.length-1&&j<ys.length-1&&rows.some(r=>(xs[i]+xs[i+1])/2>r.x0&&(xs[i]+xs[i+1])/2<r.x1&&(ys[j]+ys[j+1])/2>r.y0&&(ys[j]+ys[j+1])/2<r.y1);
+    const z0=rows[0].z0,z1=rows[0].z1;
+    for(let i=0;i<xs.length-1;i++)for(let j=0;j<ys.length-1;j++){
+      if(!filled(i,j))continue;
+      const x=xs[i],X=xs[i+1],y=ys[j],Y=ys[j+1];
+      const p0=[[x,y,z0],[X,y,z0],[X,Y,z0],[x,Y,z0]],p1=p0.map(p=>[p[0],p[1],z1]);
+      const emit=pts=>{sc.facs.push({v:pts.map(p=>scAddPt(sc,...p)),mat:'counter'});};
+      emit(p1);emit(p0.slice().reverse());
+      if(!filled(i,j-1))emit([p0[0],p0[1],p1[1],p1[0]]);
+      if(!filled(i+1,j))emit([p0[1],p0[2],p1[2],p1[1]]);
+      if(!filled(i,j+1))emit([p0[2],p0[3],p1[3],p1[2]]);
+      if(!filled(i-1,j))emit([p0[3],p0[0],p1[0],p1[3]]);
+    }
+  }
+}
+function pngBackDetails(sc,runs){
+  const P=pricing();if(!P.zastena&&!P.tl)return;
+  for(const r of runs){
+    let a=r.horizontal?r.x0:r.y0,b=r.horizontal?r.x1:r.y1;
+    const top=r.z1;
+    // Zástěna/TL se v rohu napojí až v průsečíku ZADNÍCH hran,
+    // ne na hranici předního spoje pracovních desek.
+    for(const q of runs){
+      if(q.horizontal===r.horizontal||Math.abs(q.z1-r.z1)>1)continue;
+      if(Math.max(r.x0,q.x0)>Math.min(r.x1,q.x1)+.1||Math.max(r.y0,q.y0)>Math.min(r.y1,q.y1)+.1)continue;
+      const join=q.back;
+      if(join<a&&a-join<=topDepthOfRun({f:r.f,el:r.el})+90)a=join;
+      if(join>b&&join-b<=topDepthOfRun({f:r.f,el:r.el})+90)b=join;
+    }
+    const uppers=S.project.elements.filter(e=>elKind3(e)==='upper'&&(e.front||'jih')===r.f&&
+      (r.horizontal?e.x<b&&e.x+e.w>a:e.y<b&&e.y+e.d>a)&&
+      Math.abs((r.f==='jih'?e.y:r.f==='sever'?e.y+e.d:r.f==='východ'?e.x:e.x+e.w)-r.back)<=150);
+    const breaks=[a,b,...uppers.flatMap(e=>r.horizontal?[Math.max(a,e.x),Math.min(b,e.x+e.w)]:[Math.max(a,e.y),Math.min(b,e.y+e.d)])].sort((x,y)=>x-y);
+    const into=(r.f==='jih'||r.f==='východ')?1:-1;
+    const panelT=10; // schematická tloušťka, nezávislá na kalkulaci materiálu
+    const point=(u,offset,z)=>r.horizontal?[u,r.back+into*offset,z]:[r.back+into*offset,u,z];
+    const box=(lo,hi,d0,d1,z0,z1,mat)=>{
+      const p=point(lo,d0,z0),q=point(hi,d1,z1);
+      scBox(sc,Math.min(p[0],q[0]),Math.min(p[1],q[1]),Math.max(p[0],q[0]),Math.max(p[1],q[1]),z0,z1,mat);
+    };
+    if(P.zastena)for(let i=0;i<breaks.length-1;i++){
+      const lo=breaks[i],hi=breaks[i+1];if(hi-lo<.1)continue;
+      const mid=(lo+hi)/2;
+      const above=uppers.filter(e=>r.horizontal?mid>=e.x&&mid<=e.x+e.w:mid>=e.y&&mid<=e.y+e.d);
+      const end=above.length?Math.min(...above.map(elZ0)):top+(+S.project.info.splashHeight||Math.max(1,B3D.upperBot-top));
+      if(end>top)box(lo,hi,0,panelT,top,end,'backsplash');
+    }
+    if(P.tl){
+      const off=P.zastena?panelT:0;
+      const section=u=>[point(u,off,top),point(u,off+30,top),point(u,off,top+30)];
+      const p=section(a),q=section(b),emit=pts=>sc.facs.push({v:pts.map(v=>scAddPt(sc,...v)),mat:'trim'});
+      emit(p);emit(q.slice().reverse());for(let i=0;i<3;i++)emit([p[i],q[i],q[(i+1)%3],p[(i+1)%3]]);
+    }
+  }
+}
+function pngBlende3(sc){
+  for(const b of blendeCorners()){
+    const els=b.els.map(getEl).filter(Boolean);if(!els.length)continue;
+    const z=Math.min(...els.map(elZ0)),h=Math.max(...els.map(elH3));
+    scBox(sc,b.x,b.y,b.x+b.w,b.y+b.h,z,z+h,'front');
+  }
+}
+
+/* Samostatná neprůsvitná exportní scéna. Místnost se nepromítá přes nábytek. */
+function buildPngScene(){
+  const sc=mkScene();
+  elements3(sc,{el:()=> 'body'});
+  const runs=pngCounterRuns();
+  pngCounterMesh(sc,runs);
+  pngBackDetails(sc,runs); pngBlende3(sc);
+  plinths3(sc,{plinth:'plinth'});
+  for(const e of S.project.elements){
+    const z=elZ0(e), H=elH3(e), f=e.front||'jih';
+    const box=(a,b,lo,hi,mat)=>{
+      if(f==='jih') scBox(sc,e.x+a,e.y+e.d,e.x+b,e.y+e.d+18,lo,hi,mat);
+      else if(f==='sever') scBox(sc,e.x+a,e.y-18,e.x+b,e.y,lo,hi,mat);
+      else if(f==='východ') scBox(sc,e.x+e.w,e.y+a,e.x+e.w+18,e.y+b,lo,hi,mat);
+      else scBox(sc,e.x-18,e.y+a,e.x,e.y+b,lo,hi,mat);
+    };
+    const cfg=frontCfg(e), W=elFrontW(e);
+    if(cfg.on){
+      const fp=frontPieces(e), start=2+(fp.blende?.cutL||0);
+      let lo=z+2;
+      const gap=fp.drawers.length===2&&!fp.doors.length ? 4 : (+pricing().drawerGap||3);
+      for(const h of fp.drawers){box(start,start+fp.wDraw,lo,Math.min(z+H-2,lo+h),'front');lo+=h+gap;}
+      fp.doors.forEach((h,i)=>box(start+i*(fp.wDoor+DOOR_GAP_W),start+i*(fp.wDoor+DOOR_GAP_W)+fp.wDoor,lo,Math.min(z+H-2,lo+h),'front'));
+    } else {
+      // Neznámé členění se nevymýšlí: jediná neutrální čelní plocha.
+      box(2,W-2,z+2,z+H-2,'front');
+    }
+  }
+  return sc;
+}
+/* Ortografický raster s hloubkou pro každý pixel (nikoli řazení celých ploch). */
+function renderPngView(sc, az, el){
+  const W=1500,H=1500,cv=document.createElement('canvas');cv.width=W;cv.height=H;
+  const ctx=cv.getContext('2d'),img=ctx.createImageData(W,H),rgba=img.data;
+  rgba.fill(255);
+  const depth=new Float32Array(W*H);depth.fill(-Infinity);
+  const A=az*Math.PI/180,E=el*Math.PI/180;
+  const d=[Math.cos(E)*Math.sin(A),Math.cos(E)*Math.cos(A),Math.sin(E)];
+  const right=nrm3(cross3(d.map(v=>-v),[0,0,1]));
+  const up=nrm3(cross3(right,d.map(v=>-v)));
+  const points=sc.verts.map(p=>[dot3(p,right),dot3(p,up),dot3(p,d)]);
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  points.forEach(p=>{x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);});
+  if(!points.length)return '';
+  const scale=Math.min((W-150)/(x1-x0||1),(H-150)/(y1-y0||1));
+  const pp=points.map(p=>[(p[0]-(x0+x1)/2)*scale+W/2,H/2-(p[1]-(y0+y1)/2)*scale,p[2]]);
+  const light=nrm3([-0.4,-0.6,1]);
+  const edgeGroups=new Map();
+  const edgeKey=(face,j)=>{
+    const vs=face.v.map(i=>sc.verts[i]);
+    const n=nrm3(cross3(vec3(vs[0],vs[1]),vec3(vs[0],vs[2]))).map(v=>Math.abs(v)<1e-8?0:Math.round(v*10000)/10000);
+    // orientace normály se sjednotí, aby i opačné vinutí dalo tutéž rovinu
+    const sign=n.find(v=>v!==0)<0?-1:1;
+    const normal=n.map(v=>v*sign),plane=Math.round(dot3(normal,vs[0])*10000);
+    const a=vs[j].join(','),b=vs[(j+1)%vs.length].join(',');
+    return face.mat+'|'+normal.join(',')+'|'+plane+'|'+[a,b].sort().join('|');
+  };
+  for(const f of sc.facs)for(let j=0;j<f.v.length;j++){
+    const k=edgeKey(f,j);edgeGroups.set(k,(edgeGroups.get(k)||0)+1);
+  }
+
+  for(const face of sc.facs){
+    const poly=face.v.map(i=>pp[i]);
+    const outline=face.v.map((_,j)=>edgeGroups.get(edgeKey(face,j))===1);
+    const n=nrm3(cross3(vec3(sc.verts[face.v[0]],sc.verts[face.v[1]]),vec3(sc.verts[face.v[0]],sc.verts[face.v[2]])));
+    const shade=.70+.30*Math.abs(dot3(n,light));
+    const colors={body:[183,190,198],front:[235,234,229],counter:[174,164,148],plinth:[131,138,146],backsplash:[219,216,208],trim:[160,164,168]};
+    const col=(colors[face.mat]||colors.body).map(v=>Math.round(v*shade));
+    for(let t=1;t<poly.length-1;t++){
+      const a=poly[0],b=poly[t],c=poly[t+1];
+      const den=(b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
+      if(Math.abs(den)<1e-8)continue;
+      const minX=Math.max(0,Math.floor(Math.min(a[0],b[0],c[0]))),maxX=Math.min(W-1,Math.ceil(Math.max(a[0],b[0],c[0])));
+      const minY=Math.max(0,Math.floor(Math.min(a[1],b[1],c[1]))),maxY=Math.min(H-1,Math.ceil(Math.max(a[1],b[1],c[1])));
+      for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
+        const X=x+.5,Y=y+.5;
+        const u=((b[1]-c[1])*(X-c[0])+(c[0]-b[0])*(Y-c[1]))/den;
+        const v=((c[1]-a[1])*(X-c[0])+(a[0]-c[0])*(Y-c[1]))/den,w=1-u-v;
+        if(u< -1e-7||v< -1e-7||w< -1e-7)continue;
+        const z=u*a[2]+v*b[2]+w*c[2],ix=y*W+x;
+        if(z<depth[ix]-1e-6)continue;
+        depth[ix]=z;
+        let edge=false;
+        for(let j=0;j<poly.length;j++){
+          if(!outline[j])continue;
+          const p=poly[j],q=poly[(j+1)%poly.length],dx=q[0]-p[0],dy=q[1]-p[1],l=dx*dx+dy*dy;
+          const s=l?Math.max(0,Math.min(1,((X-p[0])*dx+(Y-p[1])*dy)/l)):0;
+          if((X-p[0]-s*dx)**2+(Y-p[1]-s*dy)**2<.65){edge=true;break;}
+        }
+        const k=ix*4;rgba[k]=edge?80:col[0];rgba[k+1]=edge?84:col[1];rgba[k+2]=edge?90:col[2];
+      }
+    }
+  }
+  ctx.putImageData(img,0,0);
+  return cv.toDataURL('image/png').split(',')[1]||'';
 }
 
 function b64ToBytes(b64){
@@ -4548,7 +4704,7 @@ function doExportPng(){
     toast('Nejdřív nakresli místnost a skříně'); return;
   }
   try{
-    const { sc } = buildScene3(true);                   // bez stropu, ať je vidět dovnitř
+    const sc = buildPngScene(); // čistá kuchyň bez překrývající se místnosti
     const files = [];
     const lines = projectAiPrompt();
     for(const v of projectPngViews()){
@@ -4591,6 +4747,7 @@ function openProjectModal(){
   $('#fDesigner').value = i.designer; $('#fDesignerContact').value = i.designerContact;
   $('#fDate').value = i.date; $('#fPaper').value = i.paper;
   $('#fNotes').value = i.notes;
+  $('#fSplashHeight').value = i.splashHeight || '';
   DECOR_FIELDS.forEach(([k])=>{ $('#fDecor_'+k).value = i.decors?.[k] || ''; });
   $('#modalProject').classList.remove('hidden');
 }
@@ -4601,6 +4758,7 @@ function saveProjectInfo(){
   i.clientPhone = $('#fClientPhone').value.trim(); i.address = $('#fAddress').value.trim();
   i.designer = $('#fDesigner').value.trim(); i.designerContact = $('#fDesignerContact').value.trim();
   i.date = $('#fDate').value; i.paper = $('#fPaper').value; i.notes = $('#fNotes').value;
+  i.splashHeight = Math.max(0,Math.min(2500,+$('#fSplashHeight').value||0));
   i.decors = Object.fromEntries(DECOR_FIELDS.map(([k])=>[k,$('#fDecor_'+k).value.trim()]));
   $('#projTitle').textContent = i.name || 'Nový nárys';
   closeProjectModal(); pushHistory();
