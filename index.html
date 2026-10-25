@@ -446,6 +446,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <button class="tb toggle" id="btnGrid" aria-pressed="true" title="Mřížka 50 / 500 mm">▦</button>
       <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
       <button class="tb toggle" id="btnFronts" aria-pressed="true" title="Zobrazit čela (dvířka, zásuvky) v půdorysu">▯</button>
+      <button class="tb toggle" id="btnBlendeAuto" aria-pressed="true" title="Blende 50 × 50 v rozích – počítá se automaticky. Vypni, když si chceš blende nakreslit sám."><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#dc2626"></span>blende</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
     </div>
@@ -1018,7 +1019,12 @@ function requestRender(kind){
     if(k === 'canvas') doRenderCanvas(); else doRender();
   });
 }
-function render(){ requestRender('full'); }
+function render(){ syncBlendeAuto(); requestRender('full'); }
+/* Stav vypínače automatické blende v liště. */
+function syncBlendeAuto(){
+  const b = document.querySelector('#btnBlendeAuto');
+  if(b) b.setAttribute('aria-pressed', pricing().blendeOn === false ? 'false' : 'true');
+}
 /* Překreslí jen výkres; panel vpravo zůstane stát, takže psaní a Tab
    v polích nepřijdou o fokus. */
 function renderCanvas(){ requestRender('canvas'); }
@@ -3181,6 +3187,11 @@ function renderInspector(){
               <b style="color:#b91c1c">Blende v rohu ${BS.w} × ${BS.d} mm.</b>
               Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
               na druhém konci skříně taky 2 mm.</p>`;
+          if(pricing().blendeOn === false)
+            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
+              <b>Automatická blende je vypnutá.</b> Nic se nedopočítává – blende si nakresli sám
+              (nebo ji <a href="#" id="iBlendeAutoOn" style="color:#b45309;font-weight:700">zapni</a>).
+              Dvířka jsou proto jen o 4 mm menší než skříň (${fmt(elFrontW(e) - 4)} mm).</p>`;
           return `<p class="hint" style="margin-top:6px">Blende: tahle skříň není v rohu.
             Blende ${BS.w} × ${BS.d} mm se přidá sama, když se dvě kolmé řady potkají (L nebo U roh).</p>`;
         })()}
@@ -3245,6 +3256,11 @@ function renderInspector(){
       e.fronts.doors = clamp(Math.round(+ev.target.value || 0), 0, 20);
       pushHistoryQuiet(); renderCanvas();
     });
+    const bA = $('#iBlendeAutoOn');
+    if(bA) bA.onclick = ev => {
+      ev.preventDefault();
+      const P = pricing(); P.blendeOn = true; syncBlendeAuto(); save(); render();
+    };
     $('#iFrDrawers').addEventListener('change', ev => {
       e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
       e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
@@ -5156,7 +5172,7 @@ function bindPriceInputs(){
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
     else if(el.id === 'pDoorH'){ P.doorH = clamp(+el.value || DOOR_H_DFLT, 100, 2000); updatePriceTotals(); }
     else if(el.id === 'pDrawerGap'){ P.drawerGap = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
-    else if(el.id === 'pBlendeOn'){ P.blendeOn = el.checked; renderPriceModal(); save(); }
+    else if(el.id === 'pBlendeOn'){ P.blendeOn = el.checked; syncBlendeAuto(); render(); save(); }
     else if(el.id === 'pBlendeW'){ P.blendeW = clamp(+el.value || 0, 0, 400); renderPriceModal(); save(); }
     else if(el.id === 'pBlendeD'){ P.blendeD = clamp(+el.value || 0, 0, 600); renderPriceModal(); save(); }
     else if(el.id === 'pDrawerStack'){
@@ -5833,6 +5849,19 @@ function bindUi(){
     $('#btnFronts').setAttribute('aria-pressed', S.showFronts?'true':'false');
     render();
   };
+  /* Blende v rozích: vypínač automatiky. Když je vypnutá, nic se
+     nedopočítává a blende si můžeš nakreslit sám jako prvek. */
+  $('#btnBlendeAuto').onclick = () => {
+    const P = pricing();
+    P.blendeOn = (P.blendeOn === false);
+    syncBlendeAuto();
+    save();
+    render();
+    toast(P.blendeOn === false
+      ? 'Blende v rozích VYPNUTÁ – nakresli si ji sám'
+      : 'Blende v rozích zapnutá – počítá se z rohů');
+  };
+  $('#btnBlendeAuto').setAttribute('aria-pressed', pricing().blendeOn === false ? 'false' : 'true');
   $('#btnDimInst').onclick = () => {
     S.showDimInst = !S.showDimInst;
     $('#btnDimInst').setAttribute('aria-pressed', S.showDimInst?'true':'false');
