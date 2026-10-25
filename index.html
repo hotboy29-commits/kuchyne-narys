@@ -1033,6 +1033,9 @@ function renderCanvas(){ requestRender('canvas'); }
 function doRender(){ doRenderCanvas(); renderInspector(); }
 
 function doRenderCanvas(){
+  /* mezera mezi řadami musí být vždy 50 mm – stejně jako blende; když ji
+     uživatel přitáhne blíž, řada se sama srovná (blende se nekrátí) */
+  if(!drag) blendeEnforceGap();
   /* dokud netáhneš, držíme celý nákres ukotvený v počátku (0,0) */
   if(!drag) rebaseProject();
   for(const sm of S.project.symbols) if(sm.wallId != null) applySymbolAnchor(sm);
@@ -2582,6 +2585,79 @@ function rectsCrossM(a, b){
          a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
 }
 
+/* ── MEZERA MEZI ŘADAMI = 50 mm (stejně jako blende) ─────────────────────
+   Blende má vždy 50 × 50 mm a nikdy nesmí narušit žádnou skříň. Proto se
+   nekrátí ona – posouvá se řada. Když se druhá řada přitáhne blíž (nebo dál)
+   než na 50 mm, celá řada se srovná tak, aby mezera byla přesně 50 mm.
+   Řada se posouvá podél svého čela, takže jí zůstává hloubka i odstup od zdi. */
+let blendeShifted = {};        // id prvku → naposledy provedený posun řady
+/* Prvky stejné řady jako skříň b (stejné čelo + stejná hloubka řady). */
+function blendeRowElements(b){
+  const fi = elFaceInfo(b);
+  const d0 = fi.horiz ? b.y : b.x;
+  const d1 = d0 + (fi.horiz ? b.d : b.w);
+  return S.project.elements.filter(e => {
+    const fe = elFaceInfo(e);
+    if(fe.f !== fi.f) return false;
+    const e0 = fe.horiz ? e.y : e.x;
+    const e1 = e0 + (fe.horiz ? e.d : e.w);
+    return Math.min(e1, d1) - Math.max(e0, d0) > 60;   // stejná hloubka = stejná řada
+  });
+}
+function blendeEnforceGap(){
+  const P = pricing();
+  if(P.blendeOn === false) return;
+  const req = Math.max(0, +P.blendeD || 0);          // hloubka blende = mezera řad
+  if(!(req > 0)) return;
+  for(let pass = 0; pass < 4; pass++){
+    let moved = false;
+    const ds = S.project.elements.filter(e => {
+      const k = elKind3(e);
+      if(k !== 'base' && k !== 'column') return false;
+      return Math.min(e.w, e.d) >= 120;               // blende/dvířka nejsou skříně
+    });
+    for(let i = 0; i < ds.length && !moved; i++) for(let j = i + 1; j < ds.length; j++){
+      const a = ds[i], b = ds[j];
+      const fa = elFaceInfo(a), fb = elFaceInfo(b);
+      if(fa.horiz === fb.horiz) continue;             // jen kolmá čela
+      const A  = fa.horiz ? a : b;
+      const B  = fa.horiz ? b : a;
+      const FA = fa.horiz ? fa : fb;
+      const FB = fa.horiz ? fb : fa;
+      const ra = { x:a.x, y:a.y, w:a.w, h:a.d };
+      const rb = { x:b.x, y:b.y, w:b.w, h:b.d };
+      if(rectsCrossM(ra, rb)) continue;               // překryv → to není roh
+      if(rectGapM(ra, rb) > BLENDE_TOL) continue;     // musí spolu sousedit
+      const px = FB.face, py = FA.face;
+      if(px < FA.a0 - 120 || px > FA.a1 + 120) continue;
+      if(py < FB.a0 - 120 || py > FB.a1 + 120) continue;
+      const dir  = FA.f === 'jih' ? 1 : -1;
+      const near = FA.f === 'jih' ? FB.a0 : FB.a1;
+      const gap  = (near - py) * dir;
+      if(Math.abs(gap - req) <= 0.5) continue;        // mezera je přesně 50 → hotovo
+      const delta = (req - gap) * dir;                // o kolik řadu B srovnat
+      const row = blendeRowElements(B);
+      const ids = new Set(row.map(e => e.id));
+      const before = row.map(e => e.y);
+      for(const e of row) e.y = R(e.y + delta);
+      /* posun nesmí nikde způsobit překryv – kdyby ano, raději ho vrátit */
+      let bad = false;
+      for(const e of row) for(const o of S.project.elements){
+        if(ids.has(o.id)) continue;
+        if(o.kind === 'front' || o.kind === 'blende') continue;
+        if(rectsCrossM({ x:e.x, y:e.y, w:e.w, h:e.d }, { x:o.x, y:o.y, w:o.w, h:o.d })) bad = true;
+      }
+      if(bad){
+        row.forEach((e, k) => { e.y = before[k]; });
+        continue;
+      }
+      for(const e of row) blendeShifted[e.id] = delta;
+      moved = true;                                   // po posunu přepočítat znovu
+      break;
+    }
+    if(!moved) break;
+  }
+}
 /* Všechny blende v projektu – jedna na roh. [{ x, y, w, h, els:[id,id] }] */
 let _blCache = { key:'', list:[] };
 function blendeCorners(){
@@ -3203,7 +3279,9 @@ function renderInspector(){
             return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px">
               <b style="color:#b91c1c">Blende v rohu ${BS.w} × ${BS.d} mm.</b>
               Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
-              na druhém konci skříně taky 2 mm.</p>`;
+              na druhém konci skříně taky 2 mm.<br>
+              Mezera mezi řadami je vždy ${BS.d} mm – stejně jako blende, takže do žádné skříně nevlézá.
+              ${blendeShifted[e.id] ? '<b>Řada srovnána o ' + fmt(Math.abs(Math.round(blendeShifted[e.id]))) + ' mm.</b>' : ''}</p>`;
           if(pricing().blendeOn === false)
             return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
               <b>Automatická blende je vypnutá.</b> Nic se nedopočítává – blende si nakresli sám
@@ -5963,6 +6041,7 @@ function bindUi(){
 }
 
 function loadProject(p, {resetHistory=true}={}){
+  blendeShifted = {};
   S.project = {
     id: p.id || uid('p'),
     info: { ...newProject().info, ...(p.info||{}) },
