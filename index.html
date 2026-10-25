@@ -623,13 +623,15 @@ const TOP_DEPTH_DFLT = 600;  // standardní hloubka pracovní desky [mm] (635 = 
    Čela zásuvek od spodu 350 / 223 / 125 mm s mezerou 3 mm → 704 mm.
    (350 + 3 + 223 + 3 + 125 = 704) */
 const FRONT_T_DFLT  = 18;                     // tloušťka dvířek / čela zásuvky [mm]
-/* ── blende (výplň v rohu, dilatace mezi skříněmi do L/U) ───────────────
-   18 mm široká (podél dveří), 50 mm hluboká, utopená tak, že její přední
-   hrana je v rovině dveří vedlejší skříně → jedna čistá linie dveří.
-   Mezi blende a dvířky jsou 2 mm. */
-const BLENDE_W_DFLT = 18;      // šířka blende podél dveří [mm]
-const BLENDE_D_DFLT = 50;      // hloubka blende od čela [mm]
+/* ── blende (výplň do rohu, dilatace mezi skříněmi do L/U) ───────────────
+   ČTVEREC 50 × 50 mm. Leží v rohu, kde se potkají dvě kolmé řady, a dotýká
+   se líce obou skříní. Dvířka obou skříní jsou od blende 2 mm a od konce
+   skříně taky 2 mm → u skříně 600 mm vyjdou dvířka 546 mm
+   (600 − 50 − 2 − 2). Roh se hledá sám z geometrie půdorysu. */
+const BLENDE_W_DFLT = 50;      // blende podél čela [mm]
+const BLENDE_D_DFLT = 50;      // blende do hloubky [mm]
 const BLENDE_GAP    = 2;       // mezera blende ↔ dvířka [mm]
+const BLENDE_TOL    = 90;      // jak blízko u sebe musí řady být, aby tvořily roh [mm]
 const DOOR_H_DFLT   = 704;                    // výška dvířek [mm]
 const DOOR_EDGE     = 4;                      // úbytek na šířku celkem (2+2) [mm]
 const DOOR_GAP_W    = 2;                      // mezera mezi dvířky vedle sebe [mm]
@@ -2540,14 +2542,119 @@ function autoDoors(e){
   const maxW = Math.max(200, +pricing().doorW || 600);
   return Math.max(1, Math.ceil(elFrontW(e) / maxW));
 }
-/* Blende u skříně: { on, side:'L'|'R' }. Strana je při pohledu na čelo. */
-function blendeCfg(e){
-  const b = e && e.blende;
-  return { on: !!(b && b.on), side: (b && b.side === 'L') ? 'L' : 'R' };
-}
+/* ── BLENDE V ROHU – počítá se sama z půdorysu ────────────────────────────
+   Blende je čtverec 50 × 50 mm. Sedí v rohu, kde se potkají dvě kolmé řady
+   (čelní roviny se protnou), a dotýká se líce obou skříní. Dvířka jsou od
+   blende 2 mm a od konce skříně taky 2 mm → skříň 600 mm má dvířka 546 mm.
+   Nic se nezadává, žádné zaškrtávátko u skříně: rohy se najdou z geometrie. */
 function blendeSize(){
   const P = pricing();
   return { w: Math.max(0, +P.blendeW || 0), d: Math.max(0, +P.blendeD || 0), gap: BLENDE_GAP };
+}
+/* Líc (čelní rovina) skříně a její rozsah podél čela.
+   face = souřadnice líce, a0/a1 = rozsah podél čela. */
+function elFaceInfo(e){
+  const f = e.front || 'jih';
+  const horiz = (f === 'jih' || f === 'sever');
+  const face = f === 'jih'    ? e.y + e.d
+             : f === 'sever'  ? e.y
+             : f === 'východ' ? e.x + e.w
+             :                  e.x;
+  return { f, horiz, face,
+           a0: horiz ? e.x : e.y,
+           a1: horiz ? e.x + e.w : e.y + e.d };
+}
+function rectGapM(a, b){
+  const dx = Math.max(0, a.x - (b.x + b.w), b.x - (a.x + a.w));
+  const dy = Math.max(0, a.y - (b.y + b.h), b.y - (a.y + a.h));
+  return Math.max(dx, dy);
+}
+function rectsCrossM(a, b){
+  return a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 &&
+         a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
+}
+
+/* Všechny blende v projektu – jedna na roh. [{ x, y, w, h, els:[id,id] }] */
+let _blCache = { key:'', list:[] };
+function blendeCorners(){
+  const P = pricing();
+  const on = P.blendeOn !== false;
+  let key = (on ? '1' : '0') + '|' + P.blendeW + '|' + P.blendeD;
+  for(const e of S.project.elements)
+    key += '|' + e.id + ',' + e.x + ',' + e.y + ',' + e.w + ',' + e.d + ',' +
+           (e.front || 'jih') + ',' + elKind3(e);
+  if(key === _blCache.key) return _blCache.list;
+  const list = blendeCornersCalc(P, on);
+  _blCache = { key, list };
+  return list;
+}
+function blendeCornersCalc(P, on){
+  if(!on) return [];
+  const W = Math.max(0, +P.blendeW || 0), D = Math.max(0, +P.blendeD || 0);
+  if(!(W > 0) || !(D > 0)) return [];
+  const ds = S.project.elements.filter(e => {
+    const k = elKind3(e); return k === 'base' || k === 'column';
+  });
+  const out = [], seen = new Set();
+  for(let i = 0; i < ds.length; i++) for(let j = i + 1; j < ds.length; j++){
+    const a = ds[i], b = ds[j];
+    const fa = elFaceInfo(a), fb = elFaceInfo(b);
+    if(fa.horiz === fb.horiz) continue;                  // jen kolmá čela
+    const A  = fa.horiz ? a : b;
+    const B  = fa.horiz ? b : a;
+    const FA = fa.horiz ? fa : fb;                       // FA = vodorovné čelo
+    const FB = fa.horiz ? fb : fa;                       // FB = svislé čelo
+    const ra = { x:a.x, y:a.y, w:a.w, h:a.d };
+    const rb = { x:b.x, y:b.y, w:b.w, h:b.d };
+    if(rectsCrossM(ra, rb)) continue;                    // skříně se nesmí překrývat
+    if(rectGapM(ra, rb) > BLENDE_TOL) continue;          // musí spolu sousedit
+    const px = FB.face, py = FA.face;                    // protnutí čelních rovin
+    if(px < FA.a0 - 120 || px > FA.a1 + 120) continue;   // protnutí musí být u skříně
+    if(py < FB.a0 - 120 || py > FB.a1 + 120) continue;
+    /* blende leží PŘED lícem obou skříní a sahá od protnutí k sousední řadě */
+    const x = FB.f === 'východ' ? px : px - W;
+    const y = FA.f === 'jih'    ? py : py - D;
+    const key = Math.round(x) + ':' + Math.round(y);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    /* Dvířka jsou vždy na straně OD sousední řady: blende sedí na té straně
+       čela, kde je druhá řada, takže z čela ubírá právě tam. */
+    const cuts = {};
+    cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
+    cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
+    out.push({ x:R(x), y:R(y), w:W, h:D, els:[A.id, B.id], cuts });
+  }
+  return out;
+}
+/* Jak blende zasahuje do čela jedné skříně.
+   cutL = mm zabrané na začátku čela, cutR = mm na konci. */
+function blendeForEl(e){
+  const res = { on:false, cutL:0, cutR:0 };
+  if(!e) return res;
+  const list = blendeCorners();
+  if(!list.length) return res;
+  const W = elFrontW(e);
+  const horiz = isHorizFront(e.front || 'jih');
+  const a0 = horiz ? e.x : e.y;
+  for(const b of list){
+    if(!b.els.includes(e.id)) continue;
+    res.on = true;
+    const s = (horiz ? b.x : b.y) - a0;          // začátek blende podél čela
+    const t = s + (horiz ? b.w : b.h);           // konec blende podél čela
+    /* strana se bere podle toho, kde leží sousední řada (viz cuts výše);
+       bez ní rozhodne, na kterém konci čela blende je */
+    const side = (b.cuts && b.cuts[e.id]) ||
+                 ((s + t) / 2 <= W / 2 ? 'L' : 'R');
+    if(side === 'L') res.cutL = Math.max(res.cutL, clamp(t, 0, W));
+    else             res.cutR = Math.max(res.cutR, W - clamp(s, 0, W));
+  }
+  return res;
+}
+/* Zpětná kompatibilita pro starší uložené projekty (ruční blende se ignoruje,
+   počítá se vždy z geometrie). */
+function blendeCfg(e){
+  const BI = blendeForEl(e);
+  return { on: BI.on, side: BI.cutR > BI.cutL ? 'R' : 'L' };
 }
 
 /* Reálné rozměry čel jedné skříně.
@@ -2572,13 +2679,13 @@ function frontPieces(e){
   nD = Math.max(0, Math.min(20, nD));
   nZ = Math.max(0, Math.min(20, nZ));
 
-  /* blende ubere z šířky čela (18 mm) + 2 mm mezera */
-  const BL = blendeCfg(e), BS = blendeSize();
-  /* blende ubere 18 mm; 2 mm na každé straně jsou v DOOR_EDGE a mezera
-     mezi blende a dvířky je z toho vykrytá (18 + 2 = 20 od kraje) */
-  const blendeCut = BL.on ? BS.w : 0;
-  const wDoor = nD > 0 ? Math.max(50, Math.round((W - DOOR_EDGE - blendeCut - (nD - 1) * DOOR_GAP_W) / nD)) : 0;
-  const wDraw = Math.max(50, Math.round(W - DOOR_EDGE - blendeCut));
+  /* blende v rohu ubere z čela 50 mm + 2 mm mezera; druhé 2 mm jsou
+     v DOOR_EDGE → skříň 600 mm = dvířka 546 mm (600 − 50 − 2 − 2) */
+  const BI = blendeForEl(e), BS = blendeSize();
+  const cutL = BI.cutL, cutR = BI.cutR;
+  const usable = Math.max(100, W - cutL - cutR);
+  const wDoor = nD > 0 ? Math.max(50, Math.round((usable - DOOR_EDGE - (nD - 1) * DOOR_GAP_W) / nD)) : 0;
+  const wDraw = Math.max(50, Math.round(usable - DOOR_EDGE));
 
   const nSlots   = nZ + (nD > 0 ? 1 : 0);          // čel nad sebou
   const gapTotal = Math.max(0, nSlots - 1) * gap;
@@ -2618,7 +2725,8 @@ function frontPieces(e){
   }
   return { doors: nD > 0 && doorH > 0 ? Array.from({length:nD}, () => doorH) : [],
            drawers, wDoor, wDraw, total,
-           blende: BL.on ? { w:BS.w, d:BS.d, gap:BS.gap, side:BL.side, cut:blendeCut } : null,
+           blende: BI.on ? { w:BS.w, d:BS.d, gap:BS.gap, cutL, cutR,
+                             cut: cutL + cutR } : null,
            ok: drawers.length === nZ && (nD === 0 || doorH > 0) };
 }
 
@@ -2632,7 +2740,10 @@ function frontSizesText(e){
   if(!out.length) return '—';
   const sum = FP.drawers.reduce((a,b) => a + b, 0) + (FP.doors.length ? FP.doors[0] : 0)
             + Math.max(0, FP.drawers.length + (FP.doors.length ? 1 : 0) - 1) * pricing().drawerGap;
-  return out.join(' · ') + ' · celkem na výšku ' + fmt(Math.round(sum)) + ' mm';
+  let txt = out.join(' · ') + ' · celkem na výšku ' + fmt(Math.round(sum)) + ' mm';
+  if(FP.blende) txt += ' · blende ' + FP.blende.w + ' × ' + FP.blende.d +
+    ' v rohu (−' + fmt(Math.round(FP.blende.cut)) + ' mm)';
+  return txt;
 }
 
 /* Čela fyzicky v půdorysu.
@@ -2654,43 +2765,34 @@ function frontStrips(e){
   const W  = elFrontW(e);                      // šířka podél čela
   const T  = FRONT_T_DFLT;                     // tloušťka čela
 
-  /* blende zabírá konec čela (18 mm) – dvířka se posunou na druhou stranu */
+  /* Blende v rohu zabírá začátek (nebo konec) čela. Dvířka jsou od ní 2 mm
+     a 2 mm od konce skříně. Blende samotná se kreslí zvlášť jako čtverec
+     50 × 50 (viz blendeCorners), ne jako pruh na čele. */
   const BL = FP.blende;
-  const EDGE = DOOR_EDGE / 2;                  // 2 mm od kraje
-  const BLC = BL ? (BL.w + BL.gap) : 0;        // blende + mezera od kraje
+  const EDGE = DOOR_EDGE / 2;                          // 2 mm od kraje
+  const inner0 = EDGE + (BL ? BL.cutL : 0);
+  const inner1 = W - EDGE - (BL ? BL.cutR : 0);
 
   /* úseky podél čela */
   const segs = [];
   if(FP.doors.length){
     const n = FP.doors.length, w = FP.wDoor, gap = DOOR_GAP_W;
     const used = n * w + (n - 1) * gap;
-    const inner0 = BL && BL.side === 'L' ? BLC : EDGE;
-    const inner1 = W - (BL && BL.side === 'R' ? BLC : EDGE);
-    let a = BL ? inner0 : inner0 + ((inner1 - inner0) - used) / 2;
+    let a = inner0 + ((inner1 - inner0) - used) / 2;
     for(let i = 0; i < n; i++){ segs.push({ a0:a, a1:a + w }); a += w + gap; }
   } else {
-    const inner0 = BL && BL.side === 'L' ? BLC : EDGE;
-    const inner1 = W - (BL && BL.side === 'R' ? BLC : EDGE);
     segs.push({ a0: inner0 + ((inner1 - inner0) - FP.wDraw) / 2,
                 a1: inner0 + ((inner1 - inner0) + FP.wDraw) / 2 });
-  }
-  /* blende = pruh na kraji čela, přední hrana v rovině dveří */
-  if(BL){
-    if(BL.side === 'L') segs.push({ a0: 0, a1: BL.w, blende:true });
-    else                segs.push({ a0: W - BL.w, a1: W, blende:true });
   }
 
   const tag = { doors:FP.doors.length, drawers:FP.drawers.length };
   const D = 18;                                // jak daleko čelo vystupuje před skříň
   return segs.map(sg => {
     const len = sg.a1 - sg.a0;
-    /* blende: přední hrana v rovině dveří, dozadu 50 mm (utopená) */
-    const depth = sg.blende ? (BL ? BL.d : T) : T;
-    const back  = sg.blende ? (T - depth) : 0;       // přední hrana v rovině dvířek
-    if(fv[1] === 1)  return { x:e.x + sg.a0, y:e.y + e.d + back, w:len, h:depth, blende:!!sg.blende, ...tag };  // jih
-    if(fv[1] === -1) return { x:e.x + sg.a0, y:e.y - back - depth, w:len, h:depth, blende:!!sg.blende, ...tag };  // sever
-    if(fv[0] === 1)  return { x:e.x + e.w + back, y:e.y + sg.a0, w:depth, h:len, blende:!!sg.blende, ...tag };  // východ
-    return                  { x:e.x - back - depth, y:e.y + sg.a0, w:depth, h:len, blende:!!sg.blende, ...tag };  // západ
+    if(fv[1] === 1)  return { x:e.x + sg.a0, y:e.y + e.d, w:len, h:T, ...tag };  // jih
+    if(fv[1] === -1) return { x:e.x + sg.a0, y:e.y - T,   w:len, h:T, ...tag };  // sever
+    if(fv[0] === 1)  return { x:e.x + e.w, y:e.y + sg.a0, w:T, h:len, ...tag };  // východ
+    return                  { x:e.x - T,   y:e.y + sg.a0, w:T, h:len, ...tag };  // západ
   });
 }
 
@@ -2768,6 +2870,16 @@ function frontsMarkup(){
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.2}px">${r.drawers}×</text>`;
         }
       }
+    }
+  }
+  /* blende v rohu – čtverec 50 × 50, tmavě červený */
+  for(const b of blendeCorners()){
+    out += `<rect x="${R(b.x)}" y="${R(b.y)}" width="${Math.max(R(b.w),0.5)}" height="${Math.max(R(b.h),0.5)}"
+      fill="#dc2626" stroke="#7f1d1d" stroke-width="${1.4/z}" pointer-events="none"/>`;
+    if(Math.min(b.w, b.h) * z > 34){
+      out += `<text x="${R(b.x + b.w/2)}" y="${R(b.y + b.h/2)}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${clamp(Math.min(b.w, b.h) * 0.40, 60, 220)}" font-weight="700" fill="#fff"
+        pointer-events="none" style="font-family:Helvetica,Arial,sans-serif">B</text>`;
     }
   }
   return out;
@@ -3062,20 +3174,16 @@ function renderInspector(){
           <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
         <p class="hint" style="margin-top:6px"><b>Rozměry čel:</b> ${frontSizesText(e)}</p>
-        <label class="chk" style="margin-top:6px">
-          <input type="checkbox" id="iBlendeOn" ${blendeCfg(e).on?'checked':''}> blende (výplň do rohu)
-        </label>
-        <div class="row2">
-          <label class="fld"><span>Blende na straně</span>
-            <select id="iBlendeSide">
-              <option value="L" ${blendeCfg(e).side==='L'?'selected':''}>vlevo</option>
-              <option value="R" ${blendeCfg(e).side==='R'?'selected':''}>vpravo</option>
-            </select></label>
-          <label class="fld"><span>Rozměr blende</span>
-            <input type="text" value="${pricing().blendeW} × ${pricing().blendeD} mm" disabled></label>
-        </div>
-        <p class="hint">Blende ${pricing().blendeW} mm široká (podél dveří) × ${pricing().blendeD} mm hluboká,
-          utopená tak, že její přední hrana je v rovině dveří. Mezi blende a dvířky jsou 2 mm.</p>
+        ${(() => {
+          const BI = blendeForEl(e), BS = blendeSize();
+          if(BI.on)
+            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px">
+              <b style="color:#b91c1c">Blende v rohu ${BS.w} × ${BS.d} mm.</b>
+              Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
+              na druhém konci skříně taky 2 mm.</p>`;
+          return `<p class="hint" style="margin-top:6px">Blende: tahle skříň není v rohu.
+            Blende ${BS.w} × ${BS.d} mm se přidá sama, když se dvě kolmé řady potkají (L nebo U roh).</p>`;
+        })()}
         <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš.
           Šířka čela = šířka skříně − 4 mm (600 → 596, na dvě 297, myčka 450 → 446),
           výška dvířek je vždy 704 mm, čela zásuvek od spodu ${(pricing().drawerStack||[]).join(' / ')} mm
@@ -3141,15 +3249,6 @@ function renderInspector(){
       e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
       e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
       pushHistoryQuiet(); renderCanvas();
-    });
-    $('#iBlendeOn').addEventListener('change', ev => {
-      if(ev.target.checked) e.blende = { on:true, side: blendeCfg(e).side };
-      else delete e.blende;
-      pushHistoryQuiet(); render(); 
-    });
-    $('#iBlendeSide').addEventListener('change', ev => {
-      e.blende = { on:true, side: ev.target.value === 'L' ? 'L' : 'R' };
-      pushHistoryQuiet(); render();
     });
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
@@ -4262,8 +4361,9 @@ function PRICE_DEFAULTS(){ return ({
   doorH: DOOR_H_DFLT,   // výška dvířek [mm] – DS i HS 704
   drawerGap: DRAWER_GAP,     // mezera mezi čely nad sebou [mm]
   drawerStack: [350, 223, 125],  // čela zásuvek od spodu [mm]
-  blendeW: BLENDE_W_DFLT,        // šířka blende podél dveří [mm]
-  blendeD: BLENDE_D_DFLT,        // hloubka blende [mm]
+  blendeW: BLENDE_W_DFLT,        // blende podél čela [mm] – čtverec 50 × 50
+  blendeD: BLENDE_D_DFLT,        // blende do hloubky [mm]
+  blendeOn: true,                // počítat blende do rohů automaticky
   inPrint: true,        // přidávat kalkulaci do PDF
   topDepth: TOP_DEPTH_DFLT, // hloubka pracovní desky [mm] – standard 600, existuje i 635
   kerf: 4,              // šířka řezu (prořez pilou) [mm] – počítá se do rozvržení
@@ -4329,8 +4429,14 @@ function pricing(){
   p.doorW       = Math.max(200, num(p.doorW, D.doorW));
   p.doorH       = clamp(num(p.doorH, D.doorH), 100, 2000);
   p.drawerGap   = clamp(num(p.drawerGap, D.drawerGap), 0, 20);
+  /* starší projekty měly blende 18 × 50 (pruh podél dveří) – teď je to
+     čtverec 50 × 50 v rohu, stará dvojice se přepíše */
+  if(+p.blendeW === 18 && +p.blendeD === 50){
+    p.blendeW = BLENDE_W_DFLT; p.blendeD = BLENDE_D_DFLT;
+  }
   p.blendeW     = clamp(num(p.blendeW, D.blendeW), 0, 400);
   p.blendeD     = clamp(num(p.blendeD, D.blendeD), 0, 600);
+  p.blendeOn    = p.blendeOn !== false;      // blende do rohů se počítá sama
   p.drawerStack = (Array.isArray(p.drawerStack) && p.drawerStack.length ? p.drawerStack : D.drawerStack)
                     .map(v => Math.max(20, +v || 0)).filter(v => v > 0);
   p.vatIncluded = p.vatIncluded !== false;
@@ -4465,9 +4571,6 @@ function materialParts(){
       }
       FP.drawers.forEach((h, i) => add('front',
         tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q));
-      if(FP.blende) add('front',
-        tag + ' – blende ' + FP.blende.w + ' × ' + FP.blende.d + ' mm (hřbet ' + fmt(Math.round(H)) + ')',
-        FP.blende.w, H, 1*q);
     }
     /* bok+ na každé zapnuté straně */
     if(bokAny(e)){
@@ -4475,6 +4578,15 @@ function materialParts(){
       add('bok', tag + ' – bok+', bokDepthOf(e), bokH(e), nb*q);
     }
   }
+
+  /* BLENDE – jedna na každý roh, kde se potkají dvě kolmé řady.
+     Je to svislý hranol 50 × 50, výška = výška sousedních skříní. */
+  blendeCorners().forEach((b, i) => {
+    const hs = b.els.map(id => { const e2 = getEl(id); return e2 ? elH3(e2) : 0; });
+    const hB = Math.max(...hs, 0) || BOK_H_DS;
+    add('front', 'Blende do rohu ' + (i+1) + ' – ' + b.w + ' × ' + b.h + ' mm (hřbet ' + fmt(Math.round(hB)) + ')',
+        Math.max(b.w, b.h), hB, 1);
+  });
 
   /* pracovní deska a sokl pod souvislými řadami DS
      Když je řada delší než deska, rozdělí se na kusy – hranice se trefí
@@ -4980,6 +5092,7 @@ function renderPriceModal(){
       <label>max šířka čela <input class="p-in num" id="pDoorW" type="number" min="200" step="50" value="${P.doorW}"> mm</label>
       <label>výška dvířek <input class="p-in num" id="pDoorH" type="number" min="100" max="2000" step="1" value="${P.doorH}"> mm</label>
       <label>mezera čel <input class="p-in num" id="pDrawerGap" type="number" min="0" max="20" step="0.5" value="${P.drawerGap}"> mm</label>
+      <label><input type="checkbox" id="pBlendeOn" ${P.blendeOn !== false ? 'checked' : ''}> blende do rohů (automaticky)</label>
       <label>blende šířka <input class="p-in num" id="pBlendeW" type="number" min="0" max="400" step="1" value="${P.blendeW}"> mm</label>
       <label>blende hloubka <input class="p-in num" id="pBlendeD" type="number" min="0" max="600" step="5" value="${P.blendeD}"> mm</label>
       <label>čela zásuvek od spodu
@@ -5043,6 +5156,7 @@ function bindPriceInputs(){
     else if(el.id === 'pDoorW'){ P.doorW = Math.max(200, +el.value || 600); updatePriceTotals(); }
     else if(el.id === 'pDoorH'){ P.doorH = clamp(+el.value || DOOR_H_DFLT, 100, 2000); updatePriceTotals(); }
     else if(el.id === 'pDrawerGap'){ P.drawerGap = clamp(+el.value || 0, 0, 20); updatePriceTotals(); }
+    else if(el.id === 'pBlendeOn'){ P.blendeOn = el.checked; renderPriceModal(); save(); }
     else if(el.id === 'pBlendeW'){ P.blendeW = clamp(+el.value || 0, 0, 400); renderPriceModal(); save(); }
     else if(el.id === 'pBlendeD'){ P.blendeD = clamp(+el.value || 0, 0, 600); renderPriceModal(); save(); }
     else if(el.id === 'pDrawerStack'){
@@ -5368,7 +5482,7 @@ function buildPrint(){
       }
       const list = [...map.values()].sort((a,b) => (b.w - a.w) || (b.h - a.h));
       const rows = list.map(o => {
-        const typ = o.blende ? ('blende ' + P.blendeW + ' × ' + P.blendeD + ' mm (hl.)')
+        const typ = o.blende ? ('blende ' + P.blendeW + ' × ' + P.blendeD + ' mm')
                   : (o.h === Math.round(P.doorH)) ? 'dvířka' : 'čelo zásuvky';
         return `<tr><td>${typ}</td><td class="num">${fmt(o.w)}</td><td class="num">${fmt(o.h)}</td><td class="num">${o.qty} ks</td></tr>`;
       }).join('');
@@ -5381,6 +5495,8 @@ function buildPrint(){
         </table>
         <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
           Šířka čela = šířka skříně − 4 mm (600 → 596; na dvě dvířka 297; myčka 450 → 446).
+          V rohu u blende ${P.blendeW} × ${P.blendeD} mm je čelo kratší o blende a 2 mm mezeru
+          (skříň 600 mm v rohu → dvířka ${600 - P.blendeW - 4} mm).
           Výška dvířek ${fmt(P.doorH)} mm, čela zásuvek od spodu ${(P.drawerStack||[]).join(' / ')}
           mm s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm (dvě zásuvky 350 + 350 s mezerou 4 mm).
           U sloupů jsou uvedené jen spodní výsuvy, zbytek čel se doměřuje.
@@ -5515,9 +5631,13 @@ function drawingSvg(P, opt){
     if(filter && !filter(e)) continue;
     for(const r of frontStrips(e)){
       parts.push(`<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
-        fill="${r.blende ? '#fde8e8' : '#ffffff'}" stroke="${r.blende ? '#b91c1c' : '#1f2937'}"
-        stroke-width="${sw(0.14)}"/>`);
+        fill="#ffffff" stroke="#1f2937" stroke-width="${sw(0.14)}"/>`);
     }
+  }
+  // blende v rohu – čtverec 50 × 50
+  for(const b of blendeCorners()){
+    parts.push(`<rect x="${R(b.x)}" y="${R(b.y)}" width="${R(b.w)}" height="${R(b.h)}"
+      fill="#dc2626" stroke="#7f1d1d" stroke-width="${sw(0.16)}"/>`);
   }
 
   // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
@@ -5821,10 +5941,8 @@ function loadProject(p, {resetHistory=true}={}){
           doors:   clamp(Math.round(+fr.doors   || 0), 0, 20),
           drawers: clamp(Math.round(+fr.drawers || 0), 0, 20) };
       } else delete o.fronts;
-      const bl = o.blende;
-      if(bl && typeof bl === 'object' && bl.on)
-        o.blende = { on:true, side: bl.side === 'L' ? 'L' : 'R' };
-      else delete o.blende;
+      /* blende se od v2 nepočítá ručně – dopočítá se z rohů půdorysu */
+      delete o.blende;
       return o;
     }),
     guides: (p.guides||[]).map(g => ({ ...g, id:g.id||uid('g'), a:{x:+g.a?.x||0,y:+g.a?.y||0},
