@@ -446,6 +446,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <button class="tb toggle" id="btnGrid" aria-pressed="true" title="Mřížka 50 / 500 mm">▦</button>
       <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
       <button class="tb toggle" id="btnFronts" aria-pressed="true" title="Zobrazit čela (dvířka, zásuvky) v půdorysu">▯</button>
+      <button class="tb toggle" id="btnLabels" aria-pressed="true" title="Popisky skříní (názvy a rozměry) – klikni pro přepnutí: auto → vždy → skryté">Aa</button>
       <button class="tb toggle" id="btnBlendeAuto" aria-pressed="true" title="Blende 50 × 50 v rozích – počítá se automaticky. Vypni, když si chceš blende nakreslit sám."><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#dc2626"></span>blende</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
@@ -651,6 +652,7 @@ const S = {
   snapMm: SNAP_MM_DEFAULT,
   magnet: true,
   showGrid: true,
+  labels: 'auto',       // popisky skříní: auto | always | off
   showDims: true,
   showFronts: true,     // kreslit čela (dvířka, zásuvky) i v půdorysu
   showDimInst: true,      // kóty instalací (voda/elektro…) – barva = typ značky
@@ -1020,7 +1022,20 @@ function requestRender(kind){
     if(k === 'canvas') doRenderCanvas(); else doRender();
   });
 }
-function render(){ syncBlendeAuto(); requestRender('full'); }
+function render(){ syncBlendeAuto(); syncLabelsBtn(); requestRender('full'); }
+/* Stav tlačítka popisků (Aa) – svítí, jen když jsou popisky vidět. */
+function syncLabelsBtn(){
+  const b = document.querySelector('#btnLabels');
+  if(!b) return;
+  const m = S.labels || 'auto';
+  b.setAttribute('aria-pressed', m === 'off' ? 'false' : 'true');
+  b.style.opacity = m === 'off' ? '.5' : '';
+  b.setAttribute('data-mode', m);
+  b.title = m === 'auto' ? 'Popisky skříní: automaticky (jen když se vejdou) – klikni pro „vždy“'
+          : m === 'always' ? 'Popisky skříní: vždy zobrazené – klikni pro skrytí'
+          : 'Popisky skříní: skryté – klikni pro automatiku';
+  b.textContent = m === 'always' ? 'Aa+' : 'Aa';
+}
 /* Stav vypínače automatické blende v liště. */
 function syncBlendeAuto(){
   const b = document.querySelector('#btnBlendeAuto');
@@ -1141,11 +1156,62 @@ function wallsMarkup(){
   }).join('');
 }
 
+/* ── POPISKY SKŘÍNÍ ────────────────────────────────────────────────────
+   Velikost popisků se drží na obrazovce pořád stejná (stejně jako kóty),
+   takže při přiblížení nezakrývají výkres a při oddálení nejsou nečitelné.
+   Když je skříň na obrazovce malá, popisek se nejdřív zkrátí a pak zmizí.
+   Režim se přepíná tlačítkem „Aa“: auto → vždy → skryté. */
+const LBL_PX_NAME = 12.5;        // px na obrazovce
+const LBL_PX_DIM  = 9.5;
+function lblShort(t, n){
+  t = String(t == null ? '' : t);
+  if(n <= 1) return '';
+  return t.length > n ? t.slice(0, Math.max(0, n - 1)).replace(/\s+$/, '') + '…' : t;
+}
+/* Leží horní skříň v půdorysu nad nějakou spodní? (překryv > 40 % její plochy) */
+function upperCovered(e){
+  const A = e.w * e.d;
+  if(!(A > 0)) return false;
+  for(const o of S.project.elements){
+    const k = elKind3(o);
+    if(k !== 'base' && k !== 'column') continue;
+    const ox = Math.min(e.x + e.w, o.x + o.w) - Math.max(e.x, o.x);
+    const oy = Math.min(e.y + e.d, o.y + o.d) - Math.max(e.y, o.y);
+    if(ox > 0 && oy > 0 && (ox * oy) / A > 0.4) return true;
+  }
+  return false;
+}
+/* Co se u skříně dá přečíst: { name, dim, fsN, fsD }
+   Vybraná skříň má popisek vždy – i když je na obrazovce malá. */
+function elLabels(e){
+  const z = S.view.zoom || 1;
+  const mode = S.labels || 'auto';
+  const wpx = e.w * z, hpx = e.d * z;            // velikost skříně na obrazovce
+  const fit = Math.min(e.w, e.d) * 0.36;         // popis nesmí přerůst skříň
+  const sel = S.sel?.kind === 'el' && S.sel.id === e.id;
+  let showName = mode !== 'off', showDim = mode !== 'off';
+  if(mode === 'auto'){                           // auto = jen když je místo
+    showName = sel || (wpx >= 66 && hpx >= 28);
+    showDim  = sel || (wpx >= 120 && hpx >= 52);
+    /* Horní skříň leží v půdorysu NAD spodní – na společné vrstvě by se
+       její popisek srážel s popiskem spodní řady. Proto se popisek horní
+       skříně ukáže jen na vrstvě HS, nebo když pod ní nic není. */
+    if(elKind3(e) === 'upper' && S.layer !== 'HS' && !sel && upperCovered(e)){
+      showName = false; showDim = false;
+    }
+  }
+  const fsN = Math.min(LBL_PX_NAME / z, fit);
+  const fsD = Math.min(LBL_PX_DIM / z, fit * 0.78);
+  const maxCh = Math.max(3, Math.floor((e.w - 6) / (0.60 * fsN)));
+  return { name: showName ? lblShort(e.name || '', maxCh) : '',
+           dim:  showDim ? fmt(e.w) + ' × ' + fmt(e.d) : '',
+           fsN, fsD };
+}
 function elementsMarkup(){
   const z = S.view.zoom;
   return S.project.elements.filter(layerShowsEl).map(e => {
     const sel = S.sel?.kind==='el' && S.sel.id===e.id;
-    const fs = clamp(Math.min(e.w, e.d)/5, 90, 320);
+    const LB = elLabels(e);
     const c = e.color || COLORS[0];
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(80, e.w*0.14, e.d*0.14);
@@ -1160,12 +1226,12 @@ function elementsMarkup(){
       <rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
             fill="${c}${up?'0a':'22'}" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
       <path d="${dl}" stroke="${c}" stroke-width="${2/z}" fill="none" opacity=".8"/>
-      <text x="${e.x+e.w/2}" y="${e.y+e.d/2 - fs*0.15}" text-anchor="middle" dominant-baseline="middle"
-            font-size="${fs}" font-weight="700" fill="#111827"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}px">${esc(e.name||'')}</text>
-      <text x="${e.x+e.w/2}" y="${e.y+e.d/2 + fs*0.72}" text-anchor="middle" dominant-baseline="middle"
-            font-size="${fs*0.62}" fill="#374151"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.18}px">${fmt(e.w)} × ${fmt(e.d)}</text>
+      ${LB.name ? `<text x="${e.x+e.w/2}" y="${e.y+e.d/2 - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
+            font-size="${LB.fsN}" font-weight="700" fill="#111827"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
+      ${LB.dim ? `<text x="${e.x+e.w/2}" y="${e.y+e.d/2 + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
+            font-size="${LB.fsD}" fill="#4b5563"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}
     </g>`;
   }).join('');
 }
@@ -2786,6 +2852,9 @@ function frontPieces(e){
   if(!nD && !nZ) nD = isCol ? 0 : 1;           // zapnuto, ale nic nezadáno
   nD = Math.max(0, Math.min(20, nD));
   nZ = Math.max(0, Math.min(20, nZ));
+  /* SLOUP: dole jsou dva výsuvy (350 a 223), nad nimi trouba, mikrovlnka
+     a výklop – ty se doměřují, do kalkulace se nepočítají. */
+  if(isCol) nZ = Math.min(nZ, 2);
 
   /* blende v rohu ubere z čela jen to, co je za rovinou dveří; dvířka
      jsou od ní 2 mm a 2 mm od konce skříně (skříň 600 v rohu = 578 mm) */
@@ -2972,10 +3041,11 @@ function frontsMarkup(){
         if(along > 46){
           const tx = R(r.x + r.w/2), ty = R(r.y + r.h/2);
           const rot = r.h > r.w ? ` transform="rotate(-90 ${tx} ${ty})"` : '';
-          const fs = clamp(Math.max(r.w, r.h) * 0.14, 80, 240);
+          /* popisek zásuvek je na obrazovce stále stejně velký */
+          const fs = Math.min(10.5/z, Math.min(r.w, r.h) * 0.85);
           out += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle"${rot}
             font-size="${fs}" font-weight="700" fill="#111827" pointer-events="none"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.2}px">${r.drawers}×</text>`;
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.22}">${r.drawers}×</text>`;
         }
       }
     }
@@ -2989,7 +3059,7 @@ function frontsMarkup(){
       ${uB ? 'stroke-dasharray="' + (6/z) + ' ' + (4/z) + '"' : ''} pointer-events="none"/>`;
     if(Math.min(b.w, b.h) * z > 34){
       out += `<text x="${R(b.x + b.w/2)}" y="${R(b.y + b.h/2)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${clamp(Math.min(b.w, b.h) * 0.40, 60, 220)}" font-weight="700" fill="${uB ? '#7f1d1d' : '#fff'}"
+        font-size="${Math.min(9/z, Math.min(b.w, b.h) * 0.55)}" font-weight="700" fill="${uB ? '#7f1d1d' : '#fff'}"
         pointer-events="none" style="font-family:Helvetica,Arial,sans-serif">B</text>`;
     }
   }
@@ -5962,6 +6032,16 @@ function bindUi(){
     S.showFronts = !S.showFronts;
     $('#btnFronts').setAttribute('aria-pressed', S.showFronts?'true':'false');
     render();
+  };
+  /* Popisky skříní: auto (jen když se vejdou) → vždy → skryté */
+  $('#btnLabels').onclick = () => {
+    const order = ['auto', 'always', 'off'];
+    S.labels = order[(order.indexOf(S.labels || 'auto') + 1) % order.length];
+    syncLabelsBtn();
+    render();
+    toast(S.labels === 'auto' ? 'Popisky: automaticky (jen když se vejdou)'
+        : S.labels === 'always' ? 'Popisky: vždy zobrazené'
+        : 'Popisky: skryté');
   };
   /* Blende v rozích: vypínač automatiky. Když je vypnutá, nic se
      nedopočítává a blende si můžeš nakreslit sám jako prvek. */
