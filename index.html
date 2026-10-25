@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#0f172a">
 <title>Nárysy – prototyp pro iPad</title>
 <style>
@@ -14,6 +14,11 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root{
+  /* Bezpečné okraje se mění automaticky při otočení iPadu. */
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-right:env(safe-area-inset-right,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --safe-left:env(safe-area-inset-left,0px);
   --bg:#eceff3;
   --surface:#ffffff;
   --surface-2:#f4f6f8;
@@ -51,6 +56,8 @@ body{
    takže se inspektor vykresloval jako pruh ve spodní části obrazovky.) */
 .app{
   position:fixed;inset:0;
+  top:var(--safe-top);right:var(--safe-right);
+  bottom:var(--safe-bottom);left:var(--safe-left);
   display:grid;
   grid-template-columns:minmax(0,1fr) var(--insp,320px);
   grid-template-rows:auto minmax(0,1fr) auto;
@@ -262,9 +269,11 @@ body{
 /* ───────── modaly ───────── */
 #modalPng [hidden]{display:none!important}
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
-  background:rgba(16,24,40,.42);padding:20px}
+  background:rgba(16,24,40,.42);padding:20px;
+  padding-top:calc(20px + var(--safe-top));padding-right:calc(20px + var(--safe-right));
+  padding-bottom:calc(20px + var(--safe-bottom));padding-left:calc(20px + var(--safe-left))}
 .sheet{
-  width:min(720px,100%);max-height:92vh;overflow-y:auto;background:var(--surface);
+  width:min(720px,100%);max-height:min(92vh,100%);overflow-y:auto;background:var(--surface);
   border-radius:var(--radius);box-shadow:var(--shadow);padding:22px;
 }
 .sheet.narrow{width:min(430px,100%)}
@@ -332,7 +341,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
     grid-template-areas:"top" "stage" "status";
   }
   .inspector{
-    position:fixed;top:62px;bottom:42px;right:0;width:min(320px,88vw);
+    position:fixed;top:calc(62px + var(--safe-top));bottom:calc(42px + var(--safe-bottom));right:var(--safe-right);width:min(320px,88vw);
     box-shadow:var(--shadow);z-index:20;transform:translateX(102%);
     transition:transform .18s ease;
   }
