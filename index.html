@@ -2545,8 +2545,10 @@ function frontPieces(e){
   const stack = (Array.isArray(P.drawerStack) && P.drawerStack.length) ? P.drawerStack : DRAWER_STACK_DFLT;
 
   const FR = frontCfg(e);
+  const isCol = elKind3(e) === 'column';
   let nD = FR.doors, nZ = FR.drawers;
-  if(!nD && !nZ) nD = 1;                       // zapnuto, ale nic nezadáno
+  if(isCol) nD = 0;                            // sloup – dvířka nemá, spotřebiče mají vlastní
+  if(!nD && !nZ) nD = isCol ? 0 : 1;           // zapnuto, ale nic nezadáno
   nD = Math.max(0, Math.min(20, nD));
   nZ = Math.max(0, Math.min(20, nZ));
 
@@ -2558,13 +2560,31 @@ function frontPieces(e){
 
   const drawers = [];
   let used = 0;
-  for(let i = 0; i < nZ; i++){
-    const top = (i === nZ - 1) && nD === 0;        // nad poslední zásuvkou nic není
-    let h = top ? (total - used - gapTotal)
-                : (stack[i] != null ? stack[i] : stack[stack.length - 1]);
-    h = Math.round(Math.max(20, h));
-    drawers.push(h);
-    used += h;
+  if(nZ === 1 && nD === 0){
+    /* jediná zásuvka = celé čelo */
+    drawers.push(total); used = total;
+  } else if(nZ === 2 && nD === 0){
+    /* dvě stejná čela 350 + 350, mezera vyjde 4 mm (704 − 700) */
+    const h = Math.round(stack[0] || 350);
+    drawers.push(h, h); used = 2 * h;
+  } else {
+    for(let i = 0; i < nZ; i++){
+      const top = (i === nZ - 1) && nD === 0;      // nad poslední zásuvkou nic není
+      let h = top ? (total - used - gapTotal)
+                  : (stack[i] != null ? stack[i] : stack[stack.length - 1]);
+      h = Math.round(Math.max(20, h));
+      drawers.push(h);
+      used += h;
+    }
+  }
+  /* SLOUP: dole jsou dva výsuvy 350 a 223 mm, nad nimi jsou vestavné
+     spotřebiče (trouba, mikrovlnka) a výklop – ten se doměřuje.
+     Čela výsuvů se proto berou přímo ze seznamu, nic se nedorovnává. */
+  if(isCol && nZ > 0){
+    drawers.length = 0;
+    for(let i = 0; i < nZ; i++)
+      drawers.push(Math.round(stack[i] != null ? stack[i] : stack[stack.length - 1]));
+    used = drawers.reduce((a,b) => a + b, 0);
   }
   let doorH = 0;
   if(nD > 0){
@@ -2920,15 +2940,17 @@ function renderInspector(){
           <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> počítat čela v kalkulaci
         </label>
         <div class="row2">
-          <label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>
-          <label class="fld"><span>Zásuvky (ks)</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
+          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
         <p class="hint" style="margin-top:6px"><b>Rozměry čel:</b> ${frontSizesText(e)}</p>
         <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš.
           Šířka čela = šířka skříně − 4 mm (600 → 596, na dvě 297, myčka 450 → 446),
           výška dvířek je vždy 704 mm, čela zásuvek od spodu ${(pricing().drawerStack||[]).join(' / ')} mm
-          s mezerou ${pricing().drawerGap} mm – dohromady vždy 704 mm.
-          Sloupy (lednice, trouba) mají vlastní dvířka, ty se nepočítají.</p>
+          s mezerou ${pricing().drawerGap} mm – dohromady vždy 704 mm (dvě zásuvky = 350 + 350 s mezerou 4 mm).
+          ${elKind3(e)==='column'
+            ? 'U sloupu se počítají jen spodní výsuvy (' + (pricing().drawerStack||[]).slice(0,2).join(' + ') + ' mm); trouba, mikrovlnka a horní výklop mají vlastní čela a doměřují se.'
+            : 'Sloupy (lednice, trouba): počítají se jen spodní výsuvy, zbytek se doměřuje.'}</p>
       </div>
       <div class="insp-sec">
         <h4>Barva</h4>
@@ -3375,14 +3397,15 @@ function san3(s){ return String(s??'').replace(/[^A-Za-z0-9_.\-]/g,'_').slice(0,
    hodnotu přepíše). */
 function guessKind3(e){
   const n = ((e.name||'') + ' ' + (e.note||'')).toLowerCase();
-  if(/sloup|sloupc/.test(n) || /lednic|chladnic|mraz/.test(n)) return 'column';
+  if(/sloup|sloupc/.test(n) || /lednic|chladnic|mraz|troub|mikrovl|vinoték|vinotek/.test(n)) return 'column';
   if(/horn|nástěnn|nasteen|vrchn|vrni/.test(n)) return 'upper';
   return 'base';
 }
 /* Druh prvku: přednost má přepínač uživatele (e.kind), jinak odhad z názvu. */
 function elKind3(e){
-  if(e.kind==='upper') return 'upper';
-  if(e.kind==='base')  return 'base';
+  if(e.kind==='upper')  return 'upper';
+  if(e.kind==='base')   return 'base';
+  if(e.kind==='column') return 'column';   // ruční volba má vždy přednost
   return guessKind3(e);
 }
 const isUpperEl = e => elKind3(e)==='upper';
@@ -4289,7 +4312,8 @@ function materialParts(){
     /* čela – jen když je uživatel u skříně zapne; sloup = vestavěný
        spotřebič (vlastní čela), u sloupů se nepočítají nikdy */
     const FR = frontCfg(e);
-    if(FR.on && (k === 'base' || k === 'upper')){
+    /* sloup: počítají se jen spodní výsuvy (trouba, mikro a výklop se doměřují) */
+    if(FR.on && (k === 'base' || k === 'upper' || k === 'column')){
       const FP = frontPieces(e);
       if(FP.doors.length){
         add('front', tag + ' – dvířka ' + FP.wDoor + ' × ' + FP.doors[0], FP.wDoor, FP.doors[0], FP.doors.length*q);
@@ -4780,7 +4804,8 @@ function renderPriceModal(){
       Rozměry se počítají reálně: <b>výška dvířek ${fmt(P.doorH)} mm</b>, šířka = šířka skříně − 4 mm
       (600 → 596; na dvě dvířka 297; myčka 450 → 446). Čela zásuvek od spodu
       <b>${(P.drawerStack||[]).join(' / ')} mm</b> s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm.
-      Sloupy (lednice, trouba) čela nemají – mají vlastní dvířka.</p>
+      Dvě zásuvky = 350 + 350 mm s mezerou 4 mm. U sloupů se počítají jen spodní výsuvy
+      (350 + 223 mm) – trouba, mikrovlnka a horní výklop mají vlastní čela a doměřují se.</p>
 
     <div class="p-h">Zástěna a těsnící lišta</div>
     <label class="chk" style="margin-bottom:4px">
@@ -5203,7 +5228,8 @@ function buildPrint(){
         <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
           Šířka čela = šířka skříně − 4 mm (600 → 596; na dvě dvířka 297; myčka 450 → 446).
           Výška dvířek ${fmt(P.doorH)} mm, čela zásuvek od spodu ${(P.drawerStack||[]).join(' / ')}
-          mm s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm.
+          mm s mezerou ${P.drawerGap} mm – dohromady vždy ${fmt(P.doorH)} mm (dvě zásuvky 350 + 350 s mezerou 4 mm).
+          U sloupů jsou uvedené jen spodní výsuvy, zbytek čel se doměřuje.
         </div>`;
     })();
     let tables = '';
@@ -5615,7 +5641,7 @@ function loadProject(p, {resetHistory=true}={}){
         w:+e.w||600, d:+e.d||600, name:e.name||'', note:e.note||'', qty:e.qty||1,
         color:e.color||COLORS[0], front:e.front||'jih' };
       const kd = String(o.kind ?? '').toLowerCase();
-      if(kd === 'upper' || kd === 'base') o.kind = kd; else delete o.kind;
+      if(kd === 'upper' || kd === 'base' || kd === 'column') o.kind = kd; else delete o.kind;
       const hv = +o.h;
       if(hv >= 100) o.h = clamp(hv, 100, 3000); else delete o.h;
       const nb = normBok(o.bok);
