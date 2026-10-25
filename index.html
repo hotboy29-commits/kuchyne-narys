@@ -445,6 +445,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
     <div class="group">
       <button class="tb toggle" id="btnGrid" aria-pressed="true" title="Mřížka 50 / 500 mm">▦</button>
       <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
+      <button class="tb toggle" id="btnFronts" aria-pressed="true" title="Zobrazit čela (dvířka, zásuvky) v půdorysu">▯</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
     </div>
@@ -621,6 +622,7 @@ const TOP_DEPTH_DFLT = 600;  // standardní hloubka pracovní desky [mm] (635 = 
    Když jsou dvířka dvě, mezi nimi je 2 mm: (600 − 4 − 2) / 2 = 297.
    Čela zásuvek od spodu 350 / 223 / 125 mm s mezerou 3 mm → 704 mm.
    (350 + 3 + 223 + 3 + 125 = 704) */
+const FRONT_T_DFLT  = 18;                     // tloušťka dvířek / čela zásuvky [mm]
 const DOOR_H_DFLT   = 704;                    // výška dvířek [mm]
 const DOOR_EDGE     = 4;                      // úbytek na šířku celkem (2+2) [mm]
 const DOOR_GAP_W    = 2;                      // mezera mezi dvířky vedle sebe [mm]
@@ -639,6 +641,7 @@ const S = {
   magnet: true,
   showGrid: true,
   showDims: true,
+  showFronts: true,     // kreslit čela (dvířka, zásuvky) i v půdorysu
   showDimInst: true,      // kóty instalací (voda/elektro…) – barva = typ značky
   layer: 'all',            // zobrazená vrstva: all | DS | HS
   guides: [],                // dočasná magnetická vodítka během tažení
@@ -1024,7 +1027,7 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -2608,6 +2611,44 @@ function frontSizesText(e){
   return out.join(' · ') + ' · celkem na výšku ' + fmt(Math.round(sum)) + ' mm';
 }
 
+/* Čela fyzicky v půdorysu.
+   Dvířka i čela zásuvek jsou naložené panely tl. 18 mm na líci skříně,
+   takže v půdorysu vypadají jako tenký pruh PŘED skříní. Pruh je rozdělený
+   na jednotlivá dvířka (mezera 2 mm); u zásuvkové skříně je jeden pruh
+   (čela jsou nad sebou, v půdorysu se kryjí) s počtem zásuvek.
+   Vrací pole obdélníků { x, y, w, h, drawers, doors }. */
+function frontStrips(e){
+  const FR = frontCfg(e);
+  if(!FR.on) return [];
+  const k = elKind3(e);
+  if(k !== 'base' && k !== 'upper' && k !== 'column') return [];
+  const FP = frontPieces(e);
+  if(!FP.doors.length && !FP.drawers.length) return [];
+
+  const f  = e.front || 'jih';
+  const fv = FRONT_VEC[f];
+  const W  = elFrontW(e);                      // šířka podél čela
+  const T  = FRONT_T_DFLT;                     // tloušťka čela
+
+  /* úseky podél čela */
+  const segs = [];
+  if(FP.doors.length){
+    const n = FP.doors.length, w = FP.wDoor, gap = DOOR_GAP_W;
+    let a = (W - (n * w + (n - 1) * gap)) / 2; // čela vycentrovaná na skříni
+    for(let i = 0; i < n; i++){ segs.push({ a0:a, a1:a + w }); a += w + gap; }
+  } else {
+    segs.push({ a0:(W - FP.wDraw) / 2, a1:(W + FP.wDraw) / 2 });
+  }
+
+  const tag = { doors:FP.doors.length, drawers:FP.drawers.length };
+  return segs.map(sg => {
+    if(fv[1] === 1)  return { x:e.x + sg.a0, y:e.y + e.d,      w:sg.a1 - sg.a0, h:T, ...tag };  // jih
+    if(fv[1] === -1) return { x:e.x + sg.a0, y:e.y - T,        w:sg.a1 - sg.a0, h:T, ...tag };  // sever
+    if(fv[0] === 1)  return { x:e.x + e.w,   y:e.y + sg.a0,    w:T, h:sg.a1 - sg.a0, ...tag };  // východ
+    return                  { x:e.x - T,     y:e.y + sg.a0,    w:T, h:sg.a1 - sg.a0, ...tag };  // západ
+  });
+}
+
 function bokCfg(e){ const b = e && e.bok; return b && bokAny(e) ? b : null; }
 function bokW(e){ const b = bokCfg(e); return b && +b.w ? +b.w : BOK_W_DFLT; }
 function bokBack(e){
@@ -2655,6 +2696,36 @@ function bokRects(e){
   return out;
 }
 /* Kreslení boků na plátně (obrazovka): tenký pruh u konce skříně. */
+/* Čela v půdorysu – tenké pruhy na líci skříně (dvířka po kusech). */
+function frontsMarkup(){
+  if(!S.showFronts) return '';
+  const z = S.view.zoom;
+  let out = '';
+  for(const e of S.project.elements){
+    if(!layerShowsEl(e)) continue;
+    const sel = S.sel?.kind==='el' && S.sel.id===e.id;
+    const c = e.color || COLORS[0];
+    for(const r of frontStrips(e)){
+      out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${Math.max(R(r.w), 0.5)}" height="${Math.max(R(r.h), 0.5)}"
+        fill="${sel ? '#2563eb44' : c + '55'}" stroke="${sel ? '#2563eb' : '#111827'}"
+        stroke-width="${1.4/z}" pointer-events="none"/>`;
+      /* u zásuvkové skříně napiš počet čel, když je na to místo */
+      if(!r.doors && r.drawers > 0){
+        const along = Math.max(r.w, r.h) * z;
+        if(along > 46){
+          const tx = R(r.x + r.w/2), ty = R(r.y + r.h/2);
+          const rot = r.h > r.w ? ` transform="rotate(-90 ${tx} ${ty})"` : '';
+          const fs = clamp(Math.max(r.w, r.h) * 0.14, 80, 240);
+          out += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle"${rot}
+            font-size="${fs}" font-weight="700" fill="#111827" pointer-events="none"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.2}px">${r.drawers}×</text>`;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 function bokMarkup(){
   const z = S.view.zoom;
   let out = '';
@@ -5356,6 +5427,15 @@ function drawingSvg(P, opt){
     }
   }
 
+  // čela (dvířka, zásuvky) – tenké pruhy na líci skříně
+  for(const e of S.project.elements){
+    if(filter && !filter(e)) continue;
+    for(const r of frontStrips(e)){
+      parts.push(`<rect x="${R(r.x)}" y="${R(r.y)}" width="${R(r.w)}" height="${R(r.h)}"
+        fill="#ffffff" stroke="#1f2937" stroke-width="${sw(0.14)}"/>`);
+    }
+  }
+
   // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
   parts.push(boksPrintSvg(sw, filter));
 
@@ -5542,6 +5622,11 @@ function bindUi(){
   $('#btnDims').onclick = () => {
     S.showDims = !S.showDims;
     $('#btnDims').setAttribute('aria-pressed', S.showDims?'true':'false');
+    render();
+  };
+  $('#btnFronts').onclick = () => {
+    S.showFronts = !S.showFronts;
+    $('#btnFronts').setAttribute('aria-pressed', S.showFronts?'true':'false');
     render();
   };
   $('#btnDimInst').onclick = () => {
