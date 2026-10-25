@@ -260,6 +260,7 @@ body{
 .snapctl b{color:var(--ink);font-variant-numeric:tabular-nums;min-width:52px}
 
 /* ───────── modaly ───────── */
+#modalPng [hidden]{display:none!important}
 .modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
   background:rgba(16,24,40,.42);padding:20px}
 .sheet{
@@ -403,7 +404,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 
 @media print{
   html,body{overflow:visible;background:#fff;height:auto}
-  .app,.toast,#fileInput,#modalProject,#modalRoom,#modalPrice{display:none !important}
+  .app,.toast,#fileInput,#modalProject,#modalRoom,#modalPrice,#modalPng{display:none !important}
   #printRoot{display:block}
   .pr-page{margin:0;box-shadow:none}
 }
@@ -4321,8 +4322,8 @@ function doExport3D(){
    Vyrendruje z přesného 3D modelu plánku čisté obrázky BEZ popisků a kót:
    pohled shora + dva izometrické + nízký boční. Stěny jsou průsvitné, aby bylo
    vidět celou kuchyni v místnosti (okna jsou vidět jako zasklení). Vše je
-   neutrálně světlé – konečný styl pak určí prompt. Stáhne se ZIP s PNG a
-   šablonou promptu. */
+   neutrálně světlé – konečný styl pak určí prompt. Zobrazí galerii samostatných PNG a
+   šablonu promptu ke kopírování. */
 
 const PNG_VIEWS = [
   { name:'1_shora',         az:0,   el:90, desc:'pohled shora (dispozice 1:1)' },
@@ -4420,6 +4421,76 @@ function b64ToBytes(b64){
   return u;
 }
 
+let pngExportSession = null;
+function closePngGallery(){
+  if(!pngExportSession) return;
+  pngExportSession.urls.forEach(u => URL.revokeObjectURL(u));
+  pngExportSession.modal.remove();
+  const focus = pngExportSession.focus;
+  pngExportSession = null;
+  focus?.focus();
+}
+function showPngGallery(files, promptText, base){
+  closePngGallery();
+  const focus = document.activeElement;
+  const modal = document.createElement('div');
+  modal.className = 'modal'; modal.id = 'modalPng';
+  modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true');
+  modal.setAttribute('aria-labelledby','pngGalleryTitle');
+  const urls = files.map(f => URL.createObjectURL(new Blob([f.data], {type:'image/png'})));
+  pngExportSession = { modal, urls, focus };
+  modal.innerHTML = `<section style="background:var(--surface);color:var(--ink);border-radius:16px;padding:20px;width:960px;max-width:96vw;max-height:90vh;overflow:auto;box-sizing:border-box">
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2 id="pngGalleryTitle" style="margin:0">3D pohledy – PNG</h2><button class="tb" data-close aria-label="Zavřít náhledy">✕ Zavřít</button></header>
+    <p>Každý pohled uložíte jako samostatný obrázek, bez ZIPu. Na iPadu můžete obrázek také podržet a uložit pomocí nabídky prohlížeče.</p>
+    <button class="tb primary" data-share hidden>Sdílet všechny 4 obrázky</button>
+    <p data-status role="status" aria-live="polite"></p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px">
+    ${files.map((f,i)=>`<article style="border:1px solid var(--line);border-radius:12px;padding:12px"><h3 style="margin:0 0 8px">${PNG_VIEWS[i].desc}</h3><img src="${urls[i]}" alt="${PNG_VIEWS[i].desc}" style="display:block;width:100%;height:auto;background:white;border-radius:8px"><a class="tb primary" style="margin-top:10px;text-decoration:none" href="${urls[i]}" download="${base}_${f.name}">Stáhnout PNG</a></article>`).join('')}
+    </div>
+    <h3>Návod a prompt pro AI</h3><button class="tb" data-copy>Kopírovat návod a prompt</button>
+    <textarea data-prompt readonly aria-label="Návod a prompt pro AI" style="display:block;width:100%;min-height:170px;margin-top:10px;box-sizing:border-box"></textarea>
+    </section>`;
+  document.body.appendChild(modal);
+  const field = modal.querySelector('[data-prompt]'); field.value = promptText;
+  const status = modal.querySelector('[data-status]');
+  const close = modal.querySelector('[data-close]'); close.onclick = closePngGallery;
+  modal.onclick = ev => { if(ev.target === modal) closePngGallery(); };
+  modal.onkeydown = ev => {
+    if(ev.key === 'Escape'){ ev.preventDefault(); ev.stopPropagation(); closePngGallery(); }
+    if(ev.key === 'Tab'){
+      const items = Array.from(modal.querySelectorAll('button:not([hidden]),a,textarea'));
+      const first = items[0], last = items[items.length-1];
+      if(ev.shiftKey && document.activeElement === first){ ev.preventDefault(); last.focus(); }
+      else if(!ev.shiftKey && document.activeElement === last){ ev.preventDefault(); first.focus(); }
+    }
+    ev.stopPropagation(); // zkratky editoru nesmí měnit projekt v dialogu
+  };
+  modal.querySelector('[data-copy]').onclick = async () => {
+    try{
+      if(!navigator.clipboard?.writeText) throw new Error('clipboard');
+      await navigator.clipboard.writeText(promptText);
+      status.textContent = 'Návod a prompt zkopírován.';
+    }catch(e){
+      field.focus(); field.select(); field.setSelectionRange(0, field.value.length);
+      status.textContent = 'Text je označený. Zvolte Kopírovat v nabídce textu.';
+    }
+  };
+  const share = modal.querySelector('[data-share]');
+  try{
+    if(typeof File !== 'undefined' && navigator.share && navigator.canShare){
+      const shareFiles = files.map(f => new File([f.data], base+'_'+f.name, {type:'image/png'}));
+      if(navigator.canShare({files:shareFiles})){
+        share.hidden = false;
+        share.onclick = async () => {
+          try{ await navigator.share({files:shareFiles}); status.textContent = 'Obrázky předány nabídce sdílení.'; }
+          catch(e){ if(e.name !== 'AbortError') status.textContent = 'Sdílení se nepodařilo. Použijte Stáhnout PNG u jednotlivých pohledů.'; }
+        };
+      }
+    }
+  }catch(e){ /* sdílení není dostupné; samostatné PNG zůstávají funkční */ }
+  close.focus();
+}
+
 function doExportPng(){
   if((!S.project.walls.length) && (!S.project.elements.length)){
     toast('Nejdřív nakresli místnost a skříně'); return;
@@ -4465,17 +4536,9 @@ function doExportPng(){
       const b64 = renderPngView(sc, v.az, v.el);
       files.push({ name: v.name + '.png', data: b64ToBytes(b64) });
     }
-    files.push({ name:'prompt.txt', data: lines });
-
-    const bytes = zipStore(files);
-    const blob = new Blob([bytes], { type:'application/zip' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
     const base = (S.project.info.name || 'narys').replace(/[^\w\dáčďéěíňóřšťúůýž -]/gi,'').trim() || 'narys';
-    a.download = base + '_3D_pohledy.zip';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    toast('Staženo: 4 PNG pohledy + prompt (ZIP) – připraveno pro AI vizualizaci');
+    showPngGallery(files, lines, base);
+
   }catch(err){
     console.error(err);
     toast('Export pohledů selhal: ' + err.message);
