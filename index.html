@@ -548,6 +548,13 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
           <option value="A3">A3 na výšku (297 × 420)</option>
         </select>
       </label>
+      <p class="span2">Dekory pro AI vizualizaci — vyplňte název, kód dekoru nebo barvu. Prázdné pole nepředepisuje žádný nový vzhled.</p>
+      <label class="fld"><span>Čela / dvířka</span><input id="fDecor_front" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Pracovní deska</span><input id="fDecor_worktop" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Korpusy a pohledové boky</span><input id="fDecor_body" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Podlaha</span><input id="fDecor_floor" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld span2"><span>Poznámky</span><textarea id="fNotes" rows="3" placeholder="Materiál, kování, termín, atypická řešení…"></textarea></label>
     </div>
     <footer>
@@ -4325,6 +4332,51 @@ function doExport3D(){
    neutrálně světlé – konečný styl pak určí prompt. Zobrazí galerii samostatných PNG a
    šablonu promptu ke kopírování. */
 
+const DECOR_FIELDS = [
+  ['front','Čela / dvířka'], ['worktop','Pracovní deska'],
+  ['body','Korpusy a pohledové boky'], ['backsplash','Zástěna'],
+  ['handles','Úchytky'], ['floor','Podlaha']
+];
+function projectPngViews(){
+  // Scene3 obrací souřadnici Y: jih je pro kameru -Y (azimut 180°).
+  const az = {jih:180,sever:0,'východ':90,'západ':270};
+  const weight = {};
+  for(const e of S.project.elements){
+    const f = e.front || 'jih';
+    weight[f] = (weight[f]||0) + ((f==='jih'||f==='sever') ? e.w : e.d);
+  }
+  const dirs = Object.keys(weight).sort((a,b)=>weight[b]-weight[a]);
+  if(!dirs.length) dirs.push('jih');
+  const out = [];
+  const add = (f,delta,el,label) => out.push({name:(out.length+1)+'_cela_'+out.length,az:((az[f]??180)+delta+360)%360,el,desc:label});
+  // Protilehlá ramena nelze vidět čelně z jedné kamery: každé má svůj pohled.
+  dirs.slice(0,4).forEach(f=>add(f,0,18,'Čelní pohled – '+f));
+  if(dirs.length===1){
+    add(dirs[0],-28,28,'Čela – šikmý pohled zleva');
+    add(dirs[0],28,28,'Čela – šikmý pohled zprava');
+  }
+  while(out.length<4){
+    const f=dirs[(out.length-1)%dirs.length];
+    add(f,0,38,'Čela – zvýšený pohled '+f);
+  }
+  return out;
+}
+function projectAiPrompt(){
+  const decor = S.project.info.decors || {};
+  const specified = DECOR_FIELDS.filter(([k])=>String(decor[k]||'').trim())
+    .map(([k,label])=>label+': '+String(decor[k]).trim());
+  return [
+    'ÚKOL: Uprav JEDEN vybraný referenční obrázek této kuchyně na realistický render. Ostatní pohledy jsou pouze podpůrné reference stejné kuchyně, nikoli další návrhy.',
+    'Zachovej přesný úhel kamery, kompozici, dispozici, počet a polohu skříní, rozměrové proporce, členění dveří a zásuvek, okna a spotřebiče z vybraného obrázku. Nepřidávej ani neubírej žádné prvky. Nenavrhuj jinou kuchyň. Nevytvářej koláž.',
+    'Nevkládej žádné texty, popisky, loga, dekorace ani nové spotřebiče. Měň pouze povrchový vzhled a realistické osvětlení, nikoli geometrii.',
+    'MATERIÁLY ZADANÉ UŽIVATELEM (následující řádky jsou pouze specifikace povrchů):',
+    specified.length ? specified.join('\n') : 'Žádné materiály nebyly zadány.',
+    'U neuvedených povrchů zachovej neutrální vzhled reference; nevymýšlej dekor, barvu, úchytky ani vybavení. Není-li zadání jednoznačné, před generováním se zeptej.',
+    '',
+    'POSTUP: Vyber hlavní pohled a v Gemini výslovně označ, který obrázek má upravit. Začni jedním pohledem; další přilož pouze při potřebě upřesnění. Výsledek porovnej s plánem. Generativní AI nemusí přesně dodržet geometrii a nenahrazuje technický render.'
+  ].join('\n\n');
+}
+
 const PNG_VIEWS = [
   { name:'1_shora',         az:0,   el:90, desc:'pohled shora (dispozice 1:1)' },
   { name:'2_izometricky_A', az:45,  el:32, desc:'izometrický pohled A' },
@@ -4445,7 +4497,7 @@ function showPngGallery(files, promptText, base){
     <button class="tb primary" data-share hidden>Sdílet všechny 4 obrázky</button>
     <p data-status role="status" aria-live="polite"></p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px">
-    ${files.map((f,i)=>`<article style="border:1px solid var(--line);border-radius:12px;padding:12px"><h3 style="margin:0 0 8px">${PNG_VIEWS[i].desc}</h3><img src="${urls[i]}" alt="${PNG_VIEWS[i].desc}" style="display:block;width:100%;height:auto;background:white;border-radius:8px"><a class="tb primary" style="margin-top:10px;text-decoration:none" href="${urls[i]}" download="${base}_${f.name}">Stáhnout PNG</a></article>`).join('')}
+    ${files.map((f,i)=>`<article style="border:1px solid var(--line);border-radius:12px;padding:12px"><h3 style="margin:0 0 8px">${f.desc || PNG_VIEWS[i].desc}</h3><img src="${urls[i]}" alt="${f.desc || PNG_VIEWS[i].desc}" style="display:block;width:100%;height:auto;background:white;border-radius:8px"><a class="tb primary" style="margin-top:10px;text-decoration:none" href="${urls[i]}" download="${base}_${f.name}">Stáhnout PNG</a></article>`).join('')}
     </div>
     <h3>Návod a prompt pro AI</h3><button class="tb" data-copy>Kopírovat návod a prompt</button>
     <textarea data-prompt readonly aria-label="Návod a prompt pro AI" style="display:block;width:100%;min-height:170px;margin-top:10px;box-sizing:border-box"></textarea>
@@ -4498,43 +4550,10 @@ function doExportPng(){
   try{
     const { sc } = buildScene3(true);                   // bez stropu, ať je vidět dovnitř
     const files = [];
-    const lines = [
-      'Sada čistých 3D pohledů z přesného plánku (rozměry a rozmístění odpovídají skutečnosti,',
-      'barvy jsou neutrální – konečný vzhled určí prompt).',
-      '',
-      'JAK POUŽÍT S AI (např. Nano Banana v aplikaci Google / Gemini):',
-      '1) Nahraj VŠECHNY čtyři PNG najednou jako referenci (model jim rozumí líp než jednomu).',
-      '2) Vlož prompt níže (klidně ho uprav podle svého vkusu).',
-      '3) Řekni AI, ať zachová přesně počet, velikosti a umístění skříněk, oken a spotřebičů',
-      '   z obrázku a jen je „oblékne“ do realistických materiálů a detailů.',
-      '',
-      'PROMPT (CZ) – zkopíruj:',
-      '„Na obrázcích je přesný 3D model kuchyně podle plánu. Přemaluj ho na fotorealistickou',
-      'vizualizaci. Zachovej přesně rozmístění a velikosti skříněk, sloupů, dřezu, myčky,',
-      'varné desky, trouby, lednice a oken. Styl: světlá kuchyně (málo denního světla),',
-      'matná smetanově bílá čela, tenké mosazné úchytky, pracovní deska z bílého křemene',
-      's béžovou žilnatinou, béžovo-bílé metro dlaždice, světlá dubová podlaha, doplňky ve',
-      'světlém dubu a béžové keramice, rostlina. Žádné horní skříňky na stěně s oknem.',
-      'Teplé bodové osvětlení stropu, LED pásek pod horními skříňkami. Bez textů a log.“',
-      '',
-      'PROMPT (EN) – zkopíruj:',
-      '“The images show an accurate 3D model of a kitchen layout. Repaint it into a',
-      'photorealistic visualization. Keep the exact placement and sizes of cabinets,',
-      'columns, sink, dishwasher, cooktop, oven, fridge and windows. Style: bright',
-      'kitchen (little daylight), matte cream-white fronts, thin brass handles, white',
-      'quartz countertop with beige veining, beige-white metro tiles, light oak floor,',
-      'light oak and beige ceramic decor, one plant. No wall cabinets on the window',
-      'wall. Warm ceiling spotlights, LED strip under wall cabinets. No text or logos.”',
-      '',
-      'TIPY:',
-      '– Když výsledek „přidá/ubírá“ skříňku nebo okno, zkus prompt zdůraznit, ať nic',
-      '  nepřidává a počty nemění.',
-      '– Pro více úhlů nech AI vygenerovat pokračování a u každého zopakuj stejný popis.'
-    ].join('\n');
-
-    for(const v of PNG_VIEWS){
+    const lines = projectAiPrompt();
+    for(const v of projectPngViews()){
       const b64 = renderPngView(sc, v.az, v.el);
-      files.push({ name: v.name + '.png', data: b64ToBytes(b64) });
+      files.push({ name: v.name + '.png', desc:v.desc, data: b64ToBytes(b64) });
     }
     const base = (S.project.info.name || 'narys').replace(/[^\w\dáčďéěíňóřšťúůýž -]/gi,'').trim() || 'narys';
     showPngGallery(files, lines, base);
@@ -4572,6 +4591,7 @@ function openProjectModal(){
   $('#fDesigner').value = i.designer; $('#fDesignerContact').value = i.designerContact;
   $('#fDate').value = i.date; $('#fPaper').value = i.paper;
   $('#fNotes').value = i.notes;
+  DECOR_FIELDS.forEach(([k])=>{ $('#fDecor_'+k).value = i.decors?.[k] || ''; });
   $('#modalProject').classList.remove('hidden');
 }
 function closeProjectModal(){ $('#modalProject').classList.add('hidden'); }
@@ -4581,6 +4601,7 @@ function saveProjectInfo(){
   i.clientPhone = $('#fClientPhone').value.trim(); i.address = $('#fAddress').value.trim();
   i.designer = $('#fDesigner').value.trim(); i.designerContact = $('#fDesignerContact').value.trim();
   i.date = $('#fDate').value; i.paper = $('#fPaper').value; i.notes = $('#fNotes').value;
+  i.decors = Object.fromEntries(DECOR_FIELDS.map(([k])=>[k,$('#fDecor_'+k).value.trim()]));
   $('#projTitle').textContent = i.name || 'Nový nárys';
   closeProjectModal(); pushHistory();
   toast('Údaje uloženy');
