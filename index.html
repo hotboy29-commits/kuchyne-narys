@@ -104,6 +104,7 @@ body{
   background:transparent;color:var(--ink);cursor:pointer;
   font-family:var(--font);font-size:13px;font-weight:600;touch-action:pan-y;
 }
+#btnUndo,#btnRedo{font-size:30px;line-height:1;min-width:46px;height:44px}
 .tb:active{background:rgba(15,98,254,.12)}
 .tb.wide{min-width:66px}
 .tb.primary{background:var(--accent);color:var(--accent-ink)}
@@ -874,12 +875,12 @@ function addWindowAt(p){
   const half=Math.min(600,h.L)/2;
   const win={ id:uid('o'), wallId:h.wall.id, seg:h.i, off:R(Math.max(half,Math.min(h.off,h.L-half))), w:600 };
   S.project.windows.push(win);
-  select('win',win.id); pushHistory();
+  select('win',win.id); pushHistory(); setTool('select');
 }
 function addSymbolAt(p){
   const sm={ id:uid('s'), x:R(p.x), y:R(p.y), type:S.symType||'zasuvka', note:'' };
   S.project.symbols.push(sm);
-  select('sym',sm.id); pushHistory();
+  select('sym',sm.id); pushHistory(); setTool('select');
 }
 /* Přesná poloha značky: přichycení ke zdi = dva rozměry v mm –
    „od začátku úseku" (podél zdi) a „od líce zdi" (kolmo do místnosti). */
@@ -2119,6 +2120,7 @@ function onUp(ev){
       const e = finishNewElementKind(addElement({ x:R(r.x), y:R(r.y), w:R(r.w), d:DFLT_EL_D }));
       select('el', e.id);
       pushHistory();
+      setTool('select');
       toast('Zadej přesné rozměry v panelu vpravo');
       setTimeout(()=>$('#iW')?.focus(), 60);
     }
@@ -2132,8 +2134,9 @@ function onUp(ev){
       pushHistory();
     }
     S.draft = null;
+    if(L >= 50) setTool('select');
   }
-  if(drag?.mode==='measure'){ S.draft = null; }
+  if(drag?.mode==='measure'){ S.draft = null; setTool('select'); }
   if(drag?.mode==='wallDraw'){ commitWallPoint(); }
   if(drag?.mode==='move'){
     S.guides = [];
@@ -2312,7 +2315,7 @@ function finishWall(closed){
     toast(closed ? 'Místnost vytvořena' : 'Zeď vytvořena – uprav délky úseků vpravo');
   }
   S.draft = null;
-  render();
+  setTool('select');
 }
 
 function createRoom(w, h, t){
@@ -5986,7 +5989,7 @@ const HINTS = {
   wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
   window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
-  sym:    'Dole vyber značku a klepej do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
+  sym:    'Dole vyber značku a klepni do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
   measure:'Táhni pro změření vzdálenosti – měří se jen vodorovně (X) nebo svisle (Y), nikdy šikmo. Chytá se na rohy/hrany skříní, boků+ a zdí. Nic se neukládá.'
 };
 
@@ -6017,9 +6020,8 @@ function buildTools(){
      </button>`).join('');
   $('#tools').addEventListener('click', ev => {
     const b = ev.target.closest('.tool-btn'); if(!b) return;
-    /* Klik na nástroj, kterým právě kreslím, kresbu dokončí a nechá nástroj
-       aktivní – další klik začne novou zeď. */
-    if(b.dataset.tool === S.tool && S.draft){ commitDraft(); return; }
+    /* Klik na aktivní kreslicí nástroj dokončí kresbu a vrátí výběr. */
+    if(b.dataset.tool === S.tool && S.draft){ commitDraft(); setTool('select'); return; }
     setTool(b.dataset.tool);
   });
   // krátké klepnutí nástrojem Obdélník (bez tažení) vloží výchozí obdélník
@@ -6029,9 +6031,11 @@ function buildTools(){
     if(S.tool!=='rect' || !downAt) return;
     const moved = Math.hypot(ev.clientX-downAt.x, ev.clientY-downAt.y);
     if(moved < 6 && Date.now()-downAt.t < 500){
+      S.draft = null;
+      drag = null; // krátké klepnutí je hotové; onUp už nesmí vložit druhý prvek
       const wpt = screenToWorld(ev.clientX, ev.clientY);
       const e = addElementAtPoint(wpt.x, wpt.y);
-      select('el', e.id); pushHistory();
+      select('el', e.id); pushHistory(); setTool('select');
       toast(S.layer==='HS' ? 'Horní skříň 600 × 320 (š × hl) u zdi – uprav rozměry vpravo' : 'Obdélník 600 × 510 (š × hl) – uprav rozměry vpravo');
       setTimeout(()=>$('#iW')?.focus(), 60);
     }
