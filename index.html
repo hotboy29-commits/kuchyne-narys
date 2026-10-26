@@ -671,7 +671,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v79'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-nabidka-v80'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -6718,7 +6718,7 @@ function pricePageHtml(opt){
 }
 
 function hardwarePrintPages(includeTechnical=true){
- const h=hardwareCalc(),led=ledCalc(),pages=[],size=5;
+ const h=hardwareCalc(),led=ledCalc(),pages=[],size=Math.max(1,h.groups.length+1);
  if(led.profileMm){h.groups.push({led,gross:led.gross,warnings:led.warnings,notices:[]});h.gross=roundMoney(h.gross+led.gross);h.warnings.push(...led.warnings);}
  for(let i=0;i<h.groups.length;i+=size){
    const groups=h.groups.slice(i,i+size),subtotal=roundMoney(groups.reduce((n,g)=>n+g.gross,0));
@@ -6730,8 +6730,8 @@ function hardwarePrintPages(includeTechnical=true){
 }
 function printTechnicalAppendixPages(){
   const h=hardwareCalc(),pages=[];
-  for(let i=0;i<h.rows.length;i+=5){
-    pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Příloha · kování</span><h2>Kování Démos</h2></div></div>${hardwareDetailTable({...h,rows:h.rows.slice(i,i+5),warnings:[],notices:[]},true)}<p>Součet v zápatí tabulky je za veškeré oceněné kování projektu, nikoli jen tuto stránku.</p></section>`);
+  for(let i=0;i<h.rows.length;i+=Math.max(1,h.rows.length)){
+    pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Příloha · kování</span><h2>Kování Démos</h2></div></div>${hardwareDetailTable({...h,rows:h.rows.slice(i),warnings:[],notices:[]},true)}<p>Součet v zápatí tabulky je za veškeré oceněné kování projektu, nikoli jen tuto stránku.</p></section>`);
   }
   for(const r of h.reports){pages.push(`<section class="pr-page"><div class="pr-head"><h2>Výpočet výklopu · ${esc(r.tag)}</h2></div>${blumReport(r.model)}<p>Zdroj: Blum AVENTOS top CZ, str.9–10,14–15,33–34,37; katalog 2024/25 str.56–57,716. Ceny Démos 26.10.2026. Kontrola kolizí a montážního provedení je nutná před objednáním.</p></section>`);}
   for(let i=0;i<h.warnings.length;i+=6){
@@ -6742,7 +6742,32 @@ function printTechnicalAppendixPages(){
 /* Measure actual laid-out content, then paginate. Fixed page boxes must never
    silently clip rows/totals. Project data is not modified by this operation. */
 function paginatePrint(){
- const root=$('#printRoot'),sources=[...root.querySelectorAll(':scope > .pr-page')];
+ const root=$('#printRoot');
+ // Technical sections form one continuous document. Cover and scaled drawings
+ // remain on separate sheets; row-based pagination below preserves every item.
+ if(printDocumentMode==='technical'){
+  let target=null;
+  for(const src of [...root.querySelectorAll(':scope > .pr-page')]){
+   if(src.matches('.cover,.draw,.customer-quote')){target=null;continue;}
+   if(!target){target=src;target.classList.add('pr-technical-flow');continue;}
+   for(const child of [...src.children]){
+    if(child.matches('.pr-foot,.pr-cover-foot'))continue;
+    if(child.matches('.pr-head')){
+     const heading=document.createElement('h3');heading.className='pr-section-title';
+     heading.textContent=child.querySelector('h2')?.textContent||child.textContent;
+     heading.style.cssText='font-size:11pt;margin:4mm 0 2mm';target.appendChild(heading);
+    }else target.appendChild(child);
+   }
+   src.remove();
+  }
+  // Blum's wrapper must not force a whole report to the next sheet.
+  for(const wrapper of root.querySelectorAll('.pr-technical-flow > div.hint')){
+   const parts=[...wrapper.children];
+   for(const part of parts){part.style.fontSize='9pt';wrapper.before(part);}
+   wrapper.remove();
+  }
+ }
+ const sources=[...root.querySelectorAll(':scope > .pr-page')];
  if(!sources.length)return;
  const oldStyle=root.getAttribute('style');
  root.style.cssText='display:block;position:absolute;left:-20000px;top:0;visibility:hidden;pointer-events:none';
