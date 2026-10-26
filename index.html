@@ -429,14 +429,15 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 .cq-total strong{display:block;font-size:23pt;line-height:1.25;margin-top:1mm;white-space:nowrap;color:#172554}
 .cq-total small{display:block;font-size:8pt}.cq-incomplete{background:#fff7ed;border-color:#9a3412}
 .cq-breakdown{display:flex;justify-content:space-between;gap:4mm;margin:0 0 3mm;font-size:9pt}.cq-breakdown b{display:block;font-size:12pt;margin-top:1mm}
-.customer-quote .cq-table{font-size:9pt;table-layout:fixed}
-.customer-quote .cq-table td{padding:1.65mm 2mm;line-height:1.25}
+.customer-quote .cq-table{font-size:10.5pt;table-layout:fixed}
+.customer-quote .cq-table td{padding:2.4mm 2mm;line-height:1.3}
+.customer-quote.cq-compact .cq-table td{padding:1.2mm 2mm}
 .customer-quote .cq-table th{padding:1.7mm 2mm}
 .cq-detail{font-size:8pt;color:#475569;line-height:1.25;margin-top:.6mm}
 .cq-status{font-size:7.5pt;color:#9a3412;margin-top:.4mm}
 .customer-quote .cq-section td{background:#eef2f6;color:#334155;font-size:8pt;font-weight:700;text-transform:uppercase;padding:1.5mm 2mm}
-.cq-price{font-weight:700;font-size:10pt}
-.customer-quote .cq-grand td{font-size:12pt;border-top:1.4pt solid #172554;padding-top:2.5mm}
+.cq-price{font-weight:700;font-size:11pt}
+.customer-quote .cq-grand td{font-size:15pt;border-top:1.4pt solid #172554;padding-top:2.5mm}
 .cq-terms{font-size:8pt;line-height:1.4;margin:3mm 0 0;overflow-wrap:anywhere}.cq-alert{font-size:9pt;color:#9a3412;margin:2mm 0}
 
 @media print{
@@ -670,7 +671,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v77'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-nabidka-v78'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -6376,7 +6377,7 @@ function renderPriceModal(){
 
     <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; technický nářez je volitelná interní příloha.</p>
     <div class="p-h">Kování podle skříní</div>
-    <label class="chk"><input id="pHardwareTechnicalPrint" type="checkbox" ${P.printTechnicalAppendix===true?'checked':''}> Připojit interní nářez, položkový rozpis a výpočty do PDF (pro zákazníka nechte vypnuté)</label>
+    <button class="tb" id="pPrintTechnical" type="button">Tisk pro dílnu — nářez a detailní kování</button><p class="hint">Běžný tisk/export obsahuje jen zákaznickou nabídku a případně výkresy. Interní rozpis se tiskne pouze tímto samostatným tlačítkem.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     <div id="pLED">${ledPriceForm(C.led)}</div>
     ${hardwareCatalogForm()}
@@ -6500,7 +6501,7 @@ function bindPriceInputs(){
     }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
-    else if(el.id === 'pHardwareTechnicalPrint'){ P.printTechnicalAppendix = !!el.checked; save(); }
+
     else if(el.id === 'pTopDepth'){
       P.topDepth = clamp(+el.value || TOP_DEPTH_DFLT, 300, 1200);
       const gt = P.groups.find(g => g.id === 'top');
@@ -6521,6 +6522,7 @@ function bindPriceInputs(){
   body.addEventListener('click', ev => {
     const b = ev.target.closest ? ev.target.closest('button') : null;
     if(!b) return;
+    if(b.id==='pPrintTechnical'){buildPrint(true);toast('Interní tisk pro dílnu — není zákaznická nabídka');setTimeout(()=>window.print(),250);return;}
     if(b.id === 'pFrAll'){
       const n = setAllFronts(true);
       renderPriceModal();
@@ -6579,53 +6581,64 @@ function savePricing(){
 }
 
 /* ── kalkulace jako stránka pro tisk / PDF ── */
-/* Customer view only: source quantities and all price calculations stay unchanged. */
+/* Customer summary: quantities of hardware assemblies, not a cabinet-by-cabinet BOM.
+   Material rows quote supply for the project; purchase units stay in internal records. */
 function customerQuoteData(){
  const C=priceCalc(),rows=[],factor=C.vatIncluded?1:1+C.rate/100;
  const materials=C.rows.filter(r=>r.area>0||r.sheets>0);
  const lamino=materials.filter(r=>['body','front','bok'].includes(r.g.id));
- if(lamino.length)rows.push({section:'Materiál',label:'Lamino — deskový materiál',detail:lamino.map(r=>r.g.id==='front'&&frontMaterial().trachea?'Blende — lamino DTD 18 mm':r.g.name).join(' · '),qty:fmtQty(lamino.reduce((n,r)=>n+r.sheets,0))+' desek',gross:roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor)});
+ if(lamino.length)rows.push({section:'Materiál',label:'Lamino',qty:'',gross:roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor)});
  const names={top:'Pracovní deska',back:'Záda skříní — HDF',zast:'Zástěna',zastena:'Zástěna',tl:'Těsnicí lišta'};
- for(const r of materials.filter(r=>!['body','front','bok'].includes(r.g.id))){
-  rows.push({section:'Materiál',label:names[r.g.id]||r.g.name,detail:r.linear?num2(r.lenM)+' m v sestavě':r.g.id==='top'?(r.totalLen?num2(r.totalLen/1000)+' m v sestavě':''):num2(r.area)+' m² dílců',qty:fmtQty(r.qty??r.sheets)+(r.linear?' ks':' desek'),gross:roundMoney(r.total*factor)});
+ for(const r of materials.filter(r=>!['body','front','bok'].includes(r.g.id)))rows.push({section:'Materiál',label:names[r.g.id]||r.g.name,qty:'',gross:roundMoney(r.total*factor)});
+ if(C.edgeM>0)rows.push({section:'Materiál',label:'Hranění dílců — ABS',qty:'',gross:roundMoney(C.edgeTotal*factor)});
+ if(C.purchasedFronts.qty)rows.push({section:'Materiál',label:'Dvířka Trachea — neoceněná',qty:C.purchasedFronts.qty+' ks',gross:null});
+ const buckets=new Map();
+ const add=(key,label,qty,unit,gross)=>{
+  if(!buckets.has(key))buckets.set(key,{section:'Kování',label,number:0,unit,gross:gross==null?null:0});
+  const row=buckets.get(key);row.number+=qty;if(gross!=null)row.gross=roundMoney(row.gross+gross);
+ };
+ const hinges=C.hardware.rows.filter(r=>r.key==='hinge'),plates=C.hardware.rows.filter(r=>r.key==='plate');
+ const hQty=hinges.reduce((n,r)=>n+r.qty,0),pQty=plates.reduce((n,r)=>n+r.qty,0);
+ const sum=rs=>roundMoney(rs.reduce((n,r)=>n+r.totalGross,0));
+ if(hQty&&hQty===pQty)add('hinges','Panty s podložkami',hQty,'ks',sum([...hinges,...plates]));
+ else{
+  if(hQty)add('hinges','Panty',hQty,'ks',sum(hinges));
+  if(pQty)add('plates','Montážní podložky',pQty,'ks',sum(plates));
  }
- if(C.edgeM>0)rows.push({section:'Materiál',label:'Hranění dílců — ABS',detail:'Podle rozsahu dílců projektu',qty:num2(C.edgeM)+' m',gross:roundMoney(C.edgeTotal*factor)});
- if(C.purchasedFronts.qty)rows.push({section:'Materiál',label:'Dvířka Trachea — dosud neoceněná',detail:C.purchasedFronts.label,qty:C.purchasedFronts.qty+' ks',gross:null});
- const grouped=new Map();
- for(const original of C.hardware.groups){
-  const key=original.warnings.length?'unresolved:'+original.elementId:JSON.stringify([original.kind,original.width,original.height,!!original.notices.length,original.rows.map(r=>[r.key,r.code,r.label,r.qty/original.count,r.gross]).sort((a,b)=>String(a).localeCompare(String(b)))]);
-  if(!grouped.has(key))grouped.set(key,{...original,names:[original.tag],count:original.count,gross:original.gross});
-  else{const g=grouped.get(key);g.count+=original.count;g.gross=roundMoney(g.gross+original.gross);g.names.push(original.tag);}
+ for(const g of C.hardware.groups){
+  const lift=g.reports[0]?.model;
+  const blumRows=g.rows.filter(r=>r.key.startsWith('blum_'));
+  if(lift){
+   if(blumRows.length)add('lift-'+lift.type,'Výklopy '+blumName(lift.type)+' — komplet',g.count,'ks',sum(blumRows));
+   else add('unpriced-'+lift.type,'Výklopy '+blumName(lift.type)+' — neoceněné',g.count,'ks',null);
+  }
+  for(const r of g.rows){
+   if(['hinge','plate'].includes(r.key)||r.key.startsWith('blum_')&&lift)continue;
+   if(r.key==='leg')add('legs','Rektifikační nohy 150 mm',r.qty,'ks',r.totalGross);
+   else if(/^sm(89|185|249)$/.test(r.key))add(r.key,'Zásuvkové sady StrongMax H'+r.key.slice(2),r.qty,'ks',r.totalGross);
+   else if(r.key==='lift'){
+    const type=upperOpening(getEl(g.elementId));
+    add('manual-'+type,'Výklopy '+blumName(type)+' — ručně oceněný komplet',r.qty,'ks',r.totalGross);
+   }else add('other-'+r.key,r.label,r.qty,r.unit,r.totalGross);
+  }
  }
- for(const g of grouped.values()){
-  const short=[];if(g.rows.some(r=>r.key==='leg'))short.push('rektifikační nohy');
-  if(g.rows.some(r=>r.key==='hinge'||r.key==='plate'))short.push('panty včetně podložek');
-  if(g.rows.some(r=>/^sm\d/.test(r.key)))short.push('zásuvkové sady s tlumením');
-  if(g.reports.length)short.push('výklop '+blumName(g.reports[0].model.type)+(g.rows.some(r=>r.key.startsWith('blum_'))?' včetně příslušenství':' — NEOCENĚN'));
-  if(g.rows.some(r=>r.key==='lift'))short.push('ručně oceněný výklop');
-  rows.push({section:'Kování podle skříní',label:g.names.length>1?('Kování '+(g.kind==='upper'?'HS':g.kind==='column'?'sloupů':'DS')+' — shodné sestavy'):g.tag,detail:(g.kind==='upper'?'HS':g.kind==='column'?'Sloup':'DS')+' '+fmt(g.width)+' × '+fmt(g.height)+' mm · '+(short.join(', ')||'kování k doplnění')+(g.names.length>1?' · Pro: '+g.names.join('; '):''),qty:g.count+' ks',gross:g.rows.length?g.gross:null,status:g.warnings.length?'ČÁSTEČNÁ / NEÚPLNÁ CENA':g.notices.length?'Předběžný výběr — ověřit před objednávkou':''});
- }
- if(C.led.profileMm)rows.push({section:'Osvětlení',label:'LED osvětlení pod horními skříněmi',detail:'Profil Ormio + mléčná krytka + LED pásek + napájecí zdroj · '+num2(C.led.installedMm/1000)+' m osazeného pásku',qty:'1 sestava',gross:C.led.gross,status:C.led.warnings.length?'NEÚPLNÁ CENA NAPÁJENÍ':''});
+ const order=['hinges','plates','lift-hfTop','lift-hkTop','lift-hkS','manual-hfTop','manual-hkTop','manual-hkS','sm89','sm185','sm249','legs'];
+ rows.push(...[...buckets.entries()].sort(([a],[b])=>(order.includes(a)?order.indexOf(a):99)-(order.includes(b)?order.indexOf(b):99)).map(([,r])=>({...r,qty:fmtQty(r.number)+' '+r.unit})));
+ if(C.led.profileMm)rows.push({section:'Osvětlení',label:'LED sestava — profil, krytka, pásek a zdroj'+(C.led.warnings.length?' (neúplná cena)':''),qty:'1 sestava',gross:C.led.gross});
  const delta=roundMoney(C.total-rows.reduce((n,r)=>n+(r.gross??0),0));
- if(delta)rows.push({section:'Souhrn',label:'Zaokrouhlení součtů a DPH',detail:'Vyrovnání položkového zaokrouhlení na haléře',qty:'—',gross:delta});
+ if(delta)rows.push({section:'Souhrn',label:'Zaokrouhlení',qty:'',gross:delta});
  const incomplete=!!(C.purchasedFronts.qty||C.hardware.warnings.length||C.led.warnings.length||strongMaxProjectWarnings().length);
  return {C,rows,incomplete};
 }
 function customerQuoteHtml(){
  const {C,rows,incomplete}=customerQuoteData(),i=S.project.info;
  const date=new Date(i.date||Date.now()).toLocaleDateString('cs-CZ');
- let section='';
- const body=rows.map((r,index)=>{
-  const heading=section!==r.section?`<tr class="cq-section"><td colspan="3">${esc(r.section)}</td></tr>`:'';section=r.section;
-  return heading+`<tr data-quote-item="${index}"><td><b>${esc(r.label)}</b>${r.detail?`<div class="cq-detail">${esc(r.detail)}</div>`:''}${r.status?`<div class="cq-status">${esc(r.status)}</div>`:''}</td><td class="num">${esc(r.qty)}</td><td class="num cq-price">${r.gross==null?'NEOCENĚNO':money2(r.gross)}</td></tr>`;
- }).join('');
- return `<section class="pr-page customer-quote"><div class="pr-head cq-head"><div><div class="pr-kicker">Cenová nabídka kuchyně</div><h2>${esc(i.name||'Kuchyňská sestava')}</h2><div class="cq-meta">${esc([i.client,i.clientPhone,i.address].filter(Boolean).join(' · '))}<br>${esc([date,i.designer,i.designerContact].filter(Boolean).join(' · '))}</div></div><div class="cq-total${incomplete?' cq-incomplete':''}"><span>${incomplete?'MEZISOUČET OCENĚNÝCH POLOŽEK':'CELKOVÁ CENA S DPH'}</span><strong data-quote-total>${money2(C.total)}</strong>${incomplete?'<small>Nabídka zatím není úplná.</small>':''}</div></div>
- <div class="cq-breakdown"><span>Materiál <b>${money2(C.materialGross)}</b></span><span>Kování <b>${money2(C.hardware.gross)}</b></span><span>LED <b>${money2(C.led.gross)}</b></span></div>
- ${incomplete?'<p class="cq-alert">NEÚPLNÁ NABÍDKA: neoceněné nebo nevyřešené části nejsou zahrnuté v uvedeném mezisoučtu. Před odsouhlasením je nutné doplnit jejich ceny a parametry.</p>':''}
- <table class="pr-table cq-table"><colgroup><col style="width:65%"><col style="width:12%"><col style="width:23%"></colgroup><thead><tr><th>Položka a rozsah</th><th class="num">Množství</th><th class="num">Cena s DPH</th></tr></thead><tbody>${body}</tbody><tfoot><tr><td colspan="2">Celkem bez DPH</td><td class="num">${money2(C.base)}</td></tr><tr><td colspan="2">DPH celkem · materiál ${fmt(C.rate)} %, kování a LED 21 %</td><td class="num">${money2(C.vat)}</td></tr><tr class="cq-grand"><td colspan="2">${incomplete?'MEZISOUČET S DPH — NEÚPLNÁ NABÍDKA':'CELKOVÁ CENA S DPH'}</td><td class="num">${money2(C.total)}</td></tr></tfoot></table>
- <div class="cq-terms"><b>Rozsah nabídky:</b> pouze uvedené oceněné položky. Desky, profily a krytky jsou účtované v nákupních kusech, včetně potřebných zbytků. Práce, montáž, doprava, čelní úchytky a další neuvedené položky nejsou zahrnuté.${C.led.profileMm?' LED zahrnuje pouze profil, krytku, pásek a zdroj — bez kabeláže, ovládání a dalšího příslušenství.':''}${C.hardware.notices.length?' Výklopy označené jako předběžné vyžadují před objednávkou ověření hmotností a montáže.':''}${C.hardware.rows.some(r=>r.closing)?' Nohy 146995 jsou v doprodeji; ověřte dostupnost.':''}</div>
- <p class="cq-terms"><b>Čela:</b> ${esc(projectFrontLabel())}</p>
- ${i.notes?`<div class="cq-terms"><b>Poznámky k nabídce:</b><p style="white-space:pre-wrap">${esc(i.notes)}</p></div>`:''}
+ const body=rows.map((r,index)=>`<tr data-quote-item="${index}"><td>${esc(r.label)}</td><td class="num">${esc(r.qty)}</td><td class="num cq-price">${r.gross==null?'NEOCENĚNO':money2(r.gross)}</td></tr>`).join('');
+ return `<section class="pr-page customer-quote"><div class="pr-head cq-head"><div><div class="pr-kicker">Cenová nabídka kuchyně</div><h2>${esc(i.name||'Kuchyňská sestava')}</h2><div class="cq-meta">${esc([i.client,i.clientPhone,i.address].filter(Boolean).join(' · '))}<br>${esc([date,i.designer,i.designerContact].filter(Boolean).join(' · '))}</div></div></div>
+ ${incomplete?'<p class="cq-alert">NEÚPLNÁ NABÍDKA: neoceněné nebo nevyřešené části nejsou zahrnuté. Uvedený součet je pouze mezisoučet oceněných položek.</p>':''}
+ <table class="pr-table cq-table"><colgroup><col style="width:64%"><col style="width:13%"><col style="width:23%"></colgroup><thead><tr><th>Položka</th><th class="num">Počet</th><th class="num">Cena s DPH</th></tr></thead><tbody>${body}</tbody><tfoot><tr><td colspan="2">Celkem bez DPH</td><td class="num">${money2(C.base)}</td></tr><tr><td colspan="2">DPH celkem</td><td class="num">${money2(C.vat)}</td></tr><tr class="cq-grand"><td colspan="2">${incomplete?'MEZISOUČET S DPH — NEÚPLNÁ NABÍDKA':'CELKOVÁ CENA S DPH'}</td><td class="num" data-quote-total>${money2(C.total)}</td></tr></tfoot></table>
+ <div class="cq-terms">Nabídka zahrnuje uvedené položky pro navrženou sestavu. Práce, montáž, doprava a čelní úchytky nejsou zahrnuté.${C.led.profileMm?' LED nezahrnuje kabeláž, ovládání a další montážní příslušenství.':''}${C.hardware.notices.length?' Výběr výklopů je nutné ověřit před objednávkou.':''}${C.hardware.rows.some(r=>r.closing)?' Nohy jsou v doprodeji — dostupnost je nutné ověřit.':''}</div>
+ ${i.notes?`<div class="cq-terms"><b>Poznámky:</b><p style="white-space:pre-wrap">${esc(i.notes)}</p></div>`:''}
  </section>`;
 }
 
@@ -6735,6 +6748,14 @@ function paginatePrint(){
  const made=[];
  try{
   for(const source of sources){
+   // Avoid a near-empty continuation for a few trailing lines: first reduce only
+   // cell padding in a near-fitting customer quote, keeping the font readable.
+   if(source.matches('.customer-quote')){
+    const tail=[...source.children].filter(n=>!n.matches('.pr-foot,.pr-cover-foot')).at(-1);
+    const pad=parseFloat(getComputedStyle(source).paddingBottom)||60;
+    const excess=tail?tail.getBoundingClientRect().bottom-(source.getBoundingClientRect().bottom-pad):0;
+    if(excess>0&&excess<=160)source.classList.add('cq-compact');
+   }
    const head=source.querySelector(':scope > .pr-head, :scope > .pr-cover-head');
    const blocks=[...source.children].filter(n=>n!==head&&!n.matches('.pr-foot,.pr-cover-foot'));
    let page,flow,count=0;
@@ -6774,7 +6795,7 @@ function paginatePrint(){
       const bounds=page.getBoundingClientRect(),pad=parseFloat(getComputedStyle(page).paddingBottom)||60;
       flow.appendChild(block);
       const legend=blocks.find(n=>n.matches('.pr-legend'));
-      const reserve=legend?Math.min(110,legend.getBoundingClientRect().height+20):20;
+      const reserve=legend?legend.getBoundingClientRect().height+24:20;
       const available=Math.max(130,bounds.bottom-pad-block.getBoundingClientRect().top-reserve-4);
       svg.style.cssText='max-width:100%;width:auto;height:'+available+'px;max-height:'+available+'px';
       if(fits()){count++;continue;}block.remove();
@@ -6837,7 +6858,7 @@ function buildPricePrint(){
     @page { size: ${P.w}mm ${P.h}mm; margin: 0; }
     @page customerOffer { size:210mm 297mm; margin:0; }
     .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
-  </style>` + customerQuoteHtml() + (pricing().printTechnicalAppendix?pricePageHtml()+printTechnicalAppendixPages().join(''):'');
+  </style>` + customerQuoteHtml();
   paginatePrint();
 }
 function printPriceOnly(){
@@ -6848,8 +6869,8 @@ function printPriceOnly(){
 
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
 
-function buildPrint(){
-  printDocumentMode='full';
+function buildPrint(technicalRequested=false){
+  printDocumentMode=technicalRequested===true?'technical':'full';
   const p = S.project, info = p.info;
   const P = PAPER[info.paper] || PAPER.A4L;
   const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',year:'numeric'});
@@ -6885,7 +6906,7 @@ function buildPrint(){
   const showDS = els.some(fDS);
   const showHS = els.some(fHS);
   const showPrice = !!(els.length && pricing().inPrint);
-  const technical=pricing().printTechnicalAppendix===true;
+  const technical=technicalRequested===true;
   const hwPages=showPrice&&technical?printTechnicalAppendixPages():[];
   if(showPrice){pages.length=0;pages.push(customerQuoteHtml());}
   const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0) + (showPrice?1:0) + hwPages.length;
@@ -7105,7 +7126,7 @@ function legendHtml(filter){
   const fEls = filter ? S.project.elements.filter(filter) : S.project.elements;
   const used = [...new Map(fEls.map(e=>[e.name||'bez názvu', e])).values()];
   const symUsed = [...new Map(S.project.symbols.map(sm=>[sm.type, symType(sm.type)])).values()];
-  return used.map(e => `<span class="lg"><i class="sw" style="background:${e.color}"></i>${esc(e.name||'bez názvu')}</span>`).join('')
+  return (used.length>6?'<span class="lg">Skříně — názvy jsou uvedeny přímo ve výkresu.</span>':used.map(e => `<span class="lg"><i class="sw" style="background:${e.color}"></i>${esc(e.name||'bez názvu')}</span>`).join(''))
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
@@ -7507,7 +7528,7 @@ function bindUi(){
     if(k==='o'){ rotateSelection(); }
   });
 
-  window.addEventListener('beforeprint', () => { try{ if(printDocumentMode==='price')buildPricePrint();else buildPrint(); }catch(e){ console.warn(e); } });
+  window.addEventListener('beforeprint', () => { try{ if(printDocumentMode==='price')buildPricePrint();else buildPrint(printDocumentMode==='technical'); }catch(e){ console.warn(e); } });
   window.addEventListener('resize', () => render());
 }
 
