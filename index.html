@@ -641,7 +641,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-trachea-v71'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-prehled-kovani-v72'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1244,12 +1244,9 @@ function elLabels(e){
   if(mode === 'auto'){                           // auto = jen když je místo
     showName = sel || (wpx >= 66 && hpx >= 28);
     showDim  = sel || (wpx >= 120 && hpx >= 52);
-    /* Horní skříň leží v půdorysu NAD spodní – na společné vrstvě by se
-       její popisek srážel s popiskem spodní řady. Proto se popisek horní
-       skříně ukáže jen na vrstvě HS, nebo když pod ní nic není. */
-    if(elKind3(e) === 'upper' && S.layer !== 'HS' && !sel && upperCovered(e)){
-      showName = false; showDim = false;
-    }
+    // Do not hide a named upper cabinet merely because a base is below it.
+    // Overlapping levels use separate label positions instead.
+
   }
   const fsN = Math.min(LBL_PX_NAME / z, fit);
   const fsD = Math.min(LBL_PX_DIM / z, fit * 0.78);
@@ -1258,9 +1255,16 @@ function elLabels(e){
            dim:  showDim ? fmt(e.w) + ' × ' + fmt(e.d) : '',
            fsN, fsD };
 }
+function elementLabelY(e){
+  if(S.layer==='HS'||S.layer==='DS')return e.y+e.d/2;
+  if(elKind3(e)==='upper'&&upperCovered(e))return e.y+e.d*.24;
+  if(elKind3(e)!=='upper'&&S.project.elements.some(u=>elKind3(u)==='upper'&&upperCovered(u)&&Math.min(e.x+e.w,u.x+u.w)>Math.max(e.x,u.x)&&Math.min(e.y+e.d,u.y+u.d)>Math.max(e.y,u.y)))return e.y+e.d*.76;
+  return e.y+e.d/2;
+}
 function elementsMarkup(){
   const z = S.view.zoom;
-  return S.project.elements.filter(layerShowsEl).map(e => {
+  const labels=[];
+  const bodies=S.project.elements.filter(layerShowsEl).map(e => {
     const sel = S.sel?.kind==='el' && S.sel.id===e.id;
     const LB = elLabels(e);
     const c = e.color || COLORS[0];
@@ -1273,18 +1277,20 @@ function elementsMarkup(){
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
     const up = elKind3(e)==='upper';
     const dash = up ? ` stroke-dasharray="${R(11/z)} ${R(7/z)}"` : '';
-    return `<g data-el="${e.id}">
+    labels.push(`<g data-el-label="${e.id}" pointer-events="none">      ${LB.name ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
+            font-size="${LB.fsN}" font-weight="700" fill="#111827"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
+      ${LB.dim ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
+            font-size="${LB.fsD}" fill="#4b5563"
+            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}</g>`);
+    return `<g data-el="${e.id}"><title>${esc(e.name||'Skříň')}</title>
       <rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
             fill="${c}${up?'0a':'22'}" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
       <path d="${dl}" stroke="${c}" stroke-width="${2/z}" fill="none" opacity=".8"/>
-      ${LB.name ? `<text x="${e.x+e.w/2}" y="${e.y+e.d/2 - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
-            font-size="${LB.fsN}" font-weight="700" fill="#111827"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
-      ${LB.dim ? `<text x="${e.x+e.w/2}" y="${e.y+e.d/2 + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
-            font-size="${LB.fsD}" fill="#4b5563"
-            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}
+
     </g>`;
   }).join('');
+  return bodies+labels.join(''); // Labels stay above every cabinet body, independent of insertion order.
 }
 
 function guidesMarkup(){
@@ -5608,13 +5614,45 @@ function hardwareForEl(e){
 }
 
 function hardwareCalc(){
-  const rows=[],warnings=[],notices=[],reports=[];
-  for(const e of S.project.elements){const h=hardwareForEl(e);rows.push(...h.rows);warnings.push(...h.warnings);notices.push(...h.notices);reports.push(...h.reports);}
+  const rows=[],warnings=[],notices=[],reports=[],groups=[];
+  for(const e of S.project.elements){
+    const h=hardwareForEl(e);
+    rows.push(...h.rows);warnings.push(...h.warnings);notices.push(...h.notices);reports.push(...h.reports);
+    if(h.rows.length||h.warnings.length||h.notices.length)groups.push({...h,elementId:e.id,tag:e.name||'Skříň '+(S.project.elements.indexOf(e)+1),kind:elKind3(e),width:elFrontW(e),height:elH3(e),count:Math.max(1,Math.round(e.qty||1)),gross:roundMoney(h.rows.reduce((a,r)=>a+r.totalGross,0))});
+  }
   const gross=roundMoney(rows.reduce((a,r)=>a+r.totalGross,0));
   const base=roundMoney(rows.reduce((a,r)=>a+r.totalGross/(1+r.vat/100),0));
-  return {rows,warnings,notices,reports,gross,base,vat:roundMoney(gross-base)};
+  return {rows,warnings,notices,reports,groups,gross,base,vat:roundMoney(gross-base)};
+}
+function hardwareGroupDescription(g){
+ const parts=[],has=k=>g.rows.some(r=>r.key===k);
+ const lift=g.reports[0]?.model;
+ if(lift){
+   const detail=lift.type==='hfTop'?'zdvihače, ramena, krytky, závěsy, podložky a vruty':lift.type==='hkTop'?'zdvihače, krytky, čelní příchyty a vruty':'zdvihače s krytkami, čelní příchyty a vruty';
+   parts.push('Výklop '+blumName(lift.type)+(g.rows.some(r=>r.key.startsWith('blum_'))?' — '+detail:' — není oceněný'));
+ }
+ if(has('lift'))parts.push('Výklop — ručně oceněný komplet (složení ověřit)');
+ const drawers=g.rows.filter(r=>/^sm(89|185|249)$/.test(r.key));
+ if(drawers.length)parts.push('Zásuvkové sady StrongMax s tlumením: '+drawers.reduce((n,r)=>n+r.qty,0)+' ks celkem');
+ if(has('hinge')||has('plate'))parts.push('Pantové otevírání — '+(has('hinge')?'panty':'')+(has('hinge')&&has('plate')?' a ':'')+(has('plate')?'montážní podložky':''));
+ return parts.join(' · ')||'Kování vyžaduje doplnění';
+}
+function hardwareGroupStatus(g){
+ return g.warnings.length?'NEÚPLNÁ CENA — nevyřešené části nejsou zahrnuté.'
+ :g.notices.length?'PŘEDBĚŽNĚ — výběr ověřit před objednávkou.'
+ :'Oceněné kování';
+}
+function hardwareGroupRow(g,printing=false){
+ const label=(g.kind==='upper'?'HS':g.kind==='column'?'Sloup':'DS')+' · '+fmt(g.width)+' × '+fmt(g.height)+' mm';
+ const details=printing?'':`<details class="p-det"><summary>Součásti, ceny a kontrola (${g.rows.length} položek)</summary>${hardwareDetailTable(g)}${g.reports.map(r=>blumReport(r.model)).join('')}</details>`;
+ return `<tr data-hw-group="${esc(g.elementId)}"><td><b>${esc(g.tag)}</b><div style="color:#64748b;font-size:9pt">${esc(label)}</div><div style="margin-top:3px">${esc(hardwareGroupDescription(g))}</div><div style="font-size:8pt;color:${g.warnings.length?'#b91c1c':g.notices.length?'#92400e':'#64748b'}">${hardwareGroupStatus(g)}</div>${details}</td><td class="num">${g.count} ks</td><td class="num"><b>${g.rows.length?money2(g.gross):'neoceněno'}</b></td></tr>`;
 }
 function hardwareTable(h,printing=false){
+ return `<p class="hint">Jedna skříň = jeden souhrn kování včetně příslušenství. Ceny v Kč s DPH 21 %. Materiál a čelní úchytky nejsou v tomto souhrnu.</p>
+ ${h.warnings.length?'<p style="color:#b91c1c"><b>NEÚPLNÁ CENA KOVÁNÍ:</b> Některé části nejsou oceněné. Dotčené skříně jsou označené níže; důvody najdete v jejich rozpisu.</p>':''}
+ <table class="${printing?'pr-table':'p-tbl'}"><thead><tr><th>Skříň a zahrnuté kování</th><th>Skříní</th><th class="num">Celkem s DPH</th></tr></thead><tbody>${h.groups.map(g=>hardwareGroupRow(g,printing)).join('')||'<tr><td colspan="3">Žádné oceněné kování.</td></tr>'}</tbody><tfoot><tr><td colspan="2">Oceněné kování celkem s DPH 21 %</td><td class="num">${money2(h.gross)}</td></tr></tfoot></table>`;
+}
+function hardwareDetailTable(h,printing=false){
  return `<p class="hint">Kování: veřejné ceny Démos v Kč s DPH. Ceník ověřen 26. 10. 2026; nejde o živé připojení. Lamino a hranění jsou zvlášť. Komponenty generací StrongMax nemíchejte.</p>
  ${h.warnings.length?`<p style="color:#b91c1c"><b>NEÚPLNÁ CENA KOVÁNÍ:</b> ${esc(h.warnings.join(' '))}</p>`:''}
  ${h.notices?.length?`<p style="color:#92400e"><b>PŘEDBĚŽNÝ VÝBĚR:</b> ${esc(h.notices.join(' '))}</p>`:''}
@@ -6203,7 +6241,8 @@ function renderPriceModal(){
       </tr></tfoot>
     </table>
 
-    <div class="p-h">Kování Démos</div>
+    <div class="p-h">Kování podle skříní</div>
+    <label class="chk"><input id="pHardwareTechnicalPrint" type="checkbox" ${P.hardwareTechnicalPrint===true?'checked':''}> Připojit interní technický rozpis a výpočty do PDF (pro zákazníka nechte vypnuté)</label>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     ${hardwareCatalogForm()}
     <p class="hint">Panty a podložky se počítají automaticky: 2 + 2 na každá dvířka. Variantu Blumu nastavíte u konkrétní skříně v části Kování Démos. U atypů a jiných značek nepovažujte tento dílčí výpočet za úplnou nabídku.</p>
@@ -6323,6 +6362,7 @@ function bindPriceInputs(){
     }
     else if(el.id === 'pVatIncl'){ P.vatIncluded = !!el.checked; updatePriceTotals(); }
     else if(el.id === 'pInPrint'){ P.inPrint = !!el.checked; save(); }
+    else if(el.id === 'pHardwareTechnicalPrint'){ P.hardwareTechnicalPrint = !!el.checked; save(); }
     else if(el.id === 'pTopDepth'){
       P.topDepth = clamp(+el.value || TOP_DEPTH_DFLT, 300, 1200);
       const gt = P.groups.find(g => g.id === 'top');
@@ -6475,9 +6515,18 @@ function pricePageHtml(opt){
 }
 
 function hardwarePrintPages(){
+ const h=hardwareCalc(),pages=[],size=5;
+ for(let i=0;i<h.groups.length;i+=size){
+   const groups=h.groups.slice(i,i+size),subtotal=roundMoney(groups.reduce((n,g)=>n+g.gross,0));
+   pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Nabídka · kování podle skříní</span><h2>Kování a příslušenství</h2></div><div class="pr-meta">${esc(S.project.info.name||'')}<br>Přehled ${Math.floor(i/size)+1} / ${Math.ceil(h.groups.length/size)}</div></div><p style="font-size:9pt">Cena u skříně zahrnuje uvedené oceněné kování i příslušenství pro uvedený počet kusů. Deskový materiál a čelní úchytky jsou mimo tento souhrn.</p><table class="pr-table"><thead><tr><th>Skříň a zahrnuté kování</th><th>Skříní</th><th class="num">Kč s DPH</th></tr></thead><tbody>${groups.map(g=>hardwareGroupRow(g,true)).join('')}</tbody><tfoot><tr><td colspan="2">Mezisoučet této stránky s DPH 21 %</td><td class="num">${money2(subtotal)}</td></tr>${i+size>=h.groups.length?`<tr><td colspan="2">Kování projektu celkem s DPH 21 %${h.warnings.length?' — NEÚPLNÁ CENA':''}</td><td class="num">${money2(h.gross)}</td></tr>`:''}</tfoot></table><p style="font-size:8pt">${groups.some(g=>g.warnings.length)?'<b>NEÚPLNÁ CENA:</b> Nevyřešené části označených skříní nejsou v součtu; před uzavřením nabídky je nutné doplnit jejich parametry a ceny. ':''}${groups.some(g=>g.notices.length)?'Předběžné sestavy výklopů vyžadují ověření hmotnosti čel a montáže před objednávkou. ':''}Ceník Démos ověřen 26. 10. 2026, případné vlastní ceny dle projektu. Práce a montáž nejsou zahrnuté.</p></section>`);
+ }
+ if(pricing().hardwareTechnicalPrint===true)pages.push(...hardwareTechnicalPrintPages());
+ return pages;
+}
+function hardwareTechnicalPrintPages(){
   const h=hardwareCalc(),pages=[];
   for(let i=0;i<h.rows.length;i+=5){
-    pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Příloha · kování</span><h2>Kování Démos</h2></div></div>${hardwareTable({...h,rows:h.rows.slice(i,i+5),warnings:[],notices:[]},true)}<p>Součet v zápatí tabulky je za veškeré oceněné kování projektu, nikoli jen tuto stránku.</p></section>`);
+    pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Příloha · kování</span><h2>Kování Démos</h2></div></div>${hardwareDetailTable({...h,rows:h.rows.slice(i,i+5),warnings:[],notices:[]},true)}<p>Součet v zápatí tabulky je za veškeré oceněné kování projektu, nikoli jen tuto stránku.</p></section>`);
   }
   for(const r of h.reports){pages.push(`<section class="pr-page"><div class="pr-head"><h2>Výpočet výklopu · ${esc(r.tag)}</h2></div>${blumReport(r.model)}<p>Zdroj: Blum AVENTOS top CZ, str.9–10,14–15,33–34,37; katalog 2024/25 str.56–57,716. Ceny Démos 26.10.2026. Kontrola kolizí a montážního provedení je nutná před objednáním.</p></section>`);}
   for(let i=0;i<h.warnings.length;i+=6){
