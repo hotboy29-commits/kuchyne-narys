@@ -3625,6 +3625,7 @@ function renderInspector(){
         })()}
         <details class="insp-help"><summary>Pravidla rozměrů čel</summary><p class="hint">Dvířka: výška 704 mm, šířka skříně − 4 mm; mezi dvířky 2 mm. Zásuvky dle nastavení projektu. Výklopy a sloupy mají vlastní členění.</p></details>
       </div>
+      <div id="strongMaxBox"></div>
       ${upperOpeningForm(e)}
       <details class="insp-sec insp-fold" data-insp-fold="bok"><summary>Bok+ <small>${bokAny(e)?"zapnuto":"bez panelů"}</small></summary>
         <div class="row2">
@@ -3671,6 +3672,7 @@ function renderInspector(){
       section.open=inspectorFolds.get(key)??false;
       section.addEventListener('toggle',()=>inspectorFolds.set(key,section.open));
     });
+    refreshStrongMaxInspector(e);
     const bind = (id, fn, ev='change') => { const el = $(id); if(el) el.addEventListener(ev, fn); };
     /* Pole vpravo nesmí přestavět panel ani při psaní, ani při potvrzení
        (Tab/Enter) – jinak by po každém písmenu / tabulátoru vypadl fokus.
@@ -3705,12 +3707,12 @@ function renderInspector(){
     bind('#iHKHeight',ev=>{e.opening={...e.opening,height:Math.round(clamp(+ev.target.value||400,1,400))};pushHistory();render();});
     bind('#iNote', ev => { e.note = ev.target.value; }, 'input');
     bind('#iNote', () => pushHistoryQuiet(), 'change');
-    bind('#iW', ev => { setElFrontW(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); });
-    bind('#iD', ev => { setElFrontD(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); });
+    bind('#iW', ev => { setElFrontW(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e); });
+    bind('#iD', ev => { setElFrontD(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e); });
     bind('#iX', ev => { e.x = R(OR.x + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iY', ev => { e.y = R(OR.y + (+ev.target.value||0)); pushHistoryQuiet(); renderCanvas(); });
     bind('#iQty', ev => { e.qty = clamp(+ev.target.value||1,1,99); pushHistoryQuiet(); renderCanvas(); });
-    $('#iH').addEventListener('change', ev => { e.h = clamp(+ev.target.value||0,100,3000); pushHistoryQuiet(); renderCanvas(); });
+    $('#iH').addEventListener('change', ev => { e.h = clamp(+ev.target.value||0,100,3000); pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e); });
     $('#iFrOn').addEventListener('change', ev => {
       const on = !!ev.target.checked;
       if(on){
@@ -3727,7 +3729,7 @@ function renderInspector(){
     $('#iFrDoors')?.addEventListener('change', ev => {
       e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
       e.fronts.doors = clamp(Math.round(+ev.target.value || 0), 0, 20);
-      pushHistoryQuiet(); renderCanvas();
+      pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e);
     });
     const bA = $('#iBlendeAutoOn');
     if(bA) bA.onclick = ev => {
@@ -3737,7 +3739,7 @@ function renderInspector(){
     $('#iFrDrawers').addEventListener('change', ev => {
       e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
       e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
-      pushHistoryQuiet(); renderCanvas();
+      pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e);
     });
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
@@ -5277,12 +5279,83 @@ function upperCutParts(e){
     {group:'back',label:'záda HDF HS',w:W,h:H,qty:1}
   ].filter(p=>p.w>0&&p.h>0);
 }
+/* StrongMax 18, standard outer drawers, NL500. Source: Demos instructions
+   /product-file/download/70179 pp.1,3. LW=clear cabinet width (18 mm sides).
+   Bottom LW-21 × NL-20; back LW-42 × H(59/155/219), all 18 mm DTD.
+   2026 generation retains cut sizes; hardware components are NOT interchangeable. */
+const STRONGMAX18 = {length:500,backHeights:{89:59,185:155,249:219},frontMap:{125:89,223:185,350:249}};
+function strongMaxModel(e){
+  const cfg=e.strongMax||{},fronts=frontCfg(e);
+  const result={parts:[],drawers:[],errors:[],warnings:[],active:false,innerWidth:elFrontW(e)-36};
+  if(!fronts.on||fronts.drawers===0)return result;
+  const fp=frontPieces(e);
+  if(!fp.drawers.length)return result;
+  result.active=cfg.mode!=='off';
+  result.depth=cfg.clearDepth??(elFrontD(e)-3);
+  if(!result.active)return result;
+  if(result.innerWidth<=42)result.errors.push('Světlá šířka nestačí pro StrongMax 18.');
+  if(result.depth<505)result.errors.push('Výsuv 500 mm vyžaduje světlou hloubku alespoň 505 mm; zadaná/odhadnutá je '+result.depth+' mm.');
+  if(elFrontW(e)>800)result.warnings.push('Šířka nad 800 mm: ověřte zpevnění a podpěru dna dle montážního návodu.');
+  if(fp.blende?.cut)result.warnings.push('Rohová skříň: ověřte průchod zásuvky kolem blende. Šířka dna se odvozuje od korpusu, nikoli od zkráceného čela.');
+  if(e.appliances?.oven?.on)result.warnings.push('Trouba: ověřte prostor zásuvek vůči spotřebiči; samotné schéma výsuvu pod troubou nenahrazuje zadaný počet zásuvek.');
+  fp.drawers.forEach((face,index)=>{
+    const override=cfg.heights?.[index];
+    const side=Object.hasOwn(STRONGMAX18.backHeights,override)?+override:(STRONGMAX18.frontMap[face]||null);
+    const drawer={index,face,side,back:side?STRONGMAX18.backHeights[side]:null};result.drawers.push(drawer);
+    if(!side){result.errors.push('Zásuvka '+(index+1)+': pro atypické čelo '+face+' mm vyberte výšku bočnice.');return;}
+    if(side>face){result.errors.push('Zásuvka '+(index+1)+': bočnice H'+side+' je vyšší než čelo '+face+' mm.');return;}
+  });
+  // Never issue a partial production cut list when one drawer is unresolved.
+  if(result.errors.length)return result;
+  for(const d of result.drawers){
+    result.parts.push({group:'body',label:'StrongMax 18 – zásuvka '+(d.index+1)+' H'+d.side+' – dno DTD 18 mm',w:result.innerWidth-21,h:480,qty:1,edgeMm:0,edgeNote:'bez hranění'});
+    result.parts.push({group:'body',label:'StrongMax 18 – zásuvka '+(d.index+1)+' H'+d.side+' – záda DTD 18 mm',w:result.innerWidth-42,h:d.back,qty:1,edgeMm:result.innerWidth-42,edgeNote:'hranit horní hranu po šířce'});
+  }
+  return result;
+}
+function strongMaxForm(e){
+  const m=strongMaxModel(e);
+  if(!frontCfg(e).on||!frontPieces(e).drawers.length)return '';
+  return `<details class="insp-help" data-strongmax-details ${m.errors.length?'open':''}><summary>StrongMax 18 · ${m.active?(m.errors.length?'doplnit zadání':m.parts.length+' dílců do nářezu'):'vypnuto'}</summary>
+    <label class="fld"><span>Dna a záda zásuvek</span><select data-sm-mode><option value="auto" ${m.active?'selected':''}>StrongMax 18 / 500 mm — automaticky</option><option value="off" ${!m.active?'selected':''}>Bez těchto dílců / jiné kování</option></select></label>
+    ${m.active?`<p class="hint">Bílé kování, tlumení. Dna a záda DTD 18 mm ve skupině korpusového lamina. Pořadí zásuvek odspodu.</p>
+    ${m.drawers.map(d=>`<label class="fld"><span>${d.index+1}. zásuvka · čelo ${d.face} mm</span><select data-sm-index="${d.index}"><option value="auto" ${!e.strongMax?.heights?.[d.index]?'selected':''}>Automaticky ${STRONGMAX18.frontMap[d.face]?'H'+STRONGMAX18.frontMap[d.face]:'— nutno vybrat'}</option>${[89,185,249].map(h=>`<option value="${h}" ${+e.strongMax?.heights?.[d.index]===h?'selected':''}>H${h} · záda ${STRONGMAX18.backHeights[h]} mm</option>`).join('')}</select></label>`).join('')}
+    <label class="fld"><span>Skutečná světlá hloubka (mm, volitelné)</span><input data-sm-depth type="number" min="1" max="3000" value="${e.strongMax?.clearDepth??''}" placeholder="Odhad ${elFrontD(e)-3} mm"></label>
+    <p class="hint">Bez zadání: hloubka korpusu − 3 mm HDF. Odsazení zad a překážky ověřte. Světlá šířka: ${m.innerWidth} mm (boky 18 mm).</p>
+    ${m.parts.length?`<p class="hint">Dno ${m.innerWidth-21} × 480 mm, záda ${m.innerWidth-42} × ${m.drawers.map(d=>d.back).join(' / ')} mm. Dno bez hranění; záda hranit pouze nahoře po šířce. Bez ceny kování, práce a paušálu.</p>`:''}
+    ${m.errors.length?`<p class="hint" style="color:#b91c1c"><b>Nářez zásuvek není úplný:</b> ${esc(m.errors.join(' '))} Dílce StrongMax nejsou započtené.</p>`:''}
+    ${m.warnings.length?`<p class="hint" style="color:#854d0e">${esc(m.warnings.join(' '))}</p>`:''}`:''}
+  </details>`;
+}
+function refreshStrongMaxInspector(e){
+  const box=$('#strongMaxBox');if(!box)return;
+  const wasOpen=box.querySelector('[data-strongmax-details]')?.open;
+  box.innerHTML=strongMaxForm(e);
+  const details=box.querySelector('[data-strongmax-details]');if(details&&wasOpen)details.open=true;
+  box.querySelectorAll('[data-sm-mode],[data-sm-index],[data-sm-depth]').forEach(input=>input.addEventListener('change',()=>{
+    e.strongMax ||= {};
+    if(input.hasAttribute('data-sm-mode'))e.strongMax.mode=input.value;
+    else if(input.hasAttribute('data-sm-depth')){
+      if(input.value.trim()==='')delete e.strongMax.clearDepth;
+      else e.strongMax.clearDepth=clamp(Math.round(+input.value||1),1,3000);
+    }else{
+      e.strongMax.heights ||= {};
+      if(input.value==='auto')delete e.strongMax.heights[input.dataset.smIndex];
+      else e.strongMax.heights[input.dataset.smIndex]=+input.value;
+    }
+    pushHistoryQuiet();refreshStrongMaxInspector(e);renderCanvas();
+  }));
+}
+function strongMaxProjectWarnings(){
+  return S.project.elements.flatMap((e,i)=>{const m=strongMaxModel(e);return m.errors.map(x=>(e.name||'Skříň '+(i+1))+': '+x);});
+}
+
 function materialParts(){
   const P = pricing();
   const parts = [];
-  const add = (group, label, w, h, qty) => {
+  const add = (group, label, w, h, qty, edging=null) => {
     if(!(w > 0) || !(h > 0) || !(qty > 0)) return;
-    parts.push({ group, label, w:Math.round(w), h:Math.round(h), qty });
+    parts.push({ group, label, w:Math.round(w), h:Math.round(h), qty, ...(edging||{}) });
   };
 
   for(const e of S.project.elements){
@@ -5315,6 +5388,7 @@ function materialParts(){
       FP.drawers.forEach((h, i) => add('front',
         tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q));
     }
+    strongMaxModel(e).parts.forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote}));
     /* bok+ na každé zapnuté straně */
     if(bokAny(e)){
       const nb = (bokHas(e,'L') ? 1 : 0) + (bokHas(e,'R') ? 1 : 0);
@@ -5592,13 +5666,14 @@ function priceCalc(){
   const P = pricing();
   const parts = materialParts();
   const area = {};
-  let edgeM = 0;
+  let edgeM = 0, exactEdgeM = 0;
   for(const pt of parts){
     area[pt.group] = (area[pt.group] || 0) + (pt.w * pt.h / 1e6) * pt.qty;
-    if(pt.group !== 'back')                       // HDF záda se nehraní
+    if(Number.isFinite(pt.edgeMm)) exactEdgeM += pt.edgeMm / 1000 * pt.qty;
+    else if(pt.group !== 'back') // ostatní dílce: dosavadní procentní odhad
       edgeM += 2 * (pt.w + pt.h) / 1000 * pt.qty;
   }
-  edgeM = edgeM * (P.edgeShare / 100);
+  edgeM = edgeM * (P.edgeShare / 100) + exactEdgeM;
 
   /* po dílech pro každou skupinu – kvůli rozvržení na desky */
   const byGroup = {};
@@ -5660,7 +5735,7 @@ function priceCalc(){
     total = base + vat;
   }
   return {
-    parts, rows, edgeM, edgeTotal, materialTotal,
+    parts, rows, edgeM, exactEdgeM, edgeTotal, materialTotal,
     base, vat, total, rate, vatIncluded:P.vatIncluded,
     zast: Z,
     sheets: rows.reduce((s2, r) => s2 + r.sheets, 0)
@@ -5765,13 +5840,14 @@ function renderPriceModal(){
     </tr>`).join('');
 
   const partsRows = C.parts.map(pt => `<tr>
-      <td>${esc(pt.label)}</td>
+      <td>${esc(pt.label)}${pt.edgeNote?'<br><small>'+esc(pt.edgeNote)+(pt.edgeMm?' · '+fmt(pt.edgeMm)+' mm/ks':'')+'</small>':''}</td>
       <td class="num">${pt.qty}×</td>
       <td class="num">${fmt(pt.w)} × ${fmt(pt.h)}</td>
       <td class="num">${num2(pt.w * pt.h / 1e6 * pt.qty)} m²</td>
     </tr>`).join('');
 
   $('#priceBody').innerHTML = `
+    ${strongMaxProjectWarnings().length?'<p style="color:#b91c1c"><b>NEÚPLNÁ CENA / NÁŘEZ STRONGMAX:</b> '+esc(strongMaxProjectWarnings().join(' '))+' Dílce nevyřešených zásuvek nejsou započtené.</p>':''}
     <div class="p-sum">
       <div><span>Materiál celkem</span><b id="pSumTotal">${kc(C.total)}</b>
         <small id="pSumHint">${C.vatIncluded ? 'včetně DPH' : 'bez DPH'} ${fmt(C.rate)} %</small></div>
@@ -5789,7 +5865,7 @@ function renderPriceModal(){
       <tbody>${rowsHtml}
         <tr>
           <td><b>Hrana ABS</b><div class="p-sub">obvod dílů × podíl hranění</div></td>
-          <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m</td>
+          <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m<br><small>StrongMax: dno 0, záda 1× šířka; procento platí pro ostatní dílce.</small></td>
           <td class="num"><input class="p-in num" id="pEdgeShare" type="number" min="0" max="100" step="5" value="${P.edgeShare}"> %</td>
           <td class="num">—</td>
           <td class="num"><input class="p-in num" id="pEdgePrice" type="number" min="0" step="1" value="${P.edgePrice}"></td>
@@ -6026,7 +6102,7 @@ function pricePageHtml(opt){
       <tbody>${rows}
         <tr>
           <td>Hrana ABS – obvod dílů ${num2(C.edgeM)} m × ${fmt(pricing().edgePrice)} Kč/m
-            (hraní ${pricing().edgeShare} %)</td>
+            (ostatní dílce ${pricing().edgeShare} %; StrongMax přesně: dno bez hrany, záda 1× šířka)</td>
           <td class="num">—</td><td class="num">—</td><td class="num">—</td>
           <td class="num">${fmt(C.edgeTotal)}</td>
         </tr>
@@ -6151,6 +6227,10 @@ function buildPrint(){
         <td class="num">${fmt(wNom*(e.qty||1))}</td>
         <td>${esc(noteX)}</td>
       </tr>`;
+      const sm=strongMaxModel(e),smq=Math.max(1,Math.round(e.qty||1));
+      out+=sm.parts.map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*smq}</td><td class="num">${fmt(p.w*p.qty*smq)}</td><td>DTD 18 mm · ${esc(p.edgeNote)}${p.edgeMm?' · '+fmt(p.edgeMm)+' mm/ks':''}</td></tr>`).join('');
+      if(sm.errors.length)out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>NEÚPLNÝ NÁŘEZ STRONGMAX:</b> ${esc(sm.errors.join(' '))} Dílce zásuvek nejsou započtené.</td></tr>`;
+      if(sm.warnings.length)out+=`<tr class="pr-sub"><td></td><td colspan="6">StrongMax: ${esc(sm.warnings.join(' '))}</td></tr>`;
       const bkw = bokW(e), bh = bokH(e);
       const bokRows = [['L','vlevo'],['R','vpravo']].filter(([sd])=>bokHas(e,sd))
         .map(([,str]) => `<tr class="pr-sub"><td class="num"></td>
