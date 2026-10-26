@@ -634,7 +634,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-demos'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-auto-panty'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -5378,9 +5378,9 @@ function hardwareForEl(e){
   }
   const type=upperOpening(e);
   if(type==='hinges'&&fp.doors.length){
-    const n=cfg.hingesPerDoor;
-    if(!Number.isInteger(n)||n<1)warnings.push(tag+': zadejte počet pantů na jedny dveře. Panty a podložky nejsou oceněné.');
-    else{add('hinge',n*fp.doors.length);add('plate',n*fp.doors.length);}
+    // User standard: every hinged door has two hinges, each with one plate.
+    // Legacy manual hingesPerDoor values no longer control this automatic standard.
+    add('hinge',2*fp.doors.length);add('plate',2*fp.doors.length);
   }else if(type!=='hinges'&&fp.doors.length){
     const lift=cfg.lift;
     if(!lift||lift.type!==type||!String(lift.code||'').trim()||!String(lift.strength||'').trim()||!Number.isFinite(lift.gross)||lift.gross<=0){
@@ -5413,7 +5413,7 @@ function hardwareForm(e){
  const lift=cfg.lift?.type===type?cfg.lift:{};
  return `<details class="insp-help" data-hw-details><summary>Kování Démos · ${cfg.mode==='off'?'vyřazeno':money2(h.rows.reduce((s,r)=>s+r.totalGross,0))}${h.warnings.length?' · doplnit':''}</summary>
  <label class="fld"><span>Zahrnutí do ceny</span><select data-hw-field="mode"><option value="auto" ${cfg.mode!=='off'?'selected':''}>Ocenit podle čel / zásuvek</option><option value="off" ${cfg.mode==='off'?'selected':''}>Kování nezahrnovat</option></select></label>
- ${cfg.mode!=='off'&&type==='hinges'&&fp.doors.length?`<label class="fld"><span>Panty 92580T na jedny dveře (ks)</span><input data-hw-field="hingesPerDoor" type="number" min="1" max="20" step="1" value="${cfg.hingesPerDoor??''}" placeholder="Zadejte počet"></label><p class="hint">Ke každému pantu 1× podložka 92591T. Počet určete dle rozměrů a hmotnosti dveří.</p>`:''}
+ ${cfg.mode!=='off'&&type==='hinges'&&fp.doors.length?`<p class="hint"><b>Automaticky na každá dvířka:</b> 2× pant 92580T + 2× podložka 92591T.<br>${fp.doors.length} dvířek × ${Math.max(1,Math.round(e.qty||1))} ks skříně = ${2*fp.doors.length*Math.max(1,Math.round(e.qty||1))} pantů a stejný počet podložek.</p>`:''}
  ${cfg.mode!=='off'&&type!=='hinges'?`<p class="hint">Blum: cena musí zahrnovat celý potřebný komplet, ne samotný zdvihač. Částka se nepřebírá automaticky z jiného typu výklopu.</p><label class="fld"><span>Objednací kód(y) kompletu Démos</span><input data-hw-lift="code" value="${esc(lift.code||'')}" maxlength="160"></label><label class="fld"><span>Síla / varianta</span><input data-hw-lift="strength" value="${esc(lift.strength||'')}" maxlength="80"></label><label class="fld"><span>Celý komplet Kč s DPH 21 %</span><input data-hw-lift="gross" type="number" min="0.01" step="0.01" value="${lift.gross??''}"></label>`:''}
  ${h.rows.length?`<p class="hint">${h.rows.map(r=>esc(r.code)+' · '+r.qty+' '+esc(r.unit)+' × '+money2(r.gross)).join('<br>')}</p>`:''}
  ${h.warnings.length?`<p class="hint" style="color:#b91c1c">${esc(h.warnings.join(' '))}</p>`:''}
@@ -5433,7 +5433,6 @@ function refreshHardwareInspector(e){
      else e.hardware.lift[k]=input.value.trim();
      e.hardware.lift.date=new Date().toISOString().slice(0,10);
    }else if(input.dataset.hwField==='mode')e.hardware.mode=input.value;
-   else{if(input.value.trim()==='')delete e.hardware.hingesPerDoor;else e.hardware.hingesPerDoor=clamp(Math.round(+input.value||1),1,20);}
    pushHistoryQuiet();refreshHardwareInspector(e);renderCanvas();
  }));
 }
@@ -5973,7 +5972,7 @@ function renderPriceModal(){
     <div class="p-h">Kování Démos</div>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     ${hardwareCatalogForm()}
-    <p class="hint">Počet pantů a variantu Blumu nastavíte u konkrétní skříně v části Kování Démos. U atypů a jiných značek nepovažujte tento dílčí výpočet za úplnou nabídku.</p>
+    <p class="hint">Panty a podložky se počítají automaticky: 2 + 2 na každá dvířka. Variantu Blumu nastavíte u konkrétní skříně v části Kování Démos. U atypů a jiných značek nepovažujte tento dílčí výpočet za úplnou nabídku.</p>
     <div class="p-h">Čela a dvířka</div>
     <div class="p-sub" style="gap:10px;font-size:12.5px;margin-bottom:6px" id="pFrWrap">
       <span>V kalkulaci: <b id="pFrCount">${frStats().on}</b> z ${frStats().all} skříní má zapnutá čela</span>
@@ -6045,7 +6044,7 @@ function renderPriceModal(){
       čela – jen u skříní, kde jsou zapnutá –, zástěna a TL (každá zvlášť, je-li zapnutá) a hrany. Pracovní deska,
       zástěna a TL se dají objednat i po půlkách (4 100 mm → půlka 2 050 mm). Počítají se celé desky včetně
       prořezu, takže cena je nákupní, ne „prořezaná".
-      <b>Kování:</b> zahrnuté jsou pouze výše oceněné položky. Chybějící počty pantů a neoceněné výklopy jsou označeny jako neúplná cena. Úchytky, ostatní nevyjmenované kování, práce, montáž a doprava zahrnuté nejsou.
+      <b>Kování:</b> zahrnuté jsou pouze výše oceněné položky. Neoceněné výklopy a nevyřešené zásuvky jsou označeny jako neúplná cena. Úchytky, ostatní nevyjmenované kování, práce, montáž a doprava zahrnuté nejsou.
     </div>`;
   bindPriceInputs();
   updatePriceTotals();
