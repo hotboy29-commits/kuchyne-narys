@@ -403,6 +403,11 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
   border-top:.6pt solid #ccc;padding-top:3mm;font-size:8pt;color:#666}
 .pr-page:not(.cover){position:relative}
 
+.pr-paginated .pr-flow{display:flow-root;overflow-wrap:anywhere}
+.pr-paginated .pr-foot{bottom:4mm;left:9mm;right:9mm;font-size:7pt;padding-top:2mm}
+.pr-paginated .pr-table tfoot{display:table-row-group}
+.pr-paginated .pr-table td,.pr-paginated .pr-table th{overflow-wrap:anywhere}
+.pr-paginated .pr-table .num{white-space:normal}
 .pr-table{width:100%;border-collapse:collapse;font-size:9pt}
 .pr-table th{text-align:left;font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;
   color:#666;border-bottom:1pt solid #111;padding:2mm 2mm}
@@ -643,7 +648,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nohy-v74'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-tisk-v75'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1237,10 +1242,11 @@ function upperCovered(e){
 }
 /* Co se u skříně dá přečíst: { name, dim, fsN, fsD }
    Vybraná skříň má popisek vždy – i když je na obrazovce malá. */
+function frontLabelAngle(e){return ({jih:0,sever:180,'východ':-90,'západ':90})[e.front||'jih']||0;}
 function elLabels(e){
   const z = S.view.zoom || 1;
   const mode = S.labels || 'auto';
-  const wpx = e.w * z, hpx = e.d * z;            // velikost skříně na obrazovce
+  const wpx = elFrontW(e) * z, hpx = elFrontD(e) * z;            // velikost skříně na obrazovce
   const fit = Math.min(e.w, e.d) * 0.36;         // popis nesmí přerůst skříň
   const sel = S.sel?.kind === 'el' && S.sel.id === e.id;
   let showName = mode !== 'off', showDim = mode !== 'off';
@@ -1253,9 +1259,9 @@ function elLabels(e){
   }
   const fsN = Math.min(LBL_PX_NAME / z, fit);
   const fsD = Math.min(LBL_PX_DIM / z, fit * 0.78);
-  const maxCh = Math.max(3, Math.floor((e.w - 6) / (0.60 * fsN)));
+  const maxCh = Math.max(3, Math.floor((elFrontW(e) - 6) / (0.60 * fsN)));
   return { name: showName ? lblShort(e.name || '', maxCh) : '',
-           dim:  showDim ? fmt(e.w) + ' × ' + fmt(e.d) : '',
+           dim:  showDim ? fmt(elFrontW(e)) + ' × ' + fmt(elFrontD(e)) : '',
            fsN, fsD };
 }
 function elementLabelY(e){
@@ -1280,7 +1286,7 @@ function elementsMarkup(){
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
     const up = elKind3(e)==='upper';
     const dash = up ? ` stroke-dasharray="${R(11/z)} ${R(7/z)}"` : '';
-    labels.push(`<g data-el-label="${e.id}" pointer-events="none">      ${LB.name ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
+    labels.push(`<g data-el-label="${e.id}" transform="rotate(${frontLabelAngle(e)} ${e.x+e.w/2} ${elementLabelY(e)})" pointer-events="none">      ${LB.name ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
             font-size="${LB.fsN}" font-weight="700" fill="#111827"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
       ${LB.dim ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
@@ -6635,20 +6641,130 @@ function hardwareTechnicalPrintPages(){
   }
   return pages;
 }
-function printPriceOnly(){
+/* Measure actual laid-out content, then paginate. Fixed page boxes must never
+   silently clip rows/totals. Project data is not modified by this operation. */
+function paginatePrint(){
+ const root=$('#printRoot'),sources=[...root.querySelectorAll(':scope > .pr-page')];
+ if(!sources.length)return;
+ const oldStyle=root.getAttribute('style');
+ root.style.cssText='display:block;position:absolute;left:-20000px;top:0;visibility:hidden;pointer-events:none';
+ const made=[];
+ try{
+  for(const source of sources){
+   const head=source.querySelector(':scope > .pr-head, :scope > .pr-cover-head');
+   const blocks=[...source.children].filter(n=>n!==head&&!n.matches('.pr-foot,.pr-cover-foot'));
+   let page,flow,count=0;
+   const fresh=()=>{
+    page=source.cloneNode(false);page.classList.add('pr-paginated');page.style.display='block';
+    if(head)page.appendChild(head.cloneNode(true));
+    flow=document.createElement('div');flow.className='pr-flow';page.appendChild(flow);
+    root.insertBefore(page,source);made.push(page);count=0;
+   };
+   const fits=()=>{
+    const bounds=page.getBoundingClientRect(),pad=parseFloat(getComputedStyle(page).paddingBottom)||60;
+    return flow.getBoundingClientRect().bottom<=bounds.bottom-pad-2;
+   };
+   const appendTextChunks=(node)=>{
+    const text=node.textContent||'',words=text.match(/\S+\s*/g)||[''];let start=0;
+    while(start<words.length){
+     let lo=1,hi=words.length-start,best=0;
+     const p=document.createElement('p');p.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font-size:9pt;line-height:1.45';flow.appendChild(p);
+     while(lo<=hi){const mid=Math.floor((lo+hi)/2);p.textContent=words.slice(start,start+mid).join('');if(fits()){best=mid;lo=mid+1;}else hi=mid-1;}
+     if(!best&&count){p.remove();fresh();continue;}
+     // A single unbroken string can exceed a page: split by characters, preserving all data.
+     if(!best){const word=words[start];if(word.length>80){words.splice(start,1,...(word.match(/[\s\S]{1,80}/g)||[]));p.remove();continue;}best=1;}
+     p.textContent=words.slice(start,start+best).join('');count++;start+=best;if(start<words.length)fresh();
+    }
+   };
+   const appendBlock=node=>{
+    flow.appendChild(node);
+    if(fits()){count++;return;}
+    node.remove();if(count)fresh();flow.appendChild(node);
+    if(fits()){count++;return;}
+    node.remove();appendTextChunks(node);
+   };
+   fresh();
+   for(const block of blocks){
+    if(block.matches('.pr-drawing')){
+     const svg=block.querySelector('svg');if(svg){
+      const bounds=page.getBoundingClientRect(),pad=parseFloat(getComputedStyle(page).paddingBottom)||60;
+      flow.appendChild(block);
+      const legend=blocks.find(n=>n.matches('.pr-legend'));
+      const reserve=legend?Math.min(110,legend.getBoundingClientRect().height+20):20;
+      const available=Math.max(130,bounds.bottom-pad-block.getBoundingClientRect().top-reserve-4);
+      svg.style.cssText='max-width:100%;width:auto;height:'+available+'px;max-height:'+available+'px';
+      if(fits()){count++;continue;}block.remove();
+     }
+     appendBlock(block);continue;
+    }
+    if(block.tagName!=='TABLE'){appendBlock(block);continue;}
+    const allRows=[...block.querySelectorAll(':scope > tbody > tr')];
+    if(!allRows.length){appendBlock(block);continue;}
+    // Freeze column proportions before splitting so continuation pages stay aligned.
+    const first=block.querySelector('thead tr')||block.querySelector('tr');
+    let cols=null;
+    if(first&&[...first.children].every(c=>c.colSpan===1)){
+     const widths=[...first.children].map(c=>c.getBoundingClientRect().width),total=widths.reduce((a,b)=>a+b,0);
+     if(total){cols=document.createElement('colgroup');widths.forEach(w=>{const col=document.createElement('col');col.style.width=w/total*100+'%';cols.appendChild(col);});}
+    }
+    let table,body;
+    const tableStart=()=>{
+     table=block.cloneNode(false);table.style.tableLayout='fixed';
+     if(cols)table.appendChild(cols.cloneNode(true));
+     if(block.tHead)table.appendChild(block.tHead.cloneNode(true));
+     body=document.createElement('tbody');table.appendChild(body);flow.appendChild(table);
+    };
+    tableStart();
+    for(const row of allRows){
+     body.appendChild(row);
+     if(!fits()){
+      row.remove();if(!body.children.length)table.remove();
+      if(count||body.children.length)fresh();
+      tableStart();body.appendChild(row);
+      if(!fits()){
+       row.remove();if(!body.children.length)table.remove();
+       const para=document.createElement('p');const headers=[...(block.tHead?.querySelectorAll('th')||[])].map(t=>t.textContent);
+       para.textContent=[...row.children].map((c,i)=>(headers[i]?headers[i]+': ':'')+c.textContent).join(' · ');
+       appendTextChunks(para);tableStart();
+      }
+     }
+     count++;
+    }
+    if(block.tFoot){const foot=block.tFoot.cloneNode(true);table.appendChild(foot);if(!fits()){foot.remove();if(!body.children.length)table.remove();fresh();tableStart();table.appendChild(foot);if(!fits()){foot.remove();table.remove();appendTextChunks(foot);}}}
+    if(!body.children.length&&!table.tFoot)table.remove();
+   }
+   source.remove();
+  }
+  const pages=made.filter(p=>p.querySelector('.pr-flow')?.children.length);
+  for(const p of made)if(!pages.includes(p))p.remove();
+  pages.forEach((p,i)=>{
+   const foot=document.createElement('div');foot.className='pr-foot';
+   foot.innerHTML='<span>'+esc(S.project.info.name||'Projekt')+'</span><span>Strana '+(i+1)+' / '+pages.length+'</span>';p.appendChild(foot);
+  });
+ }finally{if(oldStyle===null)root.removeAttribute('style');else root.setAttribute('style',oldStyle);}
+}
+
+let printDocumentMode='full';
+function buildPricePrint(){
+  printDocumentMode='price';
   if(!S.project.elements.length){ toast('Není co počítat – nakresli aspoň jednu skříň'); return; }
   const P = PAPER[S.project.info.paper] || PAPER.A4L;
   $('#printRoot').innerHTML = `<style>
     @page { size: ${P.w}mm ${P.h}mm; margin: 0; }
     .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
   </style>` + pricePageHtml() + hardwarePrintPages().join('');
-  toast('V dialogu tisku zvol „Uložit jako PDF“');
-  setTimeout(() => window.print(), 250);
+  paginatePrint();
+}
+function printPriceOnly(){
+  if(!S.project.elements.length){toast('Není co počítat – nakresli aspoň jednu skříň');return;}
+  buildPricePrint();toast('V dialogu tisku zvol „Uložit jako PDF“');
+  setTimeout(()=>window.print(),250);
 }
 
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
 
 function buildPrint(){
+  printDocumentMode='full';
   const p = S.project, info = p.info;
   const P = PAPER[info.paper] || PAPER.A4L;
   const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',year:'numeric'});
@@ -6701,9 +6817,9 @@ function buildPrint(){
       <div><span class="pr-kicker">${kicker}</span><h2>${title} – ${esc(info.name || 'Název projektu')}</h2></div>
       <div class="pr-meta">${esc(info.client || '')}<br>${dateCs} · Kóty v mm · ${sub}</div>
     </div>
-    <div class="pr-drawing">${drawingSvg(P, { filter, boxW, boxH })}</div>
+    <div class="pr-drawing">${drawingSvg(P, { filter, boxW, boxH, layer:fname==='půdorys HS'?'HS':'DS' })}</div>
     <div class="pr-legend">${legendHtml(filter)}</div>
-    ${info.notes ? `<div class="pr-notes-inline"><b>Poznámky:</b> ${esc(info.notes)}</div>` : ''}
+
     <div class="pr-foot"><span>${esc(info.name || 'Projekt')} – ${fname}</span><span>Strana ${pg} / ${nPages}</span></div>
   </section>`);
   };
@@ -6894,6 +7010,7 @@ function buildPrint(){
     .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
   </style>`);
   $('#printRoot').innerHTML = pages.join('');
+  paginatePrint();
 }
 
 function legendHtml(filter){
@@ -6974,15 +7091,15 @@ function drawingSvg(P, opt){
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
       const cx = e.x+e.w/2, cy = e.y+e.d/2;
       const size = fs(clamp(capPx*k*0.30, 2.0, 3.4));
-      const withDim = capPx*k >= 13 && e.w*k >= 16;
-      parts.push(`<text x="${R(cx)}" y="${R(cy + (withDim ? -size*0.45 : 0))}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${size}" font-weight="700" fill="#0d1117"
-        style="font-family:Helvetica,Arial,sans-serif">${esc(e.name||'')}</text>`);
-      if(withDim){
-        parts.push(`<text x="${R(cx)}" y="${R(cy + size*1.05)}" text-anchor="middle" dominant-baseline="middle"
-          font-size="${fs(clamp(size*k*0.66, 1.7, 2.6))}" fill="#374151"
-          style="font-family:Helvetica,Arial,sans-serif">${fmt(e.w)} × ${fmt(e.d)}</text>`);
-      }
+      const withDim = capPx*k >= 13 && elFrontW(e)*k >= 16;
+      const maxChars=Math.max(3,Math.floor((elFrontW(e)-12)/(size*.66)));
+      let text=String(e.name||''),lines=[];
+      while(text.length>maxChars){let cut=text.lastIndexOf(' ',maxChars);if(cut<maxChars*.35)cut=maxChars;lines.push(text.slice(0,cut));text=text.slice(cut).trimStart();}if(text)lines.push(text);
+      const top=cy-((lines.length-1)*size*1.12+(withDim?size:0))/2;
+      parts.push(`<g data-print-label="${esc(e.id)}" transform="rotate(${frontLabelAngle(e)} ${R(cx)} ${R(cy)})"><title>${esc(e.name||'')}</title>`);
+      lines.forEach((line,i)=>parts.push(`<text x="${R(cx)}" y="${R(top+i*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}" font-weight="700" fill="#0d1117" style="font-family:Helvetica,Arial,sans-serif">${esc(line)}</text>`));
+      if(withDim)parts.push(`<text x="${R(cx)}" y="${R(top+lines.length*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs(clamp(size*k*.66,1.7,2.6))}" fill="#374151" style="font-family:Helvetica,Arial,sans-serif">${fmt(elFrontW(e))} × ${fmt(elFrontD(e))}</text>`);
+      parts.push('</g>');
     }
   }
 
@@ -6996,9 +7113,11 @@ function drawingSvg(P, opt){
   }
   // blende v rohu – L-profil 68 × 68 (vnitřní 50 × 50)
   for(const b of blendeCorners()){
+    if(opt?.layer==='HS'&&b.kind!=='u'||opt?.layer==='DS'&&b.kind==='u')continue;
+    if(filter&&!b.els.every(id=>{const e=getEl(id);return e&&filter(e);}))continue;
     const uB = b.kind === 'u';
     for(const arm of blendeLRects(b)) parts.push(`<rect x="${R(arm.x)}" y="${R(arm.y)}" width="${R(arm.w)}" height="${R(arm.h)}"
-      fill="${uB ? '#fca5a5' : '#dc2626'}" stroke="${uB ? '#b91c1c' : '#7f1d1d'}" stroke-width="${sw(0.16)}"
+      data-print-blende="${b.kind}" fill="${uB ? '#fca5a5' : '#dc2626'}" stroke="${uB ? '#b91c1c' : '#7f1d1d'}" stroke-width="${sw(0.16)}"
       ${uB ? 'stroke-dasharray="' + sw(1.2) + ' ' + sw(0.8) + '"' : ''}/>`);
   }
 
@@ -7298,7 +7417,7 @@ function bindUi(){
     if(k==='o'){ rotateSelection(); }
   });
 
-  window.addEventListener('beforeprint', () => { try{ buildPrint(); }catch(e){ console.warn(e); } });
+  window.addEventListener('beforeprint', () => { try{ if(printDocumentMode==='price')buildPricePrint();else buildPrint(); }catch(e){ console.warn(e); } });
   window.addEventListener('resize', () => render());
 }
 
