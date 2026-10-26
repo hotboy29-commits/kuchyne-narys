@@ -1788,10 +1788,10 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
   }
   // The 50 mm corner target wins over grid / ordinary cabinet edges.
   // Use pointer Y, not the already rounded grid position, to avoid jitter.
-  const corner=snapBlendeCorner(e,x,ny);
+  const corner=snapBlendeCorner(e,x,y,nx,ny);
   if(corner){
-    y=corner.y;
-    for(let i=shown.length-1;i>=0;i--)if(shown[i].axis==='y')shown.splice(i,1);
+    x=corner.x;y=corner.y;
+    for(let i=shown.length-1;i>=0;i--)if(shown[i].axis===corner.guide.axis)shown.splice(i,1);
     shown.push(corner.guide);
   }
   return { x, y, guides: shown };
@@ -1800,35 +1800,41 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
 /* Rohová mezera je skutečný magnetický cíl už BĚHEM tažení.
    Neposouváme sousední řadu; mění se pouze tažená skříň. Obě pořadí
    přikládání mají stejný výsledek. Rozměry a výpočet blende se nemění. */
-function snapBlendeCorner(e, x, rawY){
+function transposeCornerEl(e){
+  return {...e,kind:elKind3(e),x:e.y,y:e.x,w:e.d,d:e.w,
+    front:({'jih':'východ','východ':'jih','sever':'západ','západ':'sever'})[e.front||'jih']};
+}
+function snapBlendeCorner(e, x, y, rawX=x, rawY=y){
   if(!S.magnet || pricing().blendeOn===false || Math.min(e.w,e.d)<120) return null;
   const req=blendeSize().d;
   if(!(req>0))return null;
-  const moving={...e,x,y:rawY}, fm=elFaceInfo(moving);
   let best=null;
-  for(const other of S.project.elements){
-    if(other.id===e.id || !layerShowsEl(other) || blendeClass(other)!==blendeClass(e) || Math.min(other.w,other.d)<120)continue;
-    const fo=elFaceInfo(other);
-    if(fm.horiz===fo.horiz)continue;
-    const A=fm.horiz?moving:other, B=fm.horiz?other:moving;
-    const fa=elFaceInfo(A),fb=elFaceInfo(B),dir=fa.f==='jih'?1:-1;
-    const near=dir>0?fb.a0:fb.a1, gap=(near-fa.face)*dir;
-    const delta=(req-gap)*dir*(fm.horiz?-1:1);
-    // Catch the whole approach to the corner, including bodies touching.
-    // Distance to the 50 mm target alone misses gap=0 with a 40 mm magnet.
-    // This only moves the actively dragged cabinet; never the adjacent row.
-    if(gap < -S.snapMm || gap > req+S.snapMm)continue;
-    const test={...moving,y:rawY+delta};
-    const ta=fm.horiz?test:other,tb=fm.horiz?other:test;
-    const tfa=elFaceInfo(ta),tfb=elFaceInfo(tb);
-    if(tfb.face<tfa.a0-120 || tfb.face>tfa.a1+120 || tfa.face<tfb.a0-120 || tfa.face>tfb.a1+120)continue;
-    if(rectGapM({x:ta.x,y:ta.y,w:ta.w,h:ta.d},{x:tb.x,y:tb.y,w:tb.w,h:tb.d})>BLENDE_TOL)continue;
-    if(blockedByWall(test,e))continue;
-    // No snap through another cabinet (DS and HS remain independent).
-    if(S.project.elements.some(o=>o.id!==e.id && blendeClass(o)===blendeClass(e) &&
-      rectsCrossM({x:test.x,y:test.y,w:test.w,h:test.d},{x:o.x,y:o.y,w:o.w,h:o.d})))continue;
-    if(!best || Math.abs(delta)<best.distance){
-      best={y:test.y,distance:Math.abs(delta),guide:{axis:'y',pos:fm.horiz?elFaceInfo(test).face:(dir>0?test.y:test.y+test.d),from:Math.min(test.x,other.x)-100,to:Math.max(test.x+test.w,other.x+other.w)+100}};
+  for(const transposed of [false,true]){
+    const original={...e,x:transposed?rawX:x,y:transposed?y:rawY};
+    const moving=transposed?transposeCornerEl(original):original,fm=elFaceInfo(moving);
+    for(const fixed of S.project.elements){
+      if(fixed.id===e.id || !layerShowsEl(fixed) || blendeClass(fixed)!==blendeClass(e) || Math.min(fixed.w,fixed.d)<120)continue;
+      const other=transposed?transposeCornerEl(fixed):fixed,fo=elFaceInfo(other);
+      if(fm.horiz===fo.horiz)continue;
+      const A=fm.horiz?moving:other,B=fm.horiz?other:moving;
+      const fa=elFaceInfo(A),fb=elFaceInfo(B),dir=fa.f==='jih'?1:-1;
+      const gap=((dir>0?fb.a0:fb.a1)-fa.face)*dir;
+      if(gap < -S.snapMm || gap > req+S.snapMm)continue;
+      const delta=(req-gap)*dir*(fm.horiz?-1:1);
+      const changed={...moving,y:moving.y+delta};
+      const ta=fm.horiz?changed:other,tb=fm.horiz?other:changed;
+      const tfa=elFaceInfo(ta),tfb=elFaceInfo(tb);
+      if(tfb.face<tfa.a0-120 || tfb.face>tfa.a1+120 || tfa.face<tfb.a0-120 || tfa.face>tfb.a1+120)continue;
+      if(rectGapM({x:ta.x,y:ta.y,w:ta.w,h:ta.d},{x:tb.x,y:tb.y,w:tb.w,h:tb.d})>BLENDE_TOL)continue;
+      const test=transposed?{...original,x:changed.y,y:changed.x}:changed;
+      if(blockedByWall(test,e))continue;
+      if(S.project.elements.some(o=>o.id!==e.id && blendeClass(o)===blendeClass(e) &&
+        rectsCrossM({x:test.x,y:test.y,w:test.w,h:test.d},{x:o.x,y:o.y,w:o.w,h:o.d})))continue;
+      if(!best || Math.abs(delta)<best.distance){
+        const pos=fm.horiz?elFaceInfo(changed).face:(dir>0?changed.y:changed.y+changed.d);
+        best={x:test.x,y:test.y,distance:Math.abs(delta),guide:{axis:transposed?'x':'y',pos,
+          from:Math.min(changed.x,other.x)-100,to:Math.max(changed.x+changed.w,other.x+other.w)+100}};
+      }
     }
   }
   return best;
@@ -2836,8 +2842,8 @@ function blendeCornersCalc(P, on){
     return Math.min(e.w, e.d) >= 120;
   });
   const out = [], seen = new Set();
-  for(let i = 0; i < ds.length; i++) for(let j = i + 1; j < ds.length; j++){
-    const a = ds[i], b = ds[j];
+  for(let i = 0; i < ds.length; i++) for(let j = i + 1; j < ds.length; j++) for(const transposed of [false,true]){
+    const a = transposed?transposeCornerEl(ds[i]):ds[i], b = transposed?transposeCornerEl(ds[j]):ds[j];
     const fa = elFaceInfo(a), fb = elFaceInfo(b);
     if(fa.horiz === fb.horiz) continue;                  // jen kolmá čela
     if(blendeClass(a) !== blendeClass(b)) continue;      // DS a HS se nemíchají
@@ -2865,7 +2871,8 @@ function blendeCornersCalc(P, on){
     const gap  = (near - py) * dir;                // mezera mezi řadami
     if(!(gap > 0)) continue;                       // řady na sebe → není co vyplňovat
     const y    = dir > 0 ? near - D : near;        // líc na hraně skříně, hloubka vždy 50
-    const key = blendeClass(A) + ':' + Math.round(x) + ':' + Math.round(y);
+    const rx=transposed?y:x,ry=transposed?x:y;
+    const key = blendeClass(A) + ':' + Math.round(rx) + ':' + Math.round(ry);
     if(seen.has(key)) continue;
     seen.add(key);
     /* Dvířka jsou vždy na straně OD sousední řady: blende sedí na té straně
@@ -2873,7 +2880,7 @@ function blendeCornersCalc(P, on){
     const cuts = {};
     cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
     cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
-    out.push({ x:R(x), y:R(y), w:W, h:D, els:[A.id, B.id], cuts, kind:blendeClass(A) });
+    out.push({ x:R(rx), y:R(ry), w:transposed?D:W, h:transposed?W:D, els:[A.id, B.id], cuts, kind:blendeClass(A) });
   }
   return out;
 }
