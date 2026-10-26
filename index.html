@@ -447,6 +447,23 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
   .pr-page{margin:0;box-shadow:none}
 }
 
+
+/* Workshop uses a single physical format: Safari/iOS ignores mixed CSS page
+   sizes and otherwise clips landscape boxes onto portrait paper. */
+.workshop-print .pr-page{width:210mm!important;height:297mm!important;padding:10mm 10mm 14mm!important;box-sizing:border-box}
+.workshop-print .pr-table td{padding:1mm 1.4mm}
+.workshop-print .pr-table th{padding:1.5mm 1.4mm;letter-spacing:0}
+.workshop-print .pr-head{gap:4mm;margin-bottom:3mm}
+.workshop-print .pr-head>div{min-width:0;overflow-wrap:anywhere}
+.workshop-print .pr-head h2{font-size:13pt}
+.workshop-print .pr-meta{flex-shrink:0;max-width:40%}
+.workshop-print .pr-page.draw .pr-head h2{font-size:10.5pt}
+.workshop-print .pr-flow>p{font-size:9pt;line-height:1.35}
+@media print{
+ html:has(.workshop-print),body:has(.workshop-print){width:210mm!important;min-width:0!important;margin:0!important;padding:0!important}
+ #printRoot.workshop-print{width:210mm!important;min-width:0!important;margin:0!important;padding:0!important}
+}
+
 /* označená stěna v seznamu úseků */
 .seg-item.active { border-color:#2563eb; background:#eff6ff; }
 .seg-item.active .seg-n { background:#2563eb; color:#fff; }
@@ -671,7 +688,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v80'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-nabidka-v81'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3949,7 +3966,8 @@ function renderInspector(){
       moveSegment(w, S.sel.seg, dx*step, dy*step);
       pushHistory();
     }));
-    /* označená stěna → rovnou aktivní pole s délkou */
+    
+/* označená stěna → rovnou aktivní pole s délkou */
     if(S.sel?.seg != null){
       const act = $(`[data-seg="${S.sel.seg}"]`);
       if(act) setTimeout(()=>{ act.focus(); act.select?.(); }, 40);
@@ -6377,7 +6395,7 @@ function renderPriceModal(){
 
     <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; kompletní interní podklady se tisknou samostatně přes Interní PDF.</p>
     <div class="p-h">Kování podle skříní</div>
-    <button class="tb" id="pPrintTechnical" type="button">Tisk pro dílnu — nářez a detailní kování</button><p class="hint">Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
+    <button class="tb" id="pPrintTechnical" type="button">Tisk pro dílnu — nářez a detailní kování</button><p class="hint">Dílenský tisk používá vždy A4 na výšku (také na iPadu), nezávisle na formátu výkresu v projektu. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     <div id="pLED">${ledPriceForm(C.led)}</div>
     ${hardwareCatalogForm()}
@@ -6743,6 +6761,7 @@ function printTechnicalAppendixPages(){
    silently clip rows/totals. Project data is not modified by this operation. */
 function paginatePrint(){
  const root=$('#printRoot');
+ root.classList.toggle('workshop-print',printDocumentMode==='technical');
  // Technical sections form one continuous document. Cover and scaled drawings
  // remain on separate sheets; row-based pagination below preserves every item.
  if(printDocumentMode==='technical'){
@@ -6878,6 +6897,7 @@ function paginatePrint(){
 let printDocumentMode='technical';
 function buildPricePrint(){
   printDocumentMode='price';
+  $('#printRoot').classList.remove('workshop-print');
   if(!S.project.elements.length){ toast('Není co počítat – nakresli aspoň jednu skříň'); return; }
   const P = PAPER[S.project.info.paper] || PAPER.A4L;
   $('#printRoot').innerHTML = `<style>
@@ -6898,7 +6918,7 @@ function printPriceOnly(){
 function buildPrint(technicalRequested=true){
   printDocumentMode=technicalRequested===true?'technical':'full';
   const p = S.project, info = p.info;
-  const P = PAPER[info.paper] || PAPER.A4L;
+  const P = technicalRequested===true ? PAPER.A4 : (PAPER[info.paper] || PAPER.A4L);
   const dateCs = new Date(info.date || Date.now()).toLocaleDateString('cs-CZ', {day:'numeric',month:'long',year:'numeric'});
   const els = [...p.elements].sort((a,b)=> (a.y-b.y) || (a.x-b.x));
   const totalLen = els.reduce((s,e)=> s + elFrontW(e)*(e.qty||1), 0);
@@ -6915,7 +6935,7 @@ function buildPrint(technicalRequested=true){
       <div class="pr-block"><h3>Zákazník</h3><p>${esc(info.client || '—')}${info.clientPhone ? '\n'+esc(info.clientPhone) : ''}</p></div>
       <div class="pr-block"><h3>Zpracoval</h3><p>${esc(info.designer || '—')}${info.designerContact ? '\n'+esc(info.designerContact) : ''}</p></div>
       <div class="pr-block"><h3>Adresa realizace</h3><p>${esc(info.address || '—')}</p></div>
-      <div class="pr-block"><h3>Datum</h3><p>${dateCs}\nFormát ${info.paper} (${P.w} × ${P.h} mm)</p></div>
+      <div class="pr-block"><h3>Datum</h3><p>${dateCs}\nFormát ${technicalRequested===true?'A4 — dílna, na výšku':info.paper} (${P.w} × ${P.h} mm)</p></div>
       <div class="pr-block"><h3>Rozsah</h3><p>${els.length} prvků · ${p.walls.length} zdí · ${p.guides.length} odstupů\ncelková šířka prvků ${(totalLen/1000).toFixed(2)} m</p></div>
       <div class="pr-block"><h3>Podklady</h3><p>Půdorys DS a HS s kótami v mm\nVýpis prvků na další straně</p></div>
     </div>
