@@ -527,7 +527,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <button class="tb" id="btnSave" title="Uložit do souboru JSON">↧<span class="lb">Uložit</span></button>
       <button class="tb" id="btnPng" title="3D pohledy jako PNG – připravený vstup pro AI vizualizaci (Nano Banana…)">🖼️<span class="lb">PNG</span></button>
       <button class="tb" id="btnPrice" title="Kalkulace materiálu – cena">💵<span class="lb">Cena</span></button>
-      <button class="tb primary" id="btnPdf" title="Export do PDF">⎙<span class="lb">PDF</span></button>
+      <button class="tb primary" id="btnPdf" title="Interní podklady: výkresy, nářez, materiál a kování">⎙<span class="lb">Interní PDF</span></button>
     </div>
 
     <input type="file" id="fileInput" accept=".json,application/json" hidden>
@@ -648,7 +648,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
     <footer>
       <button class="tb" id="btnPriceReset" title="Vrátí ceny na výchozí hodnoty">Výchozí ceny</button>
       <button class="tb" id="btnPriceClose">Zavřít</button>
-      <button class="tb" id="btnPricePrint">⎙ Tisk kalkulace</button>
+      <button class="tb" id="btnPricePrint">⎙ Nabídka pro zákazníka</button>
       <button class="tb primary" id="btnPriceSave">Uložit</button>
     </footer>
   </div>
@@ -671,7 +671,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v78'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-nabidka-v79'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -5682,7 +5682,7 @@ function hardwareGroupDescription(g){
    const detail=lift.type==='hfTop'?'zdvihače, ramena, krytky, závěsy, podložky a vruty':lift.type==='hkTop'?'zdvihače, krytky, čelní příchyty a vruty':'zdvihače s krytkami, čelní příchyty a vruty';
    parts.push('Výklop '+blumName(lift.type)+(g.rows.some(r=>r.key.startsWith('blum_'))?' — '+detail:' — není oceněný'));
  }
- if(has('lift'))parts.push('Výklop — ručně oceněný komplet (složení ověřit)');
+ if(has('lift'))parts.push('Výklop — komplet (složení ověřit)');
  const drawers=g.rows.filter(r=>/^sm(89|185|249)$/.test(r.key));
  if(drawers.length)parts.push('Zásuvkové sady StrongMax s tlumením: '+drawers.reduce((n,r)=>n+r.qty,0)+' ks celkem');
  if(has('hinge')||has('plate'))parts.push('Pantové otevírání — '+(has('hinge')?'panty':'')+(has('hinge')&&has('plate')?' a ':'')+(has('plate')?'montážní podložky':''));
@@ -6375,9 +6375,9 @@ function renderPriceModal(){
       </tr></tfoot>
     </table>
 
-    <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; technický nářez je volitelná interní příloha.</p>
+    <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; kompletní interní podklady se tisknou samostatně přes Interní PDF.</p>
     <div class="p-h">Kování podle skříní</div>
-    <button class="tb" id="pPrintTechnical" type="button">Tisk pro dílnu — nářez a detailní kování</button><p class="hint">Běžný tisk/export obsahuje jen zákaznickou nabídku a případně výkresy. Interní rozpis se tiskne pouze tímto samostatným tlačítkem.</p>
+    <button class="tb" id="pPrintTechnical" type="button">Tisk pro dílnu — nářez a detailní kování</button><p class="hint">Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     <div id="pLED">${ledPriceForm(C.led)}</div>
     ${hardwareCatalogForm()}
@@ -6618,7 +6618,7 @@ function customerQuoteData(){
    else if(/^sm(89|185|249)$/.test(r.key))add(r.key,'Zásuvkové sady StrongMax H'+r.key.slice(2),r.qty,'ks',r.totalGross);
    else if(r.key==='lift'){
     const type=upperOpening(getEl(g.elementId));
-    add('manual-'+type,'Výklopy '+blumName(type)+' — ručně oceněný komplet',r.qty,'ks',r.totalGross);
+    add('manual-'+type,'Výklopy '+blumName(type)+' — komplet',r.qty,'ks',r.totalGross);
    }else add('other-'+r.key,r.label,r.qty,r.unit,r.totalGross);
   }
  }
@@ -6637,8 +6637,8 @@ function customerQuoteHtml(){
  return `<section class="pr-page customer-quote"><div class="pr-head cq-head"><div><div class="pr-kicker">Cenová nabídka kuchyně</div><h2>${esc(i.name||'Kuchyňská sestava')}</h2><div class="cq-meta">${esc([i.client,i.clientPhone,i.address].filter(Boolean).join(' · '))}<br>${esc([date,i.designer,i.designerContact].filter(Boolean).join(' · '))}</div></div></div>
  ${incomplete?'<p class="cq-alert">NEÚPLNÁ NABÍDKA: neoceněné nebo nevyřešené části nejsou zahrnuté. Uvedený součet je pouze mezisoučet oceněných položek.</p>':''}
  <table class="pr-table cq-table"><colgroup><col style="width:64%"><col style="width:13%"><col style="width:23%"></colgroup><thead><tr><th>Položka</th><th class="num">Počet</th><th class="num">Cena s DPH</th></tr></thead><tbody>${body}</tbody><tfoot><tr><td colspan="2">Celkem bez DPH</td><td class="num">${money2(C.base)}</td></tr><tr><td colspan="2">DPH celkem</td><td class="num">${money2(C.vat)}</td></tr><tr class="cq-grand"><td colspan="2">${incomplete?'MEZISOUČET S DPH — NEÚPLNÁ NABÍDKA':'CELKOVÁ CENA S DPH'}</td><td class="num" data-quote-total>${money2(C.total)}</td></tr></tfoot></table>
- <div class="cq-terms">Nabídka zahrnuje uvedené položky pro navrženou sestavu. Práce, montáž, doprava a čelní úchytky nejsou zahrnuté.${C.led.profileMm?' LED nezahrnuje kabeláž, ovládání a další montážní příslušenství.':''}${C.hardware.notices.length?' Výběr výklopů je nutné ověřit před objednávkou.':''}${C.hardware.rows.some(r=>r.closing)?' Nohy jsou v doprodeji — dostupnost je nutné ověřit.':''}</div>
- ${i.notes?`<div class="cq-terms"><b>Poznámky:</b><p style="white-space:pre-wrap">${esc(i.notes)}</p></div>`:''}
+ <div class="cq-terms">Nabídka zahrnuje uvedené položky pro navrženou sestavu. Práce, montáž, doprava a čelní úchytky nejsou zahrnuté.${C.led.profileMm?' LED nezahrnuje kabeláž, ovládání a další montážní příslušenství.':''}</div>
+
  </section>`;
 }
 
@@ -6717,14 +6717,15 @@ function pricePageHtml(opt){
   </section>`;
 }
 
-function hardwarePrintPages(){
+function hardwarePrintPages(includeTechnical=true){
  const h=hardwareCalc(),led=ledCalc(),pages=[],size=5;
  if(led.profileMm){h.groups.push({led,gross:led.gross,warnings:led.warnings,notices:[]});h.gross=roundMoney(h.gross+led.gross);h.warnings.push(...led.warnings);}
  for(let i=0;i<h.groups.length;i+=size){
    const groups=h.groups.slice(i,i+size),subtotal=roundMoney(groups.reduce((n,g)=>n+g.gross,0));
-   pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Nabídka · kování podle skříní</span><h2>Kování, příslušenství a LED</h2></div><div class="pr-meta">${esc(S.project.info.name||'')}<br>Přehled ${Math.floor(i/size)+1} / ${Math.ceil(h.groups.length/size)}</div></div><p style="font-size:9pt">Cena u skříně zahrnuje uvedené oceněné kování i příslušenství pro uvedený počet kusů. Deskový materiál a čelní úchytky jsou mimo tento souhrn.</p><table class="pr-table"><thead><tr><th>Skříň a zahrnuté kování</th><th>Skříní</th><th class="num">Kč s DPH</th></tr></thead><tbody>${groups.map(g=>hardwareGroupRow(g,true)).join('')}</tbody><tfoot><tr><td colspan="2">Mezisoučet této stránky s DPH 21 %</td><td class="num">${money2(subtotal)}</td></tr>${i+size>=h.groups.length?`<tr><td colspan="2">Kování a LED projektu celkem s DPH 21 %${h.warnings.length?' — NEÚPLNÁ CENA':''}</td><td class="num">${money2(h.gross)}</td></tr>`:''}</tfoot></table><p style="font-size:8pt">${groups.some(g=>g.warnings.length)?'<b>NEÚPLNÁ CENA:</b> Nevyřešené části označených skříní nejsou v součtu; před uzavřením nabídky je nutné doplnit jejich parametry a ceny. ':''}${groups.some(g=>g.notices.length)?'Předběžné sestavy výklopů vyžadují ověření hmotnosti čel a montáže před objednávkou. ':''}Ceník Démos ověřen 26. 10. 2026, případné vlastní ceny dle projektu. Práce a montáž nejsou zahrnuté.</p></section>`);
+   pages.push(`<section class="pr-page"><div class="pr-head"><div><span class="pr-kicker">Interní podklady · kování podle skříní</span><h2>Kování, příslušenství a LED</h2></div><div class="pr-meta">${esc(S.project.info.name||'')}<br>Přehled ${Math.floor(i/size)+1} / ${Math.ceil(h.groups.length/size)}</div></div><p style="font-size:9pt">Cena u skříně zahrnuje uvedené oceněné kování i příslušenství pro uvedený počet kusů. Deskový materiál a čelní úchytky jsou mimo tento souhrn.</p><table class="pr-table"><thead><tr><th>Skříň a zahrnuté kování</th><th>Skříní</th><th class="num">Kč s DPH</th></tr></thead><tbody>${groups.map(g=>hardwareGroupRow(g,true)).join('')}</tbody><tfoot><tr><td colspan="2">Mezisoučet této stránky s DPH 21 %</td><td class="num">${money2(subtotal)}</td></tr>${i+size>=h.groups.length?`<tr><td colspan="2">Kování a LED projektu celkem s DPH 21 %${h.warnings.length?' — NEÚPLNÁ CENA':''}</td><td class="num">${money2(h.gross)}</td></tr>`:''}</tfoot></table><p style="font-size:8pt">${groups.some(g=>g.warnings.length)?'<b>NEÚPLNÁ CENA:</b> Nevyřešené části označených skříní nejsou v součtu; před uzavřením nabídky je nutné doplnit jejich parametry a ceny. ':''}${groups.some(g=>g.notices.length)?'Předběžné sestavy výklopů vyžadují ověření hmotnosti čel a montáže před objednávkou. ':''}Ceník Démos ověřen 26. 10. 2026, případné vlastní ceny dle projektu. Práce a montáž nejsou zahrnuté.</p></section>`);
  }
- if(pricing().printTechnicalAppendix===true)pages.push(...printTechnicalAppendixPages());
+
+ if(includeTechnical&&pricing().printTechnicalAppendix===true)pages.push(...printTechnicalAppendixPages());
  return pages;
 }
 function printTechnicalAppendixPages(){
@@ -6849,27 +6850,27 @@ function paginatePrint(){
  }finally{if(oldStyle===null)root.removeAttribute('style');else root.setAttribute('style',oldStyle);}
 }
 
-let printDocumentMode='full';
+let printDocumentMode='technical';
 function buildPricePrint(){
   printDocumentMode='price';
   if(!S.project.elements.length){ toast('Není co počítat – nakresli aspoň jednu skříň'); return; }
   const P = PAPER[S.project.info.paper] || PAPER.A4L;
   $('#printRoot').innerHTML = `<style>
     @page { size: ${P.w}mm ${P.h}mm; margin: 0; }
-    @page customerOffer { size:210mm 297mm; margin:0; }
+    @page customerOffer { size:210mm 297mm; margin:0; @top-left { content:none } @top-center { content:none } @top-right { content:none } @bottom-left { content:none } @bottom-center { content:none } @bottom-right { content:none } }
     .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
   </style>` + customerQuoteHtml();
   paginatePrint();
 }
 function printPriceOnly(){
   if(!S.project.elements.length){toast('Není co počítat – nakresli aspoň jednu skříň');return;}
-  buildPricePrint();toast('V dialogu tisku zvol „Uložit jako PDF“');
+  buildPricePrint();toast('Uložit jako PDF · Další nastavení → vypnout Záhlaví a zápatí (adresa webu).');
   setTimeout(()=>window.print(),250);
 }
 
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
 
-function buildPrint(technicalRequested=false){
+function buildPrint(technicalRequested=true){
   printDocumentMode=technicalRequested===true?'technical':'full';
   const p = S.project, info = p.info;
   const P = PAPER[info.paper] || PAPER.A4L;
@@ -6905,10 +6906,10 @@ function buildPrint(technicalRequested=false){
   const fHS = e => { const k = elKind3(e); return k==='upper' || k==='column'; };
   const showDS = els.some(fDS);
   const showHS = els.some(fHS);
-  const showPrice = !!(els.length && pricing().inPrint);
+  const showPrice = !!(els.length && (technicalRequested===true || pricing().inPrint));
   const technical=technicalRequested===true;
-  const hwPages=showPrice&&technical?printTechnicalAppendixPages():[];
-  if(showPrice){pages.length=0;pages.push(customerQuoteHtml());}
+  const hwPages=showPrice&&technical?[...hardwarePrintPages(false),...printTechnicalAppendixPages()]:[];
+  if(showPrice&&!technical){pages.length=0;pages.push(customerQuoteHtml());}
   const nPages = 1 + (showDS?1:0) + (showHS?1:0) + (showList?1:0) + (showPrice?1:0) + hwPages.length;
   let pg = 1;
   /* Kolik papíru zbývá na samotný půdorys: strana mínus okraje, hlavička,
@@ -6936,7 +6937,7 @@ function buildPrint(technicalRequested=false){
 
   /* 3) výpis prvků + oken + instalací */
   const wins = S.project.windows, syms = S.project.symbols;
-  if((!showPrice||technical)&&(els.length || wins.length || syms.length)){
+  if(technical&&(els.length || wins.length || syms.length)){
     const LAM = 18;   // síla lamina – půda je o dvě síly užší
     const rowFor = (e, i) => {
       const wNom = elFrontW(e), dNom = elFrontD(e);
@@ -7114,7 +7115,7 @@ function buildPrint(technicalRequested=false){
      přeškáluje a čáry přestanou sedět. */
   pages.unshift(`<style>
     @page { size: ${P.w}mm ${P.h}mm; margin: 0; }
-    @page customerOffer { size:210mm 297mm; margin:0; }
+    @page customerOffer { size:210mm 297mm; margin:0; @top-left { content:none } @top-center { content:none } @top-right { content:none } @bottom-left { content:none } @bottom-center { content:none } @bottom-right { content:none } }
     @page coverPage { size: ${P.w}mm ${P.h}mm; margin: 0; }
     .pr-page { width: ${P.w}mm; height: ${P.h}mm; padding: 14mm 14mm 16mm; }
   </style>`);
