@@ -1814,7 +1814,10 @@ function snapBlendeCorner(e, x, rawY){
     const fa=elFaceInfo(A),fb=elFaceInfo(B),dir=fa.f==='jih'?1:-1;
     const near=dir>0?fb.a0:fb.a1, gap=(near-fa.face)*dir;
     const delta=(req-gap)*dir*(fm.horiz?-1:1);
-    if(Math.abs(delta)>S.snapMm)continue;
+    // Catch the whole approach to the corner, including bodies touching.
+    // Distance to the 50 mm target alone misses gap=0 with a 40 mm magnet.
+    // This only moves the actively dragged cabinet; never the adjacent row.
+    if(gap < -S.snapMm || gap > req+S.snapMm)continue;
     const test={...moving,y:rawY+delta};
     const ta=fm.horiz?test:other,tb=fm.horiz?other:test;
     const tfa=elFaceInfo(ta),tfb=elFaceInfo(tb);
