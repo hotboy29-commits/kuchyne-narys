@@ -662,8 +662,8 @@ const FRONT_T_DFLT  = 18;                     // tloušťka dvířek / čela zá
    skříně taky 2 mm. Líc blende je v rovině dveří – přesahuje korpus
    sousední skříně o tloušťku dvířka (18 mm), takže s nimi tvoří jednu
    rovinu. Roh se hledá sám z geometrie půdorysu. */
-const BLENDE_W_DFLT = 70;      // blende podél čela [mm]
-const BLENDE_D_DFLT = 70;      // blende do hloubky [mm]
+const BLENDE_W_DFLT = 68;      // blende podél čela [mm]
+const BLENDE_D_DFLT = 68;      // blende do hloubky [mm]
 const BLENDE_GAP    = 2;       // mezera blende ↔ dvířka [mm]
 const BLENDE_TOL    = 90;      // jak blízko u sebe musí řady být, aby tvořily roh [mm]
 const DOOR_H_DFLT   = 704;                    // výška dvířek [mm]
@@ -2701,14 +2701,14 @@ function autoDoors(e){
   return Math.max(1, Math.ceil(elFrontW(e) / maxW));
 }
 /* ── BLENDE V ROHU – počítá se sama z půdorysu ────────────────────────────
-   Blende je L-profil 70 × 70 mm. Sedí v rohu, kde se potkají dvě kolmé řady
+   Blende je L-profil 68 × 68 (vnitřní 50 × 50) mm. Sedí v rohu, kde se potkají dvě kolmé řady
    (čelní roviny se protnou), a dotýká se líce obou skříní. Dvířka jsou od
    blende 2 mm a od konce skříně taky 2 mm. Líc blende je v rovině dveří
    (přesahuje korpus o 18 mm = tloušťku dvířka).
    Nic se nezadává, žádné zaškrtávátko u skříně: rohy se najdou z geometrie. */
 function blendeSize(){
   const P = pricing();
-  return { w:70, d:70, gap:BLENDE_GAP };
+  return { w:68, d:68, gap:BLENDE_GAP };
 }
 /* Líc (čelní rovina) skříně a její rozsah podél čela.
    face = souřadnice líce, a0/a1 = rozsah podél čela. */
@@ -2831,7 +2831,7 @@ function blendeCorners(){
 }
 function blendeCornersCalc(P, on){
   if(!on) return [];
-  const W = 70, D = 70;
+  const W = 68, D = 68;
   if(!(W > 0) || !(D > 0)) return [];
   const ds = S.project.elements.filter(e => {
     const k = elKind3(e);
@@ -2858,19 +2858,14 @@ function blendeCornersCalc(P, on){
     const px = FB.face, py = FA.face;                    // protnutí čelních rovin
     if(px < FA.a0 - 120 || px > FA.a1 + 120) continue;   // protnutí musí být u skříně
     if(py < FB.a0 - 120 || py > FB.a1 + 120) continue;
-    /* Líc blende je v ROVINĚ DVEŘÍ sousední řady: blende přesahuje její
-       korpus o tloušťku dvířka (18 mm), takže s dvířky tvoří jednu rovinu. */
-    const T = FRONT_T_DFLT;
-    const x = FB.f === 'východ' ? px + T - W : px - T;
-    /* Druhým směrem se blende zarovná LÍCEM NA HRANU sousední skříně a vždy
-       zůstane 50 mm hluboká – nikdy se nekrátí. Když je mezera mezi řadami
-       menší než 50 mm, blende zajede zadní částí do rohu (pod čelo rohové
-       skříně), ale skříň, která se na ni chytá, do ní nikdy nevlézá. */
+    // Anchor both outside edges at the intersecting cabinet face planes.
+    // The inside faces, offset by board thickness 18, align with door fronts.
+    const x = FB.f === 'východ' ? px : px - W;
     const dir  = FA.f === 'jih' ? 1 : -1;          // směr do místnosti
     const near = FA.f === 'jih' ? FB.a0 : FB.a1;   // hrana sousední skříně
     const gap  = (near - py) * dir;                // mezera mezi řadami
     if(!(gap > 0)) continue;                       // řady na sebe → není co vyplňovat
-    const y    = dir > 0 ? near - D : near;        // líc na hraně skříně, hloubka vždy 50
+    const y    = dir > 0 ? py : py - D;
     const rx=transposed?y:x,ry=transposed?x:y;
     const key = blendeClass(A) + ':' + Math.round(rx) + ':' + Math.round(ry);
     if(seen.has(key)) continue;
@@ -2880,12 +2875,13 @@ function blendeCornersCalc(P, on){
     const cuts = {};
     cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
     cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
-    out.push({ x:R(rx), y:R(ry), w:transposed?D:W, h:transposed?W:D, els:[A.id, B.id], cuts, kind:blendeClass(A), sideX:transposed?(dir>0?'R':'L'):(FB.f==='východ'?'R':'L'), sideY:transposed?(FB.f==='východ'?'B':'T'):(dir>0?'B':'T') });
+    out.push({ x:R(rx), y:R(ry), w:transposed?D:W, h:transposed?W:D, els:[A.id, B.id], cuts, kind:blendeClass(A), sideX:transposed?(dir>0?'L':'R'):(FB.f==='východ'?'L':'R'), sideY:transposed?(FB.f==='východ'?'T':'B'):(dir>0?'T':'B') });
   }
   return out;
 }
-/* Two non-overlapping 18 mm boards form an L with outer envelope 70×70.
-   Butt joint: full arm 70 mm, inset arm 52 mm, both full cabinet height. */
+/* Two 18 mm boards form an L: inner edges 50×50, outer envelope 68×68.
+   Inside faces align with the front surfaces of the adjacent 18 mm doors.
+   Butt joint: full arm 68 mm and inset arm 50 mm, full cabinet height. */
 function blendeLRects(b){
   const t=18;
   return [
@@ -3201,7 +3197,7 @@ function frontsMarkup(){
       }
     }
   }
-  /* blende v rohu – L-profil 70 × 70, tmavě červený */
+  /* blende v rohu – L-profil 68 × 68 (vnitřní 50 × 50), tmavě červený */
   for(const b of blendeCorners()){
     /* horní (HS) blende se kreslí přerušovaně – v půdorysu leží nad spodní řadou */
     const uB = b.kind === 'u';
@@ -3618,7 +3614,7 @@ function renderInspector(){
               <b style="color:#b91c1c">Blende v ${blendeClass(e)==='u' ? 'horním' : 'dolním'} rohu ${BS.w} × ${BS.d} mm.</b>
               Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
               na druhém konci skříně taky 2 mm.<br>
-              L-profil 70 × 70 mm z DTD 18 mm. Magnet nastaví mezeru korpusů 70 mm = dveře 18 + vůle 2 + volný odstup 50 mm. Ostatní skříně ani řady se automaticky neposouvají.</p>`;
+              L-profil: vnitřní hrany 50 × 50 mm, vnější rozměr 68 × 68 mm, DTD 18 mm. Vnitřní plochy navazují na přední plochy čel. Magnet nastaví mezeru korpusů 68 mm. Ostatní skříně ani řady se automaticky neposouvají.</p>`;
           if(pricing().blendeOn === false)
             return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
               <b>Automatická blende je vypnutá.</b> Nic se nedopočítává – blende si nakresli sám
@@ -5071,7 +5067,7 @@ function PRICE_DEFAULTS(){ return ({
   doorH: DOOR_H_DFLT,   // výška dvířek [mm] – DS i HS 704
   drawerGap: DRAWER_GAP,     // mezera mezi čely nad sebou [mm]
   drawerStack: [350, 223, 125],  // čela zásuvek od spodu [mm]
-  blendeW: BLENDE_W_DFLT,        // blende podél čela [mm] – L-profil 70 × 70
+  blendeW: BLENDE_W_DFLT,        // blende podél čela [mm] – L-profil 68 × 68 (vnitřní 50 × 50)
   blendeD: BLENDE_D_DFLT,        // blende do hloubky [mm]
   blendeOn: true,                // počítat blende do rohů automaticky
   inPrint: true,        // přidávat kalkulaci do PDF
@@ -5140,7 +5136,7 @@ function pricing(){
   p.doorH       = clamp(num(p.doorH, D.doorH), 100, 2000);
   p.drawerGap   = clamp(num(p.drawerGap, D.drawerGap), 0, 20);
   // Unified L profile for both DS and HS. No cabinet coordinates are changed.
-  p.blendeW = 70; p.blendeD = 70;
+  p.blendeW = 68; p.blendeD = 68;
   p.blendeOn    = p.blendeOn !== false;      // blende do rohů se počítá sama
   p.drawerStack = (Array.isArray(p.drawerStack) && p.drawerStack.length ? p.drawerStack : D.drawerStack)
                     .map(v => Math.max(20, +v || 0)).filter(v => v > 0);
@@ -5300,7 +5296,7 @@ function materialParts(){
   }
 
   /* BLENDE – jedna na každý roh, kde se potkají dvě kolmé řady.
-     Je to L-profil 70 × 70 ze dvou dílců, výška = výška sousedních skříní. */
+     Je to L-profil 68 × 68 (vnitřní 50 × 50) ze dvou dílců, výška = výška sousedních skříní. */
   let _nBlD = 0, _nBlH = 0;
   blendeCorners().forEach(b => {
     const hs = b.els.map(id => { const e2 = getEl(id); return e2 ? elH3(e2) : 0; });
@@ -5308,8 +5304,8 @@ function materialParts(){
     /* spodní a horní rohy se počítají zvlášť – horní blende je jinak vysoká */
     const isU = b.kind === 'u';
     const n = isU ? (++_nBlH) : (++_nBlD);
-    for(const width of [70,52]) add('front', (isU ? 'Blende do horního rohu ' : 'Blende do rohu ') + n +
-      ' – L 70 × 70, rameno '+width+' × '+fmt(Math.round(hB))+' × 18 mm',width,hB,1);
+    for(const width of [68,50]) add('front', (isU ? 'Blende do horního rohu ' : 'Blende do rohu ') + n +
+      ' – L vnitřní 50 × 50 (vnější 68 × 68), rameno '+width+' × '+fmt(Math.round(hB))+' × 18 mm',width,hB,1);
 
   });
 
@@ -6388,7 +6384,7 @@ function drawingSvg(P, opt){
         fill="#ffffff" stroke="#1f2937" stroke-width="${sw(0.14)}"/>`);
     }
   }
-  // blende v rohu – L-profil 70 × 70
+  // blende v rohu – L-profil 68 × 68 (vnitřní 50 × 50)
   for(const b of blendeCorners()){
     const uB = b.kind === 'u';
     for(const arm of blendeLRects(b)) parts.push(`<rect x="${R(arm.x)}" y="${R(arm.y)}" width="${R(arm.w)}" height="${R(arm.h)}"
