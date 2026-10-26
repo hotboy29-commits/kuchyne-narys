@@ -1079,11 +1079,9 @@ function renderCanvas(){ requestRender('canvas'); }
 function doRender(){ doRenderCanvas(); renderInspector(); }
 
 function doRenderCanvas(){
-  /* mezera mezi řadami musí být vždy 50 mm – stejně jako blende; když ji
-     uživatel přitáhne blíž, řada se sama srovná (blende se nekrátí) */
-  if(!drag) blendeEnforceGap();
-  /* dokud netáhneš, držíme celý nákres ukotvený v počátku (0,0) */
-  if(!drag) rebaseProject();
+  /* Překreslení nesmí měnit polohy skříní ani řad. Rohová mezera
+     se přichytává pouze v computeSnap při pohybu aktivního prvku.
+     Ani změna výběru / zoom / puštění myši nesmí přepsat souřadnice. */
   for(const sm of S.project.symbols) if(sm.wallId != null) applySymbolAnchor(sm);
   const v = S.view;
   $('#zoomLabel').textContent = Math.round(v.zoom*100) + ' %';
@@ -1788,7 +1786,49 @@ function computeSnap(e, nx, ny, dxMoved, dyMoved){
     const test = { ...e, x, y: bestY.ny };
     if(!blockedByWall(test, e)) { y = bestY.ny; pushGuide(shown, bestY, e, 'y'); }
   }
+  // The 50 mm corner target wins over grid / ordinary cabinet edges.
+  // Use pointer Y, not the already rounded grid position, to avoid jitter.
+  const corner=snapBlendeCorner(e,x,ny);
+  if(corner){
+    y=corner.y;
+    for(let i=shown.length-1;i>=0;i--)if(shown[i].axis==='y')shown.splice(i,1);
+    shown.push(corner.guide);
+  }
   return { x, y, guides: shown };
+}
+
+/* Rohová mezera je skutečný magnetický cíl už BĚHEM tažení.
+   Neposouváme sousední řadu; mění se pouze tažená skříň. Obě pořadí
+   přikládání mají stejný výsledek. Rozměry a výpočet blende se nemění. */
+function snapBlendeCorner(e, x, rawY){
+  if(!S.magnet || pricing().blendeOn===false || Math.min(e.w,e.d)<120) return null;
+  const req=blendeSize().d;
+  if(!(req>0))return null;
+  const moving={...e,x,y:rawY}, fm=elFaceInfo(moving);
+  let best=null;
+  for(const other of S.project.elements){
+    if(other.id===e.id || !layerShowsEl(other) || blendeClass(other)!==blendeClass(e) || Math.min(other.w,other.d)<120)continue;
+    const fo=elFaceInfo(other);
+    if(fm.horiz===fo.horiz)continue;
+    const A=fm.horiz?moving:other, B=fm.horiz?other:moving;
+    const fa=elFaceInfo(A),fb=elFaceInfo(B),dir=fa.f==='jih'?1:-1;
+    const near=dir>0?fb.a0:fb.a1, gap=(near-fa.face)*dir;
+    const delta=(req-gap)*dir*(fm.horiz?-1:1);
+    if(Math.abs(delta)>S.snapMm)continue;
+    const test={...moving,y:rawY+delta};
+    const ta=fm.horiz?test:other,tb=fm.horiz?other:test;
+    const tfa=elFaceInfo(ta),tfb=elFaceInfo(tb);
+    if(tfb.face<tfa.a0-120 || tfb.face>tfa.a1+120 || tfa.face<tfb.a0-120 || tfa.face>tfb.a1+120)continue;
+    if(rectGapM({x:ta.x,y:ta.y,w:ta.w,h:ta.d},{x:tb.x,y:tb.y,w:tb.w,h:tb.d})>BLENDE_TOL)continue;
+    if(blockedByWall(test,e))continue;
+    // No snap through another cabinet (DS and HS remain independent).
+    if(S.project.elements.some(o=>o.id!==e.id && blendeClass(o)===blendeClass(e) &&
+      rectsCrossM({x:test.x,y:test.y,w:test.w,h:test.d},{x:o.x,y:o.y,w:o.w,h:o.d})))continue;
+    if(!best || Math.abs(delta)<best.distance){
+      best={y:test.y,distance:Math.abs(delta),guide:{axis:'y',pos:fm.horiz?elFaceInfo(test).face:(dir>0?test.y:test.y+test.d),from:Math.min(test.x,other.x)-100,to:Math.max(test.x+test.w,other.x+other.w)+100}};
+    }
+  }
+  return best;
 }
 
 function pushGuide(out, cand, e, axis){
@@ -2709,6 +2749,7 @@ function blendeRowElements(b){
     return Math.min(e1, d1) - Math.max(e0, d0) > 60;   // stejná hloubka = stejná řada
   });
 }
+/* Legacy helper, not invoked by rendering or any UI action. */
 function blendeEnforceGap(){
   const P = pricing();
   if(P.blendeOn === false) return;
@@ -3558,8 +3599,7 @@ function renderInspector(){
               <b style="color:#b91c1c">Blende v ${blendeClass(e)==='u' ? 'horním' : 'dolním'} rohu ${BS.w} × ${BS.d} mm.</b>
               Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
               na druhém konci skříně taky 2 mm.<br>
-              Mezera mezi řadami je vždy ${BS.d} mm – stejně jako blende, takže do žádné skříně nevlézá.
-              ${blendeShifted[e.id] ? '<b>Řada srovnána o ' + fmt(Math.abs(Math.round(blendeShifted[e.id]))) + ' mm.</b>' : ''}</p>`;
+              Magnet přichytává taženou skříň na mezeru ${BS.d} mm. Ostatní skříně ani řady se automaticky neposouvají.</p>`;
           if(pricing().blendeOn === false)
             return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
               <b>Automatická blende je vypnutá.</b> Nic se nedopočítává – blende si nakresli sám
