@@ -442,6 +442,17 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 .group .tb.vseg{ min-width:38px; padding:0 7px; font-size:12px; }
 .tb.newproj{border:1.5px solid var(--accent);color:var(--accent);background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.08)}
 
+/* Compact inspector, touch-friendly disclosure headers. */
+#inspBody .insp-sec{margin-bottom:12px;padding-bottom:12px}
+#inspBody .insp-fold:not([open]){padding-bottom:0;margin-bottom:4px}
+#inspBody .insp-title{margin-bottom:10px}
+
+.insp-fold > summary{cursor:pointer;min-height:44px;display:list-item;padding:12px 0;font-size:13px;font-weight:700;color:var(--ink)}
+.insp-fold > summary small{font-size:11px;font-weight:400;color:var(--ink-3);margin-left:8px}
+.insp-help{margin-top:8px}.insp-help > summary{cursor:pointer;font-size:12px;padding:8px 0;color:var(--ink-2)}
+.ap-item{border-top:1px solid var(--line);padding:10px 0}.ap-item > .chk{min-height:28px}
+.ap-item .row2{margin-top:8px}.ap-item small{font-size:11px;color:var(--ink-3)}
+#inspBody [hidden]{display:none!important}
 </style>
 </head>
 <body>
@@ -470,7 +481,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <button class="tb toggle" id="btnDims" aria-pressed="true" title="Kóty skříní a obvodu">↔</button>
       <button class="tb toggle" id="btnFronts" aria-pressed="true" title="Zobrazit čela (dvířka, zásuvky) v půdorysu">▯</button>
       <button class="tb toggle" id="btnLabels" aria-pressed="true" title="Popisky skříní (názvy a rozměry) – klikni pro přepnutí: auto → vždy → skryté">Aa</button>
-      <button class="tb toggle" id="btnBlendeAuto" aria-pressed="true" title="Blende 50 × 50 v rozích – počítá se automaticky. Vypni, když si chceš blende nakreslit sám."><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#dc2626"></span>blende</button>
+      <button class="tb toggle" id="btnBlendeAuto" aria-pressed="true" title="L-blende: vnitřní 50 × 50 mm. Zapnout / vypnout."><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#dc2626"></span>blende</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
     </div>
@@ -3436,7 +3447,7 @@ function applianceDefaults(e,k){
   const fp=frontCfg(e).on?frontPieces(e):null;
   const drawerTop=(fp?.drawers||[]).reduce((a,b)=>a+b,0)+Math.max(0,(fp?.drawers.length||0)-1)*3;
   const ovenBottom=elKind3(e)==='column'?Math.max(600,drawerTop+20):Math.max(0,elZ0(e)+elH3(e)-B3D.floorT-APPLIANCE_SPECS.oven.size);
-  return {on:false,w:spec.w,size:spec.size,bottom:k==='micro'?ovenBottom+600+20:ovenBottom,drainer:true,drainerSide:'R',alignTop:elKind3(e)==='base'};
+  return {on:false,w:spec.w,size:spec.size,bottom:k==='micro'?ovenBottom+600+20:ovenBottom,drainer:false,drainerSide:'R',alignTop:false};
 }
 function applianceValue(e,k){
   const v={...applianceDefaults(e,k),...e.appliances?.[k]};
@@ -3444,11 +3455,19 @@ function applianceValue(e,k){
   return v;
 }
 function applianceForm(e){
-  const suggested=suggestedAppliances(e);
-  return `<div class="insp-sec"><h4>Vybavení pro 3D pohledy</h4><p class="hint">Návrh podle názvu: ${suggested.map(k=>APPLIANCE_SPECS[k].label).join(', ')||'žádný'}. Zaškrtnutím potvrďte zobrazení. Jde o schéma, nikoli montážní výřez nebo změnu kalkulace.</p>
-    ${Object.entries(APPLIANCE_SPECS).map(([k,s])=>{const v=applianceValue(e,k);const top=k==='sink'||k==='hob';return `<div style="border-top:1px solid var(--line);padding:8px 0"><label class="chk"><input data-ap="${k}" data-ap-field="on" type="checkbox" ${v.on?'checked':''}>${s.label}${suggested.includes(k)?' — navrženo podle názvu':''}</label><div class="row2"><label class="fld"><span>Šířka (mm)</span><input data-ap="${k}" data-ap-field="w" type="number" min="100" max="2000" value="${v.w}"></label><label class="fld"><span>${top?'Hloubka':'Výška čela'} (mm)</span><input data-ap="${k}" data-ap-field="size" type="number" min="100" max="2000" value="${v.size}"></label></div>${k==='sink'?`<label class="chk"><input type="checkbox" data-ap="sink" data-ap-field="drainer" ${v.drainer?'checked':''}>Odkapávač</label><label class="fld"><span>Strana odkapu při pohledu na čelo</span><select data-ap="sink" data-ap-field="drainerSide"><option value="L" ${v.drainerSide==='L'?'selected':''}>Vlevo</option><option value="R" ${v.drainerSide!=='L'?'selected':''}>Vpravo</option></select></label>`:''}${k==='oven'&&elKind3(e)==='base'?`<label class="chk"><input type="checkbox" data-ap="oven" data-ap-field="alignTop" ${v.alignTop!==false?'checked':''}>Trouba těsně pod PD, výsuv pod troubou</label>`:''}${top?'':`<label class="fld"><span>Spodní hrana od podlahy (mm) — návrh, upravte</span><input data-ap="${k}" data-ap-field="bottom" type="number" min="0" max="3000" value="${v.bottom}"></label>`}<p class="hint">${top?'Umístění: střed pracovní desky nad touto skříní.':'Umístění: střed čela této skříně.'}</p></div>`;}).join('')}
-    <p class="hint" id="apWarnings">${esc(applianceWarnings(e).join(' '))}</p></div>`;
+  const suggested=suggestedAppliances(e),enabled=Object.keys(APPLIANCE_SPECS).filter(k=>e.appliances?.[k]?.on);
+  return `<details class="insp-sec insp-fold" data-insp-fold="appliances"><summary>Spotřebiče <small>${enabled.length?enabled.map(k=>APPLIANCE_SPECS[k].label).join(', '):'vypnuto'}</small></summary>
+    <p class="hint">Zapněte pouze potřebné vybavení. Rozměry jsou pro 3D, ne montážní výřez.</p>
+    ${Object.entries(APPLIANCE_SPECS).map(([k,s])=>{const v=applianceValue(e,k),top=k==='sink'||k==='hob';return `<div class="ap-item"><label class="chk"><input data-ap="${k}" data-ap-field="on" type="checkbox" ${v.on?'checked':''}>${s.label}${suggested.includes(k)?' <small>— návrh podle názvu</small>':''}</label>
+      <div data-ap-settings="${k}" ${v.on?'':'hidden'}>
+        <div class="row2"><label class="fld"><span>Šířka (mm)</span><input data-ap="${k}" data-ap-field="w" type="number" min="100" max="2000" value="${v.w}"></label><label class="fld"><span>${top?'Hloubka':'Výška'} (mm)</span><input data-ap="${k}" data-ap-field="size" type="number" min="100" max="2000" value="${v.size}"></label></div>
+        ${k==='sink'?`<label class="chk"><input type="checkbox" data-ap="sink" data-ap-field="drainer" ${v.drainer?'checked':''}>Odkapávač</label><label class="fld" data-ap-drainer-side ${v.drainer?'':'hidden'}><span>Odkap při pohledu na čelo</span><select data-ap="sink" data-ap-field="drainerSide"><option value="L" ${v.drainerSide==='L'?'selected':''}>Vlevo</option><option value="R" ${v.drainerSide!=='L'?'selected':''}>Vpravo</option></select></label>`:''}
+        ${k==='oven'&&elKind3(e)==='base'?`<label class="chk"><input type="checkbox" data-ap="oven" data-ap-field="alignTop" ${v.alignTop===true?'checked':''}>Pod PD + výsuv pod troubou</label>`:''}
+        ${top?'':`<label class="fld"><span>Spodní hrana od podlahy (mm)</span><input data-ap="${k}" data-ap-field="bottom" type="number" min="0" max="3000" value="${v.bottom}"></label>`}
+      </div></div>`;}).join('')}
+    <p class="hint" id="apWarnings">${esc(applianceWarnings(e).join(' '))}</p></details>`;
 }
+
 function applianceWarnings(e){
   const warnings=[];
   for(const [k,v] of Object.entries(e.appliances||{})){
@@ -3514,7 +3533,7 @@ function pngAppliances(sc,runs){
         }
       }else{
         const a=(W-v.w)/2,b=a+v.w,z=B3D.floorT+v.bottom,H=v.size;
-        if(k==='oven'&&elKind3(e)==='base'){
+        if(k==='oven'&&elKind3(e)==='base'&&v.alignTop===true){
           const lo=elZ0(e)+2,hi=z-3;
           if(hi>lo)faceBox(2,W-2,0,18,lo,hi,'front');
         }
@@ -3528,9 +3547,17 @@ function pngAppliances(sc,runs){
   }
 }
 
+// Disclosure state belongs to the UI, not to the exported project/history.
+const inspectorFolds = new Map();
+let inspectorSelectionKey = null;
 function renderInspector(){
   const box = $('#inspBody');
   if(!box) return;
+  const selectionKey=(S.sel?.kind||'none')+':'+(S.sel?.id||'');
+  if(selectionKey!==inspectorSelectionKey){
+    const panel=$('#inspector');if(panel)panel.scrollTop=0;
+    inspectorSelectionKey=selectionKey;
+  }
 
   if(S.sel?.kind==='el'){
     const e = getEl(S.sel.id);
@@ -3539,8 +3566,7 @@ function renderInspector(){
     box.innerHTML = `
       <div class="insp-title"><i class="tool-dot" style="background:${e.color}"></i><strong>${esc(e.name || 'Obdélník')}</strong></div>
       <div class="insp-sec">
-        <h4>Název</h4>
-        <label class="fld"><span>Popisek ve výkresu a ve výpisu</span>
+        <label class="fld"><span>Název skříně</span>
           <input id="iName" maxlength="40" placeholder="např. Vestavná skříň A" value="${esc(e.name)}"></label>
       </div>
       <div class="insp-sec">
@@ -3549,14 +3575,16 @@ function renderInspector(){
           <label class="fld"><span>Šířka</span><input id="iW" type="number" step="5" min="${MIN_SIZE}" value="${elFrontW(e)}"></label>
           <label class="fld"><span>Hloubka</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${elFrontD(e)}"></label>
         </div>
+        <details class="insp-help" data-insp-fold="position"><summary>Poloha X / Y</summary>
         <div class="row2" style="margin-top:8px">
-          <label class="fld"><span>X od rohu obvodu</span><input id="iX" type="number" step="5" value="${Math.round(e.x - OR.x)}"></label>
-          <label class="fld"><span>Y od rohu obvodu</span><input id="iY" type="number" step="5" value="${Math.round(e.y - OR.y)}"></label>
+          <label class="fld"><span>Poloha X (mm)</span><input id="iX" type="number" step="5" value="${Math.round(e.x - OR.x)}"></label>
+          <label class="fld"><span>Poloha Y (mm)</span><input id="iY" type="number" step="5" value="${Math.round(e.y - OR.y)}"></label>
         </div>
-        <p class="hint">Nula je v levém horním rohu vnějšího líce obvodu.</p>
+        <p class="hint">Poloha od levého horního rohu obvodu.</p>
+        </details>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Počet kusů</span><input id="iQty" type="number" min="1" max="99" value="${e.qty||1}"></label>
-          <label class="fld"><span>Dvířka / čelo</span>
+          <label class="fld"><span>Směr čela</span>
             <select id="iFront">${FRONTS.map(f=>`<option value="${f}" ${f===(e.front||'jih')?'selected':''}>${f}</option>`).join('')}</select>
           </label>
         </div>
@@ -3564,17 +3592,41 @@ function renderInspector(){
           <label class="fld"><span>Výška (mm)</span><input id="iH" type="number" step="10" min="100" max="3000" value="${elH3(e)}"></label>
           <label class="fld"><span>Výška patří</span><input type="text" value="${kindLabel3(e)}" disabled></label>
         </div>
-        <label class="fld"><span>Druh (kreslí se jinak)</span>
+        <label class="fld"><span>Druh skříně</span>
           <div class="kindseg">
             <button type="button" id="iKindBase" class="${elKind3(e)==='base'?'on':''}">Spodní</button>
             <button type="button" id="iKindColumn" class="${elKind3(e)==='column'?'on':''}">Sloup</button>
             <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
           </div>
         </label>
-        <p class="hint">${elKind3(e)==='column' ? 'Sloup je samostatný druh skříně. Název spotřebiče druh nemění.':(elKind3(e)==='upper'?'Horní skříň: visí na zdi, hloubka 320 mm, výška 710 mm; ve výkresu je přerušovaná.':'Přepni na „Horní“ a skříň se sama přisune ke zdi (hloubka 320, výška 710) – ve výkresu bude přerušovaná.' )}</p>
+
       </div>
       <div class="insp-sec">
-        <h4>Bok+ (boční panely)</h4>
+        <h4>Dvířka a zásuvky</h4>
+        <label class="chk" style="margin-bottom:8px">
+          <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> Zahrnout čela do kalkulace
+        </label>
+        <div class="row2">
+          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
+          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+        </div>
+        <p class="hint" style="margin-top:6px">${frontCfg(e).on?'<b>Rozměry čel:</b> '+frontSizesText(e):'Čela zatím nejsou zahrnuta do kalkulace.'}</p>
+        ${(() => {
+          const BI = blendeForEl(e), BS = blendeSize();
+          if(BI.on)
+            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px">
+              <b style="color:#b91c1c">Blende v ${blendeClass(e)==='u' ? 'horním' : 'dolním'} rohu ${BS.w} × ${BS.d} mm.</b>
+              Čelo zkráceno o ${fmt(Math.round(BI.cutL + BI.cutR))} mm; spára 2 mm.
+              L: vnitřní 50 × 50 mm.</p>`;
+          if(pricing().blendeOn === false)
+            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
+              Blende vypnutá. <a href="#" id="iBlendeAutoOn">Zapnout</a>.</p>`;
+          return `<p class="hint" style="margin-top:6px">Blende se přidá automaticky v rohu.</p>`;
+        })()}
+        <details class="insp-help"><summary>Pravidla rozměrů čel</summary><p class="hint">Dvířka: výška 704 mm, šířka skříně − 4 mm; mezi dvířky 2 mm. Zásuvky dle nastavení projektu. Výklopy a sloupy mají vlastní členění.</p></details>
+      </div>
+      ${upperOpeningForm(e)}
+      <details class="insp-sec insp-fold" data-insp-fold="bok"><summary>Bok+ <small>${bokAny(e)?"zapnuto":"bez panelů"}</small></summary>
         <div class="row2">
           <label class="fld"><span>Strana (při pohledu na čelo)</span>
             <div class="kindseg">
@@ -3584,7 +3636,7 @@ function renderInspector(){
           </label>
           <label class="fld"><span>Tloušťka (mm)</span><input id="iBokW" type="number" min="5" max="60" step="1" value="${e.bok?bokW(e):BOK_W_DFLT}"></label>
         </div>
-        <p class="hint">Můžeš zapnout obě strany najednou. Vypni obě = bez boku+.</p>
+        <p class="hint">Lze zapnout jednu nebo obě strany.</p>
         <div class="row2" style="margin-top:8px">
           <label class="fld"><span>Přesah před čelo (mm)</span><input id="iBokFront" type="number" min="0" max="500" step="1" value="${bokFront(e)}"></label>
           <label class="fld"><span>Ke zdi za skříní (mm)</span><input id="iBokBack" type="number" min="0" max="500" step="1" value="${bokBack(e)}"></label>
@@ -3593,52 +3645,14 @@ function renderInspector(){
           <label class="fld"><span>Hloubka boku+</span><input type="text" value="${bokAny(e)?(fmt(bokDepthOf(e))+' mm'):'—'}" disabled></label>
           <label class="fld"><span>Rozložení hloubky</span><input type="text" value="${bokAny(e)?('skříň '+fmt(isHorizFront(e.front||'jih')?e.d:e.w)+' + '+bokBack(e)+' (ke zdi) + '+bokFront(e)+' (před čelo)'):'—'}" disabled></label>
         </div>
-        <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm – dělí se na kusy podle spár skříněk a ke každému kusu se připočítává 100 mm rezerva.</p>
-      </div>
-      ${upperOpeningForm(e)}
+        <p class="hint">Hloubka panelu = korpus + oba přesahy. Panel se počítá samostatně.</p>
+      </details>
       ${applianceForm(e)}
-      <div class="insp-sec">
-        <h4>Čela do kalkulace</h4>
-        <label class="chk" style="margin-bottom:8px">
-          <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> počítat čela v kalkulaci
-        </label>
-        <div class="row2">
-          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
-          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
-        </div>
-        <p class="hint" style="margin-top:6px"><b>Rozměry čel:</b> ${frontSizesText(e)}</p>
-        ${(() => {
-          const BI = blendeForEl(e), BS = blendeSize();
-          if(BI.on)
-            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fef2f2;border:1px solid #fecaca;border-radius:7px">
-              <b style="color:#b91c1c">Blende v ${blendeClass(e)==='u' ? 'horním' : 'dolním'} rohu ${BS.w} × ${BS.d} mm.</b>
-              Z čela ubírá ${fmt(Math.round(BI.cutL + BI.cutR))} mm → mezi blende a dvířky 2 mm,
-              na druhém konci skříně taky 2 mm.<br>
-              L-profil: vnitřní hrany 50 × 50 mm, vnější rozměr 68 × 68 mm, DTD 18 mm. Vnitřní plochy navazují na přední plochy čel. Magnet nastaví mezeru korpusů 68 mm. Ostatní skříně ani řady se automaticky neposouvají.</p>`;
-          if(pricing().blendeOn === false)
-            return `<p class="hint" style="margin-top:6px;padding:7px 9px;background:#fff7ed;border:1px solid #fed7aa;border-radius:7px">
-              <b>Automatická blende je vypnutá.</b> Nic se nedopočítává – blende si nakresli sám
-              (nebo ji <a href="#" id="iBlendeAutoOn" style="color:#b45309;font-weight:700">zapni</a>).
-              Dvířka jsou proto jen o 4 mm menší než skříň (${fmt(elFrontW(e) - 4)} mm).</p>`;
-          return `<p class="hint" style="margin-top:6px">Blende: tahle skříň není v rohu.
-            Blende ${BS.w} × ${BS.d} mm se přidá sama, když se dvě kolmé řady potkají (L nebo U roh).</p>`;
-        })()}
-        <p class="hint">Čela se do ceny nepočítají sama – zapni je u skříní, kde je chceš.
-          Šířka čela = šířka skříně − 4 mm (600 → 596, na dvě 297, myčka 450 → 446),
-          výška dvířek je vždy 704 mm, čela zásuvek od spodu ${(pricing().drawerStack||[]).join(' / ')} mm
-          s mezerou ${pricing().drawerGap} mm – dohromady vždy 704 mm (dvě zásuvky = 350 + 350 s mezerou 4 mm).
-          ${elKind3(e)==='column'
-            ? 'U sloupu se počítají jen spodní výsuvy (' + (pricing().drawerStack||[]).slice(0,2).join(' + ') + ' mm); trouba, mikrovlnka a horní výklop mají vlastní čela a doměřují se.'
-            : 'Sloupy (lednice, trouba): počítají se jen spodní výsuvy, zbytek se doměřuje.'}</p>
-      </div>
-      <div class="insp-sec">
-        <h4>Barva</h4>
+      <details class="insp-sec insp-fold" data-insp-fold="appearance"><summary>Barva a poznámka</summary>
         <div class="swatches">${COLORS.map(c=>`<button class="sw-btn${c===e.color?' on':''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>
-      </div>
-      <div class="insp-sec">
         <h4>Poznámka</h4>
         <label class="fld"><textarea id="iNote" rows="3" placeholder="materiál, kování, atyp…">${esc(e.note)}</textarea></label>
-      </div>
+      </details>
       <div class="insp-sec">
         <h4>Úpravy</h4>
         <div class="insp-actions">
@@ -3652,6 +3666,11 @@ function renderInspector(){
         </div>
       </div>`;
 
+    box.querySelectorAll('[data-insp-fold]').forEach(section=>{
+      const key=e.id+':'+section.dataset.inspFold;
+      section.open=inspectorFolds.get(key)??false;
+      section.addEventListener('toggle',()=>inspectorFolds.set(key,section.open));
+    });
     const bind = (id, fn, ev='change') => { const el = $(id); if(el) el.addEventListener(ev, fn); };
     /* Pole vpravo nesmí přestavět panel ani při psaní, ani při potvrzení
        (Tab/Enter) – jinak by po každém písmenu / tabulátoru vypadl fokus.
@@ -3667,9 +3686,15 @@ function renderInspector(){
         const v=applianceValue(e,k);
         $$('#inspBody [data-ap="oven"]').forEach(el=>{
           if(el.dataset.apField==='bottom')el.value=v.bottom;
-          if(el.dataset.apField==='alignTop')el.checked=v.alignTop!==false;
+          if(el.dataset.apField==='alignTop')el.checked=v.alignTop===true;
         });
       }
+      const settings=box.querySelector('[data-ap-settings="'+k+'"]');
+      if(settings)settings.hidden=!e.appliances[k].on;
+      const side=box.querySelector('[data-ap-drainer-side]');
+      if(side)side.hidden=!applianceValue(e,'sink').drainer;
+      const summary=box.querySelector('[data-insp-fold="appliances"] summary small');
+      if(summary)summary.textContent=Object.keys(APPLIANCE_SPECS).filter(key=>e.appliances?.[key]?.on).map(key=>APPLIANCE_SPECS[key].label).join(', ')||'vypnuto';
       const status=$('#apWarnings');if(status)status.textContent=applianceWarnings(e).join(' ');
       pushHistoryQuiet();renderCanvas();
     }));
@@ -3699,7 +3724,7 @@ function renderInspector(){
       }
       pushHistoryQuiet(); renderInspector(); renderCanvas();
     });
-    $('#iFrDoors').addEventListener('change', ev => {
+    $('#iFrDoors')?.addEventListener('change', ev => {
       e.fronts = e.fronts || { on:false, doors:0, drawers:0 };
       e.fronts.doors = clamp(Math.round(+ev.target.value || 0), 0, 20);
       pushHistoryQuiet(); renderCanvas();
@@ -6497,13 +6522,13 @@ function setTool(t){
   render();
 }
 const HINTS = {
-  select: 'Klepni na prvek, zeď nebo odstupovou čáru a uprav ji vpravo. Táhnout = přesun, bílé body = změna velikosti.',
-  rect:   'Táhni a nakresli obdélník – rozměry pak přepíšeš vpravo. Krátké klepnutí vloží obdélník 600 × 510.',
-  wall:   'Klikej body zdi. Hotovo stiskni nahoře (nebo Enter) – klik na první bod zeď uzavře. Délky úseků pak přepíšeš vpravo.',
+  select: 'Klepnutí: výběr · Tažení: přesun · Bílé body: rozměry.',
+  rect:   'Tažením kreslete. Klepnutím vložíte 600 × 510 mm. Rozměry upravíte vpravo.',
+  wall:   'Klepejte na rohy. Enter: dokončit · První bod: uzavřít. Délky upravíte vpravo.',
   guide:  'Táhni odstupovou čáru. Přichytává se k ní stejně jako ke zdi.',
-  window: 'Klepni na zeď – vloží se okno 600 mm. Šířku a polohu pak upravíš vpravo; oknem jde táhnout podél zdi.',
-  sym:    'Dole vyber značku a klepni do půdorysu. Vpravo ji přichytíš k zdi a zadáš přesné mm od rohu i od líce; poznámku (myčka, trouba…) doplníš tamtéž.',
-  measure:'Táhni pro změření vzdálenosti – měří se jen vodorovně (X) nebo svisle (Y), nikdy šikmo. Chytá se na rohy/hrany skříní, boků+ a zdí. Nic se neukládá.'
+  window: 'Klepněte na zeď: okno 600 mm. Šířka a poloha vpravo.',
+  sym:    'Vyberte značku a klepněte do výkresu. Polohu a poznámku upravíte vpravo.',
+  measure:'Tažením měřte vodorovně nebo svisle. Měření se neukládá.'
 };
 
 function toast(msg){
