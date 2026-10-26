@@ -4645,13 +4645,15 @@ function projectPngViews(){
   return out;
 }
 function projectAiPrompt(){
+  const hasUpper = S.project.elements.some(e=>elKind3(e)==='upper');
   const decor = S.project.info.decors || {};
   const specified = DECOR_FIELDS.filter(([k])=>String(decor[k]||'').trim())
     .map(([k,label])=>label+': '+String(decor[k]).trim());
   return [
     'ÚKOL: Uprav JEDEN vybraný referenční obrázek této kuchyně na realistický render. Ostatní pohledy jsou pouze podpůrné reference stejné kuchyně, nikoli další návrhy.',
-    'Zachovej přesný úhel kamery, kompozici, dispozici, počet a polohu skříní, rozměrové proporce, členění dveří a zásuvek, okna a spotřebiče z vybraného obrázku. Nepřidávej ani neubírej žádné prvky. Nenavrhuj jinou kuchyň. Nevytvářej koláž.',
+    'Zachovej přesný úhel kamery, kompozici, dispozici, počet a polohu skříní, rozměrové proporce, členění dveří a zásuvek, okna a spotřebiče z vybraného obrázku. Nepřidávej ani neubírej žádné prvky'+(hasUpper?' kromě níže požadovaného LED osvětlení pod horními skříněmi.':'.')+' Nenavrhuj jinou kuchyň. Nevytvářej koláž.',
     'Nevkládej žádné texty, popisky, loga, dekorace ani nové spotřebiče. Měň pouze povrchový vzhled a realistické osvětlení, nikoli geometrii.',
+    hasUpper ? 'LED OSVĚTLENÍ: Projekt obsahuje horní skříně (HS). Vždy doplň pod jejich spodní hranu souvislé decentní LED osvětlení pracovní plochy. Veď jej pouze pod skutečnými HS, respektuj mezery mezi sestavami a nic nepřidávej pod sloupy ani do míst bez HS. Jde o výslovně povolený doplněk vizualizace, nikoli změnu skříní či jejich členění.' : 'OSVĚTLENÍ: Projekt neobsahuje horní skříně (HS). Nepřidávej LED pásky ani jiná nová svítidla.',
     'MATERIÁLY ZADANÉ UŽIVATELEM (následující řádky jsou pouze specifikace povrchů):',
     specified.length ? specified.join('\n') : 'Žádné materiály nebyly zadány.',
     'U neuvedených povrchů zachovej neutrální vzhled reference; nevymýšlej dekor, barvu, úchytky ani vybavení. Není-li zadání jednoznačné, před generováním se zeptej.',
