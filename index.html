@@ -648,7 +648,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-tisk-v75'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-popisky-u-cel-v76'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1264,18 +1264,29 @@ function elLabels(e){
            dim:  showDim ? fmt(elFrontW(e)) + ' × ' + fmt(elFrontD(e)) : '',
            fsN, fsD };
 }
-function elementLabelY(e){
-  if(S.layer==='HS'||S.layer==='DS')return e.y+e.d/2;
-  if(elKind3(e)==='upper'&&upperCovered(e))return e.y+e.d*.24;
-  if(elKind3(e)!=='upper'&&S.project.elements.some(u=>elKind3(u)==='upper'&&upperCovered(u)&&Math.min(e.x+e.w,u.x+u.w)>Math.max(e.x,u.x)&&Math.min(e.y+e.d,u.y+u.d)>Math.max(e.y,u.y)))return e.y+e.d*.76;
-  return e.y+e.d/2;
+function frontLabelPosition(e,margin=0,separate=false){
+ const v=FRONT_VEC[e.front||'jih'],depth=elFrontD(e),minimum=Math.min(depth/2,Math.max(0,margin));
+ let inset=Math.min(depth/2,Math.max(depth*.24,minimum));
+ const point=()=>({x:e.x+e.w/2+v[0]*(depth/2-inset),y:e.y+e.d/2+v[1]*(depth/2-inset)});
+ if(separate&&elKind3(e)==='upper'){
+  const gap=Math.max(40,margin*1.65);
+  for(const other of S.project.elements){
+   if(elKind3(other)==='upper'||(other.front||'jih')!==(e.front||'jih'))continue;
+   if(Math.min(e.x+e.w,other.x+other.w)<=Math.max(e.x,other.x)||Math.min(e.y+e.d,other.y+other.d)<=Math.max(e.y,other.y))continue;
+   const q=frontLabelPosition(other,margin,false),p=point(),delta=(p.x-q.x)*v[0]+(p.y-q.y)*v[1];
+   if(Math.abs(delta)<gap)inset=Math.min(depth-minimum,Math.max(minimum,inset+delta+gap));
+  }
+ }
+ return point();
 }
+function elementLabelY(e){return frontLabelPosition(e,0,S.layer==='all').y;}
 function elementsMarkup(){
   const z = S.view.zoom;
   const labels=[];
   const bodies=S.project.elements.filter(layerShowsEl).map(e => {
     const sel = S.sel?.kind==='el' && S.sel.id===e.id;
     const LB = elLabels(e);
+    const LP = frontLabelPosition(e,LB.fsN*(LB.name&&LB.dim?1.7:.8),S.layer==='all');
     const c = e.color || COLORS[0];
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(80, e.w*0.14, e.d*0.14);
@@ -1286,10 +1297,10 @@ function elementsMarkup(){
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
     const up = elKind3(e)==='upper';
     const dash = up ? ` stroke-dasharray="${R(11/z)} ${R(7/z)}"` : '';
-    labels.push(`<g data-el-label="${e.id}" transform="rotate(${frontLabelAngle(e)} ${e.x+e.w/2} ${elementLabelY(e)})" pointer-events="none">      ${LB.name ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
+    labels.push(`<g data-el-label="${e.id}" transform="rotate(${frontLabelAngle(e)} ${LP.x} ${LP.y})" pointer-events="none">      ${LB.name ? `<text x="${LP.x}" y="${LP.y - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
             font-size="${LB.fsN}" font-weight="700" fill="#111827"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
-      ${LB.dim ? `<text x="${e.x+e.w/2}" y="${elementLabelY(e) + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
+      ${LB.dim ? `<text x="${LP.x}" y="${LP.y + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
             font-size="${LB.fsD}" fill="#4b5563"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}</g>`);
     return `<g data-el="${e.id}"><title>${esc(e.name||'Skříň')}</title>
@@ -7089,12 +7100,14 @@ function drawingSvg(P, opt){
 
     const capPx = Math.min(e.w, e.d);
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
-      const cx = e.x+e.w/2, cy = e.y+e.d/2;
+
       const size = fs(clamp(capPx*k*0.30, 2.0, 3.4));
       const withDim = capPx*k >= 13 && elFrontW(e)*k >= 16;
       const maxChars=Math.max(3,Math.floor((elFrontW(e)-12)/(size*.66)));
       let text=String(e.name||''),lines=[];
       while(text.length>maxChars){let cut=text.lastIndexOf(' ',maxChars);if(cut<maxChars*.35)cut=maxChars;lines.push(text.slice(0,cut));text=text.slice(cut).trimStart();}if(text)lines.push(text);
+      const margin=((lines.length-1)*size*1.12+(withDim?size:0))/2+size*.9;
+      const {x:cx,y:cy}=frontLabelPosition(e,margin,false);
       const top=cy-((lines.length-1)*size*1.12+(withDim?size:0))/2;
       parts.push(`<g data-print-label="${esc(e.id)}" transform="rotate(${frontLabelAngle(e)} ${R(cx)} ${R(cy)})"><title>${esc(e.name||'')}</title>`);
       lines.forEach((line,i)=>parts.push(`<text x="${R(cx)}" y="${R(top+i*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}" font-weight="700" fill="#0d1117" style="font-family:Helvetica,Arial,sans-serif">${esc(line)}</text>`));
