@@ -2871,6 +2871,49 @@ function blendeCfg(e){
    - výška dvířek  = 704 mm (DS i HS)
    - čela zásuvek od spodu 350 / 223 / 125 mm, mezera 3 mm; horní čelo
      (poslední zásuvka nebo dvířka nad nimi) vždy dorovná do 704 mm */
+function upperOpening(e){return ((elKind3(e)==='upper'&&['hfTop','hkTop','hkS'].includes(e.opening?.type))||(elKind3(e)==='column'&&e.opening?.type==='hkS'))?e.opening.type:'hinges';}
+function upperFrontTotal(e){return upperOpening(e)==='hkS'?Math.max(1,+(e.opening?.height??400)):704;}
+function upperOpeningCheck(e){
+  const type=upperOpening(e),errors=[];
+  if(type==='hinges')return {errors,notice:''};
+  const total=upperFrontTotal(e),h=elKind3(e)==='column'?total:elH3(e),w=elFrontW(e);
+  const min=type==='hfTop'?480:type==='hkTop'?205:180,max=type==='hfTop'?1200:600;
+  if((h<min||h>max)&&type!=='hkTop')errors.push('Výška korpusu '+h+' mm mimo rozsah '+min+'–'+max+' mm.');
+  if(w>1800)errors.push('Šířka korpusu přesahuje 1800 mm.');
+  if(type==='hfTop'){
+    const top=e.opening?.topH??351,bottom=total-2-top;
+    if(top<=0||bottom<=0)errors.push('Obě čela HF musí mít kladnou výšku.');
+    if(top<bottom)errors.push('HF top: větší čelo musí být nahoře.');
+    const tkh=2*top+2+Math.max(0,h-total);
+    if(tkh>1200)errors.push('HF top: teoretická výška pro asymetrická čela '+tkh+' mm překračuje 1200 mm.');
+    if(elFrontD(e)-3<264)errors.push('HF top: nestačí ani orientační světlá hloubka (požadavek 264 mm).');
+  }
+  if(type==='hkS'&&total>400)errors.push('HK-S: překročen váš pracovní limit výšky čela 400 mm.');
+  if(total>elH3(e)-4)errors.push('Čelo se nevejde do výšky skříně se spárami.');
+  if(elKind3(e)==='column'&&type==='hkS'){
+    const low=elH3(e)-2-total;
+    const drawerCount=Math.min(frontCfg(e).drawers,2),stack=pricing().drawerStack||DRAWER_STACK_DFLT;
+    const drawerTop=Array.from({length:drawerCount},(_,i)=>stack[i]||223).reduce((a,b)=>a+b,2)+Math.max(0,drawerCount-1)*3;
+    if(low<drawerTop+2)errors.push('Výklop koliduje se spodními výsuvy.');
+    for(const key of ['oven','micro']){const a=e.appliances?.[key];if(!a?.on)continue;
+      // Defaults mirror applianceDefaults without recursively calling frontPieces.
+      const bottom=a.bottom??(Math.max(600,drawerTop+18)+(key==='micro'?620:0));
+      if(bottom+B3D.floorT+(a.size??APPLIANCE_SPECS[key].size)+2>elZ0(e)+low)errors.push('HK-S: kolize s '+(key==='micro'?'mikrovlnkou':'troubou')+' — upravte výšku čela nebo polohu spotřebiče.');
+    }
+  }
+  const override=type==='hkTop'&&(h>600||total>600)?'HK top: POVOLENÁ VLASTNÍ MONTÁŽ NAD 600 mm — mimo katalogový rozsah výrobce. ':'';
+
+  return {errors,notice:override+(type==='hkS'?'HK-S: pracovní limit čela 400 mm dle vašeho pravidla (nikoli katalogové maximum). ':'')+'Kontrola rozsahu korpusu není potvrzení vhodnosti kování. Ověřte skutečnou světlou hloubku, hmotnost čel včetně úchytek, faktor výkonnosti, ramena a kolize dle Blum. Neznámá hmotnost ani konkrétní mechanismus nejsou ověřeny.'};
+}
+function upperOpeningForm(e){
+  if(!['upper','column'].includes(elKind3(e)))return '';
+  const type=upperOpening(e),top=e.opening?.topH??351,check=upperOpeningCheck(e);
+  return `<div class="insp-sec"><h4>${elKind3(e)==='column'?'Výklop nahoře ve sloupu':'Otevírání horní skříně'}</h4><label class="fld"><span>Kování / uspořádání čel</span><select id="iUpperOpening"><option value="hinges" ${type==='hinges'?'selected':''}>${elKind3(e)==='column'?'Bez horního výklopu':'Panty — dvířka vedle sebe'}</option><option ${elKind3(e)==='column'?'disabled':''} value="hfTop" ${type==='hfTop'?'selected':''}>Blum AVENTOS HF top — dvě čela nad sebou</option><option ${elKind3(e)==='column'?'disabled':''} value="hkTop" ${type==='hkTop'?'selected':''}>Blum AVENTOS HK top — jedno čelo</option><option value="hkS" ${type==='hkS'?'selected':''}>Blum AVENTOS HK-S — jedno čelo</option></select></label>
+  ${type==='hkS'?`<label class="fld"><span>Výška čela HK-S (mm), pracovní maximum 400</span><input id="iHKHeight" type="number" min="1" max="400" value="${upperFrontTotal(e)}"></label><p class="hint">Čelo je u horní hrany skříně. Zbytek výšky zůstává bez tohoto čela; ve sloupu prostor pro mikrovlnku / další vybavení. Skříň se nezmenšuje.</p>`:''}
+  ${type==='hfTop'?`<div class="row2"><label class="fld"><span>Horní čelo (mm)</span><input id="iHFTop" type="number" min="1" max="701" value="${top}"></label><label class="fld"><span>Dolní čelo (mm)</span><input id="iHFBottom" type="number" min="1" max="701" value="${702-top}"></label></div><p class="hint">Horní + 2 mm spára + dolní = 704 mm. Změnou jednoho se druhé dopočítá.</p>`:''}
+  ${type!=='hinges'?`<p class="hint">Čela výklopu se počítají pouze při zapnutém „počítat čela v kalkulaci“. U HS se nepoužijí pantová dvířka ani zásuvky; ve sloupu spodní výsuvy zůstávají.</p><p class="hint" style="color:${check.errors.length?'#b91c1c':'#715400'}">${check.errors.length?'<b>NEVYHOVUJÍCÍ ZADÁNÍ:</b> '+esc(check.errors.join(' ')):'Základní rozsah zkontrolován.'}<br>${esc(check.notice)}</p><a href="https://www.blum.com/file/cme83198_ep_dok_bau?country=cz&language=cs" target="_blank" rel="noopener">Plánování Blum AVENTOS top</a>`:''}</div>`;
+}
+
 function frontPieces(e){
   const P = pricing();
   const W = elFrontW(e);
@@ -2897,6 +2940,15 @@ function frontPieces(e){
   const wDoor = nD > 0 ? Math.max(50, Math.round((usable - DOOR_EDGE - (nD - 1) * DOOR_GAP_W) / nD)) : 0;
   const wDraw = Math.max(50, Math.round(usable - DOOR_EDGE));
 
+  const opening=upperOpening(e);
+  if(elKind3(e)==='upper'&&opening!=='hinges'){
+    const hf=opening==='hfTop',top=e.opening?.topH??351;
+    const doors=hf?[top,702-top]:[upperFrontTotal(e)];
+    const validation=upperOpeningCheck(e);
+    return {doors,drawers:[],wDoor:wDraw,wDraw,total:upperFrontTotal(e),doorBottom:opening==='hkS'?elH3(e)-2-upperFrontTotal(e):null,stacked:hf,gap:hf?2:0,
+      blende:BI.on?{w:BS.w,d:BS.d,gap:BS.gap,cutL,cutR,cut:cutL+cutR}:null,
+      ok:validation.errors.length===0,validation};
+  }
   const nSlots   = nZ + (nD > 0 ? 1 : 0);          // čel nad sebou
   const gapTotal = Math.max(0, nSlots - 1) * gap;
 
@@ -2933,6 +2985,10 @@ function frontPieces(e){
     doorH = Math.round(total - used - gapTotal);
     if(doorH < 20) doorH = 0;                      // nevychází – dvířka se nedají
   }
+  if(isCol&&opening==='hkS'){
+    const validation=upperOpeningCheck(e),height=upperFrontTotal(e);
+    return {doors:[height],drawers,wDoor:wDraw,wDraw,total,doorBottom:elH3(e)-2-height,ok:!validation.errors.length,validation};
+  }
   return { doors: nD > 0 && doorH > 0 ? Array.from({length:nD}, () => doorH) : [],
            drawers, wDoor, wDraw, total,
            blende: BI.on ? { w:BS.w, d:BS.d, gap:BS.gap, cutL, cutR,
@@ -2943,6 +2999,8 @@ function frontPieces(e){
 /* Text „596 × 704 mm × 2“ / „350 / 223 / 125 × 596 mm“ pro inspektor. */
 function frontSizesText(e){
   const FP = frontPieces(e);
+  if(FP.doorBottom!=null)return 'HK-S: horní čelo '+fmt(FP.wDoor)+' × '+fmt(FP.doors[0])+' mm · spodní hrana čela '+fmt(FP.doorBottom)+' mm od spodku korpusu'+(FP.drawers.length?' · spodní výsuvy '+FP.drawers.map(h=>fmt(FP.wDraw)+' × '+fmt(h)).join(' / ')+' mm':'');
+  if(FP.stacked)return 'HF top: horní '+fmt(FP.wDoor)+' × '+fmt(FP.doors[0])+' mm · dolní '+fmt(FP.wDoor)+' × '+fmt(FP.doors[1])+' mm · spára 2 mm · celkem 704 mm';
   const out = [];
   if(FP.doors.length) out.push('dvířka ' + fmt(FP.wDoor) + ' × ' + fmt(FP.doors[0]) + ' mm' +
     (FP.doors.length > 1 ? ' (' + FP.doors.length + ' ks vedle sebe)' : ''));
@@ -2985,7 +3043,7 @@ function frontStrips(e){
 
   /* úseky podél čela */
   const segs = [];
-  if(FP.doors.length){
+  if(FP.doors.length&&!FP.stacked){
     const n = FP.doors.length, w = FP.wDoor, gap = DOOR_GAP_W;
     const used = n * w + (n - 1) * gap;
     let a = inner0 + ((inner1 - inner0) - used) / 2;
@@ -3452,11 +3510,12 @@ function renderInspector(){
         </div>
         <label class="fld"><span>Druh (kreslí se jinak)</span>
           <div class="kindseg">
-            <button type="button" id="iKindBase" class="${elKind3(e)!=='upper'?'on':''}">Spodní</button>
+            <button type="button" id="iKindBase" class="${elKind3(e)==='base'?'on':''}">Spodní</button>
+            <button type="button" id="iKindColumn" class="${elKind3(e)==='column'?'on':''}">Sloup</button>
             <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
           </div>
         </label>
-        <p class="hint">${elKind3(e)==='column' ? 'Sloup – druh podle názvu (lednice/trouba). Kliknutím na Spodní/Horní ho můžeš změnit.':(elKind3(e)==='upper'?'Horní skříň: visí na zdi, hloubka 320 mm, výška 710 mm; ve výkresu je přerušovaná.':'Přepni na „Horní“ a skříň se sama přisune ke zdi (hloubka 320, výška 710) – ve výkresu bude přerušovaná.' )}</p>
+        <p class="hint">${elKind3(e)==='column' ? 'Sloup je samostatný druh skříně. Název spotřebiče druh nemění.':(elKind3(e)==='upper'?'Horní skříň: visí na zdi, hloubka 320 mm, výška 710 mm; ve výkresu je přerušovaná.':'Přepni na „Horní“ a skříň se sama přisune ke zdi (hloubka 320, výška 710) – ve výkresu bude přerušovaná.' )}</p>
       </div>
       <div class="insp-sec">
         <h4>Bok+ (boční panely)</h4>
@@ -3480,6 +3539,7 @@ function renderInspector(){
         </div>
         <p class="hint">Bok+ není skříň – kreslí se jako tenký pruh na konci/krajích skříně a ve výpisu/PDF se uvádí jako „Bok+“. Rozměr panelu: DS = ${fmt(bokH(e))} × 580 × 18 mm (v × hl × tl), HS = ${fmt(bokH(e))} × 340 × 18 mm. Hloubka = skříň + přesah + odskok: DS 510+20+50 = 580; HS (u zdi) 320+20+0 = 340. Pod spodními skříněmi se počítá čelní sokl výšky 150 mm – dělí se na kusy podle spár skříněk a ke každému kusu se připočítává 100 mm rezerva.</p>
       </div>
+      ${upperOpeningForm(e)}
       ${applianceForm(e)}
       <div class="insp-sec">
         <h4>Čela do kalkulace</h4>
@@ -3487,8 +3547,8 @@ function renderInspector(){
           <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> počítat čela v kalkulaci
         </label>
         <div class="row2">
-          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
-          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
+          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
         <p class="hint" style="margin-top:6px"><b>Rozměry čel:</b> ${frontSizesText(e)}</p>
         ${(() => {
@@ -3558,6 +3618,11 @@ function renderInspector(){
       const status=$('#apWarnings');if(status)status.textContent=applianceWarnings(e).join(' ');
       pushHistoryQuiet();renderCanvas();
     }));
+    bind('#iUpperOpening',ev=>{e.opening={...e.opening,type:ev.target.value,topH:e.opening?.topH??351};pushHistory();render();});
+    const updateHF=(top)=>{e.opening={...e.opening,type:'hfTop',topH:Math.round(clamp(top,1,701))};pushHistory();render();};
+    bind('#iHFTop',ev=>updateHF(+ev.target.value||351));
+    bind('#iHFBottom',ev=>updateHF(702-(+ev.target.value||351)));
+    bind('#iHKHeight',ev=>{e.opening={...e.opening,height:Math.round(clamp(+ev.target.value||400,1,400))};pushHistory();render();});
     bind('#iNote', ev => { e.note = ev.target.value; }, 'input');
     bind('#iNote', () => pushHistoryQuiet(), 'change');
     bind('#iW', ev => { setElFrontW(e, Math.max(MIN_SIZE, +ev.target.value||MIN_SIZE)); pushHistoryQuiet(); renderCanvas(); });
@@ -3596,6 +3661,7 @@ function renderInspector(){
     });
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
+    $('#iKindColumn').onclick = () => setElKind3(e, 'column');
     bind('#iFront', ev => { orientElement(e, ev.target.value); pushHistoryQuiet(); renderCanvas(); });
     /* Bok+ – přepínání stran (může být vlevo i vpravo zároveň). Klik na tlačítko
        zapne/vypne danou stranu; čísla polí se převezmou a uloží. */
@@ -3981,7 +4047,7 @@ function san3(s){ return String(s??'').replace(/[^A-Za-z0-9_.\-]/g,'_').slice(0,
    hodnotu přepíše). */
 function guessKind3(e){
   const n = ((e.name||'') + ' ' + (e.note||'')).toLowerCase();
-  if(/sloup|sloupc/.test(n) || /lednic|chladnic|mraz|troub|mikrovl|vinoték|vinotek/.test(n)) return 'column';
+  if(/sloup|sloupc/.test(n)) return 'column';
   if(/horn|nástěnn|nasteen|vrchn|vrni/.test(n)) return 'upper';
   return 'base';
 }
@@ -4043,11 +4109,12 @@ function wallFaceBehind(e){
 /* Přepne druh prvku. Horní skříň: přisune zadní hranu na líc zdi, hloubka 320,
    výška 710. Spodní: vrátí zadní hranu do mezery EL_WALL_GAP (50 mm) od zdi. */
 function setElKind3(e, kind){
-  e.kind = (kind==='upper') ? 'upper' : 'base';
+  e.kind = ['base','upper','column'].includes(kind) ? kind : 'base';
+  if(kind==='column'){e.h=B3D.colH;pushHistory();render();return;}
   const f = e.front || 'jih';
   const face = wallFaceBehind(e);
   if(face == null){
-    if(kind==='upper') e.h = UP_H_DFLT;
+    e.h = kind==='upper' ? UP_H_DFLT : B3D.baseH;
     pushHistory(); render();
     toast('Nenašel jsem zeď u prvku – změnil jsem jen druh, polohu uprav ručně');
     return;
@@ -4675,7 +4742,12 @@ function buildPngScene(){
       let lo=z+2;
       const gap=fp.drawers.length===2&&!fp.doors.length ? 4 : (+pricing().drawerGap||3);
       for(const h of fp.drawers){box(start,start+fp.wDraw,lo,Math.min(z+H-2,lo+h),'front');lo+=h+gap;}
-      fp.doors.forEach((h,i)=>box(start+i*(fp.wDoor+DOOR_GAP_W),start+i*(fp.wDoor+DOOR_GAP_W)+fp.wDoor,lo,Math.min(z+H-2,lo+h),'front'));
+      if(fp.doorBottom!=null)lo=z+fp.doorBottom;
+      if(fp.stacked){
+        const lower=fp.doors[1],upper=fp.doors[0];
+        box(start,start+fp.wDoor,lo,lo+lower,'front');
+        box(start,start+fp.wDoor,lo+lower+2,lo+lower+2+upper,'front');
+      }else fp.doors.forEach((h,i)=>box(start+i*(fp.wDoor+DOOR_GAP_W),start+i*(fp.wDoor+DOOR_GAP_W)+fp.wDoor,lo,Math.min(z+H-2,lo+h),'front'));
     } else {
       // Neznámé členění se nevymýšlí: jediná neutrální čelní plocha.
       box(2,W-2,z+2,z+H-2,'front');
@@ -5118,6 +5190,16 @@ function topDepthOfRun(r){
 }
 
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
+function upperCutParts(e){
+  const W=elFrontW(e),D=elFrontD(e),H=elH3(e),inner=W-36;
+  return [
+    {group:'body',label:'bočnice HS',w:D,h:H,qty:2},
+    {group:'body',label:'dno HS',w:inner,h:D,qty:1},
+    {group:'body',label:'půda HS',w:inner,h:D,qty:1},
+    {group:'body',label:'police HS',w:inner,h:Math.max(200,D-20),qty:2},
+    {group:'back',label:'záda HDF HS',w:W,h:H,qty:1}
+  ].filter(p=>p.w>0&&p.h>0);
+}
 function materialParts(){
   const P = pricing();
   const parts = [];
@@ -5133,12 +5215,16 @@ function materialParts(){
     const tag = (e.name || (k === 'upper' ? 'Horní skříň' : k === 'column' ? 'Sloup' : 'Spodní skříň'))
               + (q > 1 ? ' (' + q + '×)' : '');
     /* korpus: 2 bočnice, dno, horní deska, 2 police */
+    if(k==='upper'){
+      upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
+    }else{
     add('body', tag + ' – bočnice',        D, H, 2*q);
     add('body', tag + ' – dno',            W, D, 1*q);
     add('body', tag + ' – horní deska',    W, D, 1*q);
     add('body', tag + ' – police',         W, Math.max(200, D - 20), 2*q);
     /* zadní díl z HDF */
     add('back', tag + ' – zadní díl (HDF)', W, H, 1*q);
+    }
     /* čela – jen když je uživatel u skříně zapne; sloup = vestavěný
        spotřebič (vlastní čela), u sloupů se nepočítají nikdy */
     const FR = frontCfg(e);
@@ -5146,7 +5232,8 @@ function materialParts(){
     if(FR.on && (k === 'base' || k === 'upper' || k === 'column')){
       const FP = frontPieces(e);
       if(FP.doors.length){
-        add('front', tag + ' – dvířka ' + FP.wDoor + ' × ' + FP.doors[0], FP.wDoor, FP.doors[0], FP.doors.length*q);
+        const heights=[...new Set(FP.doors)];
+        heights.forEach(h=>add('front',tag+' – dvířka '+FP.wDoor+' × '+h,FP.wDoor,h,FP.doors.filter(x=>x===h).length*q));
       }
       FP.drawers.forEach((h, i) => add('front',
         tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q));
@@ -5998,6 +6085,11 @@ function buildPrint(){
           <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)</td>
         </tr>`).join('');
       if(bokRows) out += bokRows;
+      if(k3v==='upper'||k3v==='column'){
+        const check=upperOpeningCheck(e),typ=upperOpening(e);
+        if(typ!=='hinges')out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>${esc(typ==='hfTop'?'HF top':typ==='hkTop'?'HK top':'HK-S')}</b> — ${check.errors.length?'NEVYHOVUJÍCÍ ZADÁNÍ: '+esc(check.errors.join(' ')):'Rozsah korpusu zkontrolován.'} ${esc(check.notice)}</td></tr>`;
+        if(k3v==='upper')out += upperCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · š × v/hl (mm)</td></tr>`).join('');
+      }
       if(elKind3(e)==='base' && pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
