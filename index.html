@@ -625,8 +625,8 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <p class="span2 hint" id="fFrontMaterialHint"></p>
       <label class="fld" id="fLaminoDecorWrap"><span>Dekor lamina čel</span><input id="fDecor_front" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Pracovní deska</span><input id="fDecor_worktop" placeholder="Název / kód / barva (volitelné)"></label>
-      <label class="fld"><span>Bok+, rám HS a niky — společný dekor</span><input id="fDecor_finish" placeholder="Prázdné = dekor korpusů"></label>
-      <label class="fld"><span>Korpusy</span><input id="fDecor_body" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Bok+, rám HS a niky — společný dekor</span><input id="fDecor_finish" placeholder="Zadejte dekorové lamino — nezávislé na bílém korpusu"></label>
+      <label class="fld"><span>Korpusy</span><input id="fDecor_body" placeholder="8100 PE — bílá (výchozí)"></label>
       <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Podlaha</span><input id="fDecor_floor" placeholder="Název / kód / barva (volitelné)"></label>
@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-27-nabidka-v85'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-27-nabidka-v86'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1282,7 +1282,7 @@ function newProject(){
     id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2,6),
     info: {
       name:'', client:'', clientPhone:'', address:'', designer:'', designerContact:'',
-      date: new Date().toISOString().slice(0,10), paper:'A4L', notes:''
+      date: new Date().toISOString().slice(0,10), paper:'A4L', notes:'', decors:{body:'8100 PE — bílá',finish:''}
     },
     windows: [], symbols: [],
     walls: [],
@@ -1815,7 +1815,7 @@ function elLabels(e){
   const fsD = Math.min(LBL_PX_DIM / z, fit * 0.78);
   const maxCh = Math.max(3, Math.floor((elFrontW(e) - 6) / (0.60 * fsN)));
   return { name: showName ? lblShort(e.name || '', maxCh) : '',
-           dim:  showDim ? fmt(elFrontW(e)) + ' × ' + fmt(elFrontD(e)) : '',
+           dim:  showDim ? fmt(elFrontW(e)) + ' × ' + fmt(isNiche(e)?nicheFullDepth(e):elFrontD(e)) : '',
            fsN, fsD };
 }
 function frontLabelPosition(e,margin=0,separate=false){
@@ -1841,6 +1841,7 @@ function elementsMarkup(){
     const sel = S.sel?.kind==='el' && S.sel.id===e.id;
     const LB = elLabels(e);
     const LP = frontLabelPosition(e,LB.fsN*(LB.name&&LB.dim?1.7:.8),S.layer==='all');
+    const pr=nichePlanRect(e);
     const c = e.color || COLORS[0];
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(80, e.w*0.14, e.d*0.14);
@@ -1858,7 +1859,7 @@ function elementsMarkup(){
             font-size="${LB.fsD}" fill="#4b5563"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}</g>`);
     return `<g data-el="${e.id}"><title>${esc(e.name||'Skříň')}</title>
-      <rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
+      <rect x="${pr.x}" y="${pr.y}" width="${Math.max(pr.w,1)}" height="${Math.max(pr.h,1)}"
             fill="${c}${up?'0a':'22'}" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
       <path d="${dl}" stroke="${c}" stroke-width="${2/z}" fill="none" opacity=".8"/>
 
@@ -3293,11 +3294,18 @@ function bokHas(e, side){ return !!bokSides(e)[side]; }
    older projects remain unchanged until switched on. */
 function isNiche(e){return !!e&&e.spaceType==='niche';}
 function isWire(e){return !!e&&e.spaceType==='wire200'&&elKind3(e)==='base';}
-function finishDecor(){return S.project.info.decors?.finish||S.project.info.decors?.body||'dekor Bok+';}
+function bodyDecor(){return S.project.info.decors?.body||'8100 PE — bílá';}
+function finishDecor(){return S.project.info.decors?.finish||'Dekorové lamino — dekor nezadán';}
+function materialGroupLabel(g){return g.name+(g.id==='body'?' · '+bodyDecor():g.id==='bok'?' · '+finishDecor():'');}
+// Geometry retains the reference HS box for snapping. The physical open niche
+// extends 20 mm to the door/panel plane; do not add that extension twice.
+function nicheFullDepth(e){return elFrontD(e)+20;}
+function nichePlanRect(e){const r={x:e.x,y:e.y,w:e.w,h:e.d};if(!isNiche(e))return r;const f=e.front||'jih';if(isHorizFront(f)){r.h+=20;if(f==='sever')r.y-=20;}else{r.w+=20;if(f==='západ')r.x-=20;}return r;}
+
 function nicheShelves(e){return clamp(Math.round(e.nicheShelves??2),0,12);}
 function frameEnabled(e,side){return elKind3(e)==='upper'&&!e.frameOff&&pricing().upperFrame?.[side]===true;}
 function nicheCutParts(e){
- const W=elFrontW(e),H=elH3(e),D=elFrontD(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
+ const W=elFrontW(e),H=elH3(e),D=nicheFullDepth(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
  if(w<=0||h<=0||d<=0)return [];
  const p=(label,w,h,qty,edgeMm)=>({group:'bok',label:'Nika — '+label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez hranění (vloženo mezi dílce)',decor:finishDecor()});
  return [p('bočnice',D,H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
@@ -3318,7 +3326,7 @@ function wireErrors(e){
  if(elH3(e)-36<470)errors.push('Drát potřebuje alespoň 470 mm světlé výšky (rozměr koše).');
  return errors;
 }
-function hsFrameRuns(side){
+function hsFrameRawRuns(side){
  if(pricing().upperFrame?.[side]!==true)return [];
  const lines=new Map(),extra=[];
  for(const e of S.project.elements){
@@ -3340,19 +3348,67 @@ function hsFrameRuns(side){
  }
  return [...runs,...extra];
 }
+/* One shared rectangular butt-joint layout drives BOM, plans and 3D.
+   Joins use existing HS blende connections, never arbitrary nearby rows. */
+function frameCornerKey(b){return [...b.els].sort().join('|');}
+function frameCornerSpecs(side,runs=hsFrameRawRuns(side)){
+ const result=[];
+ for(const b of blendeCorners().filter(b=>b.kind==='u')){
+  const ids=b.els.map(id=>runs.findIndex(r=>!r.additional&&r.els.some(e=>e.id===id)));
+  if(ids.some(i=>i<0)||ids[0]===ids[1])continue;
+  const x=runs[ids[0]],y=runs[ids[1]];
+  if(isHorizFront(x.f)===isHorizFront(y.f)||Math.abs(x.z-y.z)>.1)continue;
+  const hi=isHorizFront(x.f)?ids[0]:ids[1],vi=isHorizFront(x.f)?ids[1]:ids[0];
+  const key=frameCornerKey(b),chosen=pricing().upperFrame?.cornerThrough?.[key];
+  const through=runs[vi].els.some(e=>e.id===chosen)?'v':'h';
+  result.push({key,b,hi,vi,through});
+ }
+ return result;
+}
+function hsFrameRuns(side){
+ const runs=hsFrameRawRuns(side).map(r=>({...r,baseA:r.a,baseB:r.b,min:r.a,max:r.b,trimMin:-Infinity,trimMax:Infinity}));
+ const rects=runs.map(rawHsFrameRect),joins=frameCornerSpecs(side,runs);
+ for(const j of joins){
+  const h=runs[j.hi],v=runs[j.vi],hr=rects[j.hi],vr=rects[j.vi];
+  h.min=Math.min(h.min,vr.x);h.max=Math.max(h.max,vr.x+vr.w);
+  v.min=Math.min(v.min,hr.y);v.max=Math.max(v.max,hr.y+hr.h);
+  if(j.through==='h'){
+   if(vr.y+vr.h/2>hr.y+hr.h/2)v.trimMin=Math.max(v.trimMin,hr.y+hr.h);
+   else v.trimMax=Math.min(v.trimMax,hr.y);
+  }else{
+   if(hr.x+hr.w/2>vr.x+vr.w/2)h.trimMin=Math.max(h.trimMin,vr.x+vr.w);
+   else h.trimMax=Math.min(h.trimMax,vr.x);
+  }
+ }
+ for(const r of runs){r.a=Math.max(r.min,r.trimMin);r.b=Math.min(r.max,r.trimMax);r.length=r.b-r.a;r.joined=r.a!==r.baseA||r.b!==r.baseB;}
+ return runs.filter(r=>r.length>.1);
+}
+function hsFrameRect(r){return rawHsFrameRect(r);}
+function frameCornerOptions(){
+ const found=new Map();
+ for(const side of ['top','bottom']){
+  const runs=hsFrameRawRuns(side);
+  for(const j of frameCornerSpecs(side,runs))if(!found.has(j.key)){
+   const h=runs[j.hi],v=runs[j.vi];
+   found.set(j.key,{...j,h,v});
+  }
+ }
+ if(!found.size)return '<p class="hint">Rohové spoje se nabídnou u zapnutého opláštění HS a rozpoznaných rohových blende.</p>';
+ return '<p class="hint">Rohové opláštění přes blende, spoj na tupo. Vyberte průběžný panel; druhý k němu končí bez překryvu.</p>'+[...found.values()].map((j,i)=>`<label class="fld"><span>Roh ${i+1} — průběžná řada</span><select data-frame-corner="${esc(j.key)}"><option value="${esc(j.h.els[0].id)}" ${j.through==='h'?'selected':''}>${esc(j.h.els.map(e=>e.name||'HS').join(' + '))} (${j.h.f})</option><option value="${esc(j.v.els[0].id)}" ${j.through==='v'?'selected':''}>${esc(j.v.els.map(e=>e.name||'HS').join(' + '))} (${j.v.f})</option></select></label>`).join('');
+}
 function hsFrameParts(){
  const g=pricing().groups.find(g=>g.id==='bok'),kerf=+pricing().kerf||0;
  const maxLen=Math.max(1,(pricing().rot?Math.max(g.bw,g.bh):g.bw)-kerf),parts=[];
  for(const side of ['top','bottom'])for(const [idx,r] of hsFrameRuns(side).entries()){
-  // Only split at cabinet joints. A single overlong cabinet remains labelled
-  // and goes through the existing oversize handling rather than an invented joint.
-  const segments=[];let length=0;
-  for(const e of r.els){const w=elFrontW(e);if(length&&length+w>maxLen){segments.push(length);length=0;}length+=w;}if(length)segments.push(length);
-  segments.forEach((w,i)=>parts.push({group:'bok',label:'Opláštění HS '+(side==='top'?'horní':'spodní')+' — řada '+(idx+1)+(segments.length>1?' / díl '+(i+1):'')+(r.additional?' / další kus':''),w,h:r.depth,qty:1,edgeMm:w,edgeNote:'ABS pouze přední dlouhá hrana',decor:finishDecor(),frame:true}));
+  const breaks=[...new Set([r.a,r.b,...r.els.flatMap(e=>{const a=isHorizFront(r.f)?e.x:e.y;return [a,a+elFrontW(e)];})])].filter(a=>a>=r.a&&a<=r.b).sort((a,b)=>a-b);
+  const segments=[];let a=r.a;
+  while(a<r.b-.1){const allowed=breaks.filter(b=>b>a+.1&&b-a<=maxLen+.01);const b=r.b-a<=maxLen?r.b:allowed.at(-1)||breaks.find(b=>b>a+.1)||r.b;segments.push(b-a);a=b;}
+  segments.forEach((w,i)=>parts.push({group:'bok',label:'Opláštění HS '+(side==='top'?'horní':'spodní')+' — řada '+(idx+1)+(segments.length>1?' / díl '+(i+1):'')+(r.joined?' / roh na tupo':'')+(r.additional?' / další kus':''),w,h:r.depth,qty:1,edgeMm:w,edgeNote:'ABS pouze přední dlouhá hrana',decor:finishDecor(),frame:true}));
  }
  return parts;
 }
-function hsFrameRect(r){
+
+function rawHsFrameRect(r){
  const d=r.depth,f=r.f,face=r.face;
  if(f==='jih')return {x:r.a,y:face-d+20,w:r.length,h:d};
  if(f==='sever')return {x:r.a,y:face-20,w:r.length,h:d};
@@ -3366,7 +3422,7 @@ function frame3(sc,mat){
  }
 }
 function niche3(sc,e,mat){
- const W=elFrontW(e),D=elFrontD(e),H=elH3(e),z=elZ0(e),f=e.front||'jih';
+ const rect=nichePlanRect(e);e={...e,x:rect.x,y:rect.y};const W=elFrontW(e),D=nicheFullDepth(e),H=elH3(e),z=elZ0(e),f=e.front||'jih';
  const box=(a,b,c,d,lo,hi)=>{
   if(f==='jih')scBox(sc,e.x+a,e.y+c,e.x+b,e.y+d,z+lo,z+hi,mat);
   else if(f==='sever')scBox(sc,e.x+a,e.y+D-d,e.x+b,e.y+D-c,z+lo,z+hi,mat);
@@ -3387,7 +3443,7 @@ function framePlanSvg(sw,filter){
 }
 function framePrintHtml(){
  const parts=hsFrameParts();if(!parts.length)return '';
- return `<h3>Opláštění HS — ${esc(finishDecor())}, DTD 18 mm</h3><p>Panely mezi krajními Bok+, hloubka korpusu + 20 mm. ABS jen přední dlouhá hrana. Samostatné řady a směry se nespojují přes rohové mezery.</p><table class="pr-table"><thead><tr><th>Dílec</th><th>Délka mm</th><th>Hloubka mm</th><th>Ks</th><th>ABS mm/ks</th></tr></thead><tbody>${parts.map(p=>`<tr><td>${esc(p.label)}</td><td>${fmt(p.w)}</td><td>${fmt(p.h)}</td><td>${p.qty}</td><td>${fmt(p.edgeMm)}</td></tr>`).join('')}</tbody></table>`;
+ return `<h3>Opláštění HS — ${esc(finishDecor())}, DTD 18 mm</h3><p>Panely mezi krajními Bok+, hloubka korpusu + 20 mm. ABS jen přední dlouhá hrana. V rozích L/U navazují přes blende spojem na tupo; průběžný panel je zvolený v kalkulaci.</p><table class="pr-table"><thead><tr><th>Dílec</th><th>Délka mm</th><th>Hloubka mm</th><th>Ks</th><th>ABS mm/ks</th></tr></thead><tbody>${parts.map(p=>`<tr><td>${esc(p.label)}</td><td>${fmt(p.w)}</td><td>${fmt(p.h)}</td><td>${p.qty}</td><td>${fmt(p.edgeMm)}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function isDishwasherSpace(e){return !!e && e.spaceType==='dishwasher' && elKind3(e)==='base';}
@@ -4281,7 +4337,7 @@ function renderInspector(){
         <h4>Rozměry (mm)</h4>
         <div class="row2">
           <label class="fld"><span>Šířka</span><input id="iW" type="number" step="5" min="${MIN_SIZE}" value="${elFrontW(e)}"></label>
-          <label class="fld"><span>Hloubka</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${elFrontD(e)}"></label>
+          <label class="fld"><span>${isNiche(e)?'Referenční hloubka HS':'Hloubka'}</span><input id="iD" type="number" step="5" min="${MIN_SIZE}" value="${elFrontD(e)}"></label>
         </div>
         <details class="insp-help" data-insp-fold="position"><summary>Poloha X / Y</summary>
         <div class="row2" style="margin-top:8px">
@@ -4308,7 +4364,7 @@ function renderInspector(){
           </div>
         </label>
         <label class="fld"><span>Provedení prvku</span><select id="iSpecialType"><option value="cabinet" ${!isNiche(e)&&!isWire(e)&&!isDishwasherSpace(e)?'selected':''}>Běžná skříň</option><option value="niche" ${isNiche(e)?'selected':''}>Nika — otevřená, pohledové lamino</option>${elKind3(e)==='base'?`<option value="wire200" ${isWire(e)?'selected':''}>Drát — výsuvný dvojkoš 200 mm</option><option value="dishwasher" ${isDishwasherSpace(e)?'selected':''}>Prostor pro myčku</option>`:''}</select></label>
-        ${isNiche(e)?`<label class="fld"><span>Počet polic niky</span><input id="iNicheShelves" type="number" min="0" max="12" value="${nicheShelves(e)}"></label><p class="hint">Lamino 18 mm, vložená záda. Dekor: ${esc(finishDecor())}. Dno/půda mezi bočnicemi, police před zády. ABS na předních hranách, záda bez ABS.</p>`:''}
+        ${isNiche(e)?`<label class="fld"><span>Hotová hloubka niky (včetně +20)</span><input id="iNicheFullDepth" type="number" min="120" step="5" value="${nicheFullDepth(e)}"></label>${e.nicheDepthReview?`<p class="hint">Nika ze starší verze: původní hloubka ${fmt(e.nicheDepthReview)} mm. Pokud už šlo o hotovou hloubku, zadejte tuto hodnotu do pole výše; nebude se znovu přičítat 20 mm.</p>`:""}<label class="fld"><span>Počet polic niky</span><input id="iNicheShelves" type="number" min="0" max="12" value="${nicheShelves(e)}"></label><p class="hint">Skutečná hloubka niky ${fmt(nicheFullDepth(e))} mm = referenční HS ${fmt(elFrontD(e))} + 20 mm. Opláštění zůstává ${fmt(elFrontD(e)+20)} mm, nikoli o dalších 20 více. Lamino 18 mm, vložená záda. Dekor: ${esc(finishDecor())}. Dno/půda mezi bočnicemi, police před zády. ABS na předních hranách, záda bez ABS.</p>`:''}
         ${elKind3(e)==='upper'?`<label class="chk"><input id="iFrameOff" type="checkbox" ${e.frameOff?'checked':''}> Vynechat tuto HS z opláštění</label><p class="hint">Horní/spodní opláštění celé sestavy zapnete v Kalkulaci. Hloubka ${fmt(elFrontD(e)+20)} mm, délka podle souvislé řady.</p>`:''}
         ${elKind3(e)==='base'?`<label class="chk"><input id="iDishwasher" type="checkbox" ${isDishwasherSpace(e)?'checked':''}> Prostor pro vestavnou myčku — bez korpusu</label><p class="hint">${isDishwasherSpace(e)?'Pouze 1 čelo (šířka místa − 4 mm). Bez korpusu, zad, polic, pantů a noh. PD a průběžný sokl zůstávají; ručně zapnutý Bok+ se počítá zvlášť.':dishwasherNameSuggestion(e)?'Název odpovídá myčce. Potvrďte volbu výše, jinak se prvek počítá jako běžná skříň.':'Pro myčku 600 i 450 mm zapněte tuto volbu; šířku místa zadejte v rozměrech.'}</p>`:''}
       </div>
@@ -4456,10 +4512,11 @@ function renderInspector(){
     $('#iSpecialType')?.addEventListener('change',ev=>{
       const type=ev.target.value;e.spaceType=type;
       if(type==='dishwasher')setDishwasherSpace(e,true);
-      if(type==='niche')e.fronts={on:false,doors:0,drawers:0};
+      if(type==='niche'){e.fronts={on:false,doors:0,drawers:0};e.nicheDepthModel='reference+20';delete e.nicheDepthReview;}
       if(type==='wire200')e.fronts={on:true,doors:1,drawers:0};
       pushHistoryQuiet();renderInspector();renderCanvas();
     });
+    $('#iNicheFullDepth')?.addEventListener('change',ev=>{const depth=clamp(+ev.target.value||340,120,3000)-20,old=elFrontD(e);if(isHorizFront(e.front)){e.d=depth;if(e.front==='sever')e.y+=old-depth;}else{e.w=depth;if(e.front==='západ')e.x+=old-depth;}e.nicheDepthModel='reference+20';delete e.nicheDepthReview;pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iNicheShelves')?.addEventListener('change',ev=>{e.nicheShelves=clamp(Math.round(+ev.target.value||0),0,12);pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iFrameOff')?.addEventListener('change',ev=>{e.frameOff=ev.target.checked;pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iDishwasher')?.addEventListener('change',ev=>{setDishwasherSpace(e,ev.target.checked);pushHistoryQuiet();renderInspector();renderCanvas();});
@@ -6444,7 +6501,7 @@ function materialParts(){
   const parts = [];
   const add = (group, label, w, h, qty, edging=null) => {
     if(!(w > 0) || !(h > 0) || !(qty > 0)) return;
-    parts.push({ group, label, w:Math.round(w), h:Math.round(h), qty, ...(edging||{}) });
+    parts.push({ group, label, w:Math.round(w), h:Math.round(h), qty, ...(group==='body'?{decor:bodyDecor()}:group==='bok'?{decor:finishDecor()}:{}), ...(edging||{}) });
   };
 
   for(const e of S.project.elements){
@@ -6522,7 +6579,7 @@ function materialParts(){
   });
 
   parts.push(...hsFrameParts());
-  return parts.map(pt=>pt.group==='purchasedFront'?{...pt,edgeMm:0,edgeNote:'Hotová fóliovaná dvířka Trachea — bez hranění ABS'}:pt);
+  return parts.map(pt=>pt.group==='body'&&!Number.isFinite(pt.edgeMm)?{...pt,edgeMm:/bočnice/i.test(pt.label)?pt.h:pt.w,edgeNote:'ABS pouze přední hrana korpusu',decor:bodyDecor()}:pt).map(pt=>pt.group==='purchasedFront'?{...pt,edgeMm:0,edgeNote:'Hotová fóliovaná dvířka Trachea — bez hranění ABS'}:pt);
 }
 
 /* ── ROZVRŽENÍ DÍLŮ NA DESKY (skutečné skládání, ne jen plocha) ──────────
@@ -7001,7 +7058,7 @@ function renderPriceModal(){
   const rowsHtml = C.rows.map(r => `
     <tr>
       <td>
-        <input class="p-in p-name" data-g="${r.g.id}" data-f="name" value="${esc(r.g.name)}">
+        <input class="p-in p-name" data-g="${r.g.id}" data-f="name" value="${esc(r.g.name)}"><small>${r.g.id==='body'?esc(bodyDecor()):r.g.id==='bok'?esc(finishDecor()):''}</small>
         ${dimCell(r)}
       </td>
       <td class="num" id="pArea_${r.g.id}">${r.linear ? (num2(r.lenM) + ' m') : (num2(r.area) + ' m²')}</td>
@@ -7043,8 +7100,8 @@ function renderPriceModal(){
       </tr></thead>
       <tbody>${rowsHtml}
         <tr>
-          <td><b>Hrana ABS</b><div class="p-sub">obvod dílů × podíl hranění</div></td>
-          <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m<br><small>StrongMax: dno 0, záda 1× šířka; procento platí pro ostatní dílce.</small></td>
+          <td><b>Hrana ABS</b><div class="p-sub">korpusy: přesné přední hrany; ostatní dle pravidel</div></td>
+          <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m<br><small>Korpusy, nika a opláštění: přední hrany. StrongMax: dno 0, záda 1× šířka. Procento pouze pro ostatní dílce (např. čela).</small></td>
           <td class="num"><input class="p-in num" id="pEdgeShare" type="number" min="0" max="100" step="5" value="${P.edgeShare}"> %</td>
           <td class="num">—</td>
           <td class="num"><input class="p-in num" id="pEdgePrice" type="number" min="0" step="1" value="${P.edgePrice}"></td>
@@ -7058,7 +7115,8 @@ function renderPriceModal(){
     </table>
 
     <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; kompletní interní podklady se tisknou samostatně přes Interní PDF.</p>
-    <div class="p-h">Orámování / opláštění HS</div><p class="hint">DTD 18 mm, dekor ${esc(finishDecor())}. Panely mezi krajními Bok+, korpus + 20 mm do hloubky. ABS jen vpředu. Každá souvislá řada zvlášť, dlouhé řady dělené na spojích skříní dle délky desky.</p><label class="chk"><input id="pFrameTop" type="checkbox" ${P.upperFrame?.top?'checked':''}> Horní opláštění HS</label><label class="chk"><input id="pFrameBottom" type="checkbox" ${P.upperFrame?.bottom?'checked':''}> Spodní opláštění HS</label><p class="hint">Bok+ u orámované HS automaticky kryje i tloušťku zapnutých panelů (18 mm za každý). Korpusy se nepřesouvají.</p>
+    <div class="p-h">Orámování / opláštění HS</div><p class="hint">DTD 18 mm, dekor ${esc(finishDecor())}. Panely mezi krajními Bok+, korpus + 20 mm do hloubky. ABS jen vpředu. Rohy L/U navazují přes blende na tupo; průběžný panel vyberte níže. Dlouhé řady dělené na spojích skříní dle délky desky.</p><label class="chk"><input id="pFrameTop" type="checkbox" ${P.upperFrame?.top?'checked':''}> Horní opláštění HS</label><label class="chk"><input id="pFrameBottom" type="checkbox" ${P.upperFrame?.bottom?'checked':''}> Spodní opláštění HS</label><p class="hint">Bok+ u orámované HS automaticky kryje i tloušťku zapnutých panelů (18 mm za každý). Korpusy se nepřesouvají.</p>
+    <div id="frameCornerControls">${frameCornerOptions()}</div>
     <div class="p-h">Kování podle skříní</div>
     <button class="tb" id="pPrintTechnical" type="button">Uložit / tisk pro dílnu — hotové PDF</button><p class="hint">Dílenský export vytvoří přímo hotový soubor PDF, A4 na výšku. Po vytvoření stiskněte Otevřít PDF nebo Stáhnout PDF. V náhledu pak zvolte Sdílet → Uložit do Souborů nebo Tisk. Prohlížeč už znovu nestránkuje HTML, takže nevkládá prázdné listy mezi stránky. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
@@ -7148,6 +7206,7 @@ function bindPriceInputs(){
   body._pbound = true;
   body.addEventListener('input', ev => {
     const el = ev.target, P = pricing();
+    if(el.dataset?.frameCorner){P.upperFrame=P.upperFrame||{};P.upperFrame.cornerThrough=P.upperFrame.cornerThrough||{};P.upperFrame.cornerThrough[el.dataset.frameCorner]=el.value;renderPriceModal();save();renderCanvas();return;}
     if(['pFrameTop','pFrameBottom'].includes(el.id)){P.upperFrame=P.upperFrame||{};P.upperFrame[el.id==='pFrameTop'?'top':'bottom']=el.checked;renderPriceModal();save();renderCanvas();return;}
     if(['pLedEnabled','pLedReserve','pLedSupply'].includes(el.id)){
       P.led=P.led||{};if(el.id==='pLedEnabled')P.led.enabled=el.checked;if(el.id==='pLedReserve')P.led.reserve=+el.value;if(el.id==='pLedSupply')P.led.supply=el.value;updatePriceTotals();save();return;
@@ -7342,7 +7401,7 @@ function pricePageHtml(opt){
         + (r.byLen ? ` · ${fmt(Math.round(r.totalLen))} mm délky` : '');
     const qty = r.linear ? `${num2(r.lenM)} m` : `${num2(r.area)} m²`;
     return `<tr>
-      <td>${esc(r.g.name)}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear || r.byLen ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
+      <td>${esc(materialGroupLabel(r.g))}<br><span style="color:#777;font-size:7.5pt">${sub}${r.linear || r.byLen ? '' : ' · dílů ' + r.nPieces + ' ks'}</span></td>
       <td class="num">${qty}</td>
       <td class="num">${fmtQty(r.qty != null ? r.qty : r.sheets)}</td>
       <td class="num">${fmt(r.g.price)}</td>
@@ -7368,7 +7427,7 @@ function pricePageHtml(opt){
         ${C.purchasedFronts.qty?`<tr><td>${esc(C.purchasedFronts.label)} — neoceněná čela</td><td class="num">${num2(C.purchasedFronts.area)} m²</td><td class="num">${C.purchasedFronts.qty}</td><td>nezadáno</td><td>NEZAHRNUTO</td></tr>`:''}
         <tr>
           <td>Hrana ABS – obvod dílů ${num2(C.edgeM)} m × ${fmt(pricing().edgePrice)} Kč/m
-            (ostatní dílce ${pricing().edgeShare} %; StrongMax přesně: dno bez hrany, záda 1× šířka)</td>
+            (korpusy jen přední hrany; ostatní neoznačené dílce ${pricing().edgeShare} %; StrongMax přesně: dno bez hrany, záda 1× šířka)</td>
           <td class="num">—</td><td class="num">—</td><td class="num">—</td>
           <td class="num">${fmt(C.edgeTotal)}</td>
         </tr>
@@ -7653,7 +7712,7 @@ function buildPrint(technicalRequested=true){
   if(technical&&(els.length || wins.length || syms.length)){
     const LAM = 18;   // síla lamina – půda je o dvě síly užší
     const rowFor = (e, i) => {
-      const wNom = elFrontW(e), dNom = elFrontD(e);
+      const wNom = elFrontW(e), dNom = isNiche(e)?nicheFullDepth(e):elFrontD(e);
       const pw = wNom - 2*LAM;            // šířka půdy i latí (podél čela)
       const k3v = elKind3(e);
       const noteX = isDishwasherSpace(e) ? ('Prostor pro myčku — bez korpusu, HDF, polic, pantů a noh; pouze čelo.'+(e.note?' '+e.note:'')) : (k3v==='base') ? (e.note||'') : ((k3v==='upper'?'horní skříň':'sloup') + (e.note?' — '+e.note:''));
@@ -7903,8 +7962,8 @@ function drawingSvg(P, opt){
   // prvky – tenká linka, žádná výplň přes sousedy (jen prvky dané vrstvy)
   for(const e of S.project.elements){
     if(filter && !filter(e)) continue;
-    const upEl = elKind3(e)==='upper';
-    parts.push(`<rect x="${e.x}" y="${e.y}" width="${Math.max(e.w,1)}" height="${Math.max(e.d,1)}"
+    const upEl = elKind3(e)==='upper';const pr=nichePlanRect(e);
+    parts.push(`<rect x="${pr.x}" y="${pr.y}" width="${Math.max(pr.w,1)}" height="${Math.max(pr.h,1)}"
       fill="${e.color}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(80, e.w*0.14, e.d*0.14);
@@ -7928,7 +7987,7 @@ function drawingSvg(P, opt){
       const top=cy-((lines.length-1)*size*1.12+(withDim?size:0))/2;
       parts.push(`<g data-print-label="${esc(e.id)}" transform="rotate(${frontLabelAngle(e)} ${R(cx)} ${R(cy)})"><title>${esc(e.name||'')}</title>`);
       lines.forEach((line,i)=>parts.push(`<text x="${R(cx)}" y="${R(top+i*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}" font-weight="700" fill="#0d1117" style="font-family:Helvetica,Arial,sans-serif">${esc(line)}</text>`));
-      if(withDim)parts.push(`<text x="${R(cx)}" y="${R(top+lines.length*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs(clamp(size*k*.66,1.7,2.6))}" fill="#374151" style="font-family:Helvetica,Arial,sans-serif">${fmt(elFrontW(e))} × ${fmt(elFrontD(e))}</text>`);
+      if(withDim)parts.push(`<text x="${R(cx)}" y="${R(top+lines.length*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs(clamp(size*k*.66,1.7,2.6))}" fill="#374151" style="font-family:Helvetica,Arial,sans-serif">${fmt(elFrontW(e))} × ${fmt(isNiche(e)?nicheFullDepth(e):elFrontD(e))}</text>`);
       parts.push('</g>');
     }
   }
@@ -8365,6 +8424,7 @@ function loadProject(p, {resetHistory=true}={}){
       const o = { ...e, id:e.id||uid('e'), x:+e.x||0, y:+e.y||0,
         w:+e.w||600, d:+e.d||600, name:e.name||'', note:e.note||'', qty:e.qty||1,
         color:e.color||COLORS[0], front:e.front||'jih' };
+      if(isNiche(o)&&!o.nicheDepthModel){o.nicheDepthReview=elFrontD(o);o.nicheDepthModel='reference+20';}
       const kd = String(o.kind ?? '').toLowerCase();
       if(kd === 'upper' || kd === 'base' || kd === 'column') o.kind = kd; else delete o.kind;
       const hv = +o.h;
