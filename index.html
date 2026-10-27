@@ -625,7 +625,8 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <p class="span2 hint" id="fFrontMaterialHint"></p>
       <label class="fld" id="fLaminoDecorWrap"><span>Dekor lamina čel</span><input id="fDecor_front" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Pracovní deska</span><input id="fDecor_worktop" placeholder="Název / kód / barva (volitelné)"></label>
-      <label class="fld"><span>Korpusy a pohledové boky</span><input id="fDecor_body" placeholder="Název / kód / barva (volitelné)"></label>
+      <label class="fld"><span>Bok+, rám HS a niky — společný dekor</span><input id="fDecor_finish" placeholder="Prázdné = dekor korpusů"></label>
+      <label class="fld"><span>Korpusy</span><input id="fDecor_body" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Podlaha</span><input id="fDecor_floor" placeholder="Název / kód / barva (volitelné)"></label>
@@ -1200,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v84'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-27-nabidka-v85'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -1253,6 +1254,7 @@ const DRAWER_STACK_DFLT = [350, 223, 125];    // čela zásuvek od spodu [mm]
 
 const DEMOS_HARDWARE = {"sm89": {"code": "503066", "label": "StrongMax 18 H89/500, bílá, tlumení", "unit": "sada", "gross": 733.63, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/k-strongmax-18-zasuvka-h89-500mm-bila/"}, "sm185": {"code": "558508", "label": "StrongMax 18 H185/500, bílá, sada (2026)", "unit": "sada", "gross": 939.33, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/strongmax-18-zasuvka-h185-500mm-bila-sada-2026/"}, "sm249": {"code": "558513", "label": "StrongMax 18 H249/500, bílá, sada (2026)", "unit": "sada", "gross": 1101.64, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/strongmax-18-zasuvka-h249-500mm-bila-sada-2026/"}, "hinge": {"code": "92580T", "label": "StrongHinges S5 naložený 110°, tlumení", "unit": "ks", "gross": 44.92, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/stronghinges-s5-zaves-klip-nalozeny-s-tlumenim-110-excentr-vrut/"}, "plate": {"code": "92591T", "label": "StrongHinges S5 podložka H0, eurošroub", "unit": "ks", "gross": 5.37, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/stronghinges-s5-montazni-podlozka-klip-h0-pro-zaves-s5-eurosroub/"}};
 
+Object.assign(DEMOS_HARDWARE,{wire200:{code:'509444',label:'Drát — StrongWire dvojkoš 200 mm, tlumený komplet',unit:'sada',gross:1308.75,vat:21,date:'2026-10-27',url:'https://www.demos-trade.cz/k-strongwire-dvojkos-200-mm-celodrateny-tlumeny-kulickovy-vysuv/'}});
 Object.assign(DEMOS_HARDWARE, {"leg": {"code": "146995", "label": "StrongLegs rektifikační noha AP002 150Rmm — doprodej", "unit": "ks", "gross": 34.74, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/stronglegs-rektifikacni-noha-ap002-150rmm/", "closing": true}});
 Object.assign(DEMOS_HARDWARE, {"blum_22F2500": {"code": "507333", "blum": "22F2500", "label": "BLUM 22F2500 Aventos HF Top výklop slabý, vruty (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2341.12, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22f2500-aventos-hf-top-vyklop-slaby-vruty/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22F2800": {"code": "507336", "blum": "22F2800", "label": "BLUM 22F2800 Aventos HF Top výklop silný, vruty (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2558.86, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22f2800-aventos-hf-top-vyklop-silny-vruty/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22F3200": {"code": "507340", "blum": "22F3200", "label": "BLUM 22F3200 Aventos HF Top ramena - 480-610mm", "unit": "pár", "gross": 1112.71, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22f3200-aventos-hf-top-ramena-480-610mm/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22F3500": {"code": "507341", "blum": "22F3500", "label": "BLUM 22F3500 Aventos HF Top ramena - 600-910mm", "unit": "pár", "gross": 1366.74, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22f3500-aventos-hf-top-ramena-600-910mm/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22F3900": {"code": "507342", "blum": "22F3900", "label": "BLUM 22F3900 Aventos HF Top ramena - 840-1200mm", "unit": "pár", "gross": 1620.79, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22f3900-aventos-hf-top-ramena-840-1200mm/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22.8000": {"code": "507344", "blum": "22.8000", "label": "BLUM 22.8000 Aventos HF/HL/HS Top krytky bez S-D, světle šedá", "unit": "sada", "gross": 358.32, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22-8000-aventos-hf-hl-hs-top-krytky-bez-s-d-svetle-seda/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_70T5550": {"code": "12023", "blum": "70T5550.TL", "label": "BLUM 70T5550.TL závěs naložený 120°, Tip-on, vrut", "unit": "ks", "gross": 69.06, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-70t5550-tl-zaves-nalozeny-120-tip-on-vrut/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_78Z5500T": {"code": "12024", "blum": "78Z5500T", "label": "BLUM 78Z5500T závěs středový, vrut", "unit": "ks", "gross": 132.11, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-78z5500t-zaves-stredovy-vrut/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_175H3100": {"code": "203387", "blum": "175H3100", "label": "BLUM 175H3100 montážní podložka, přímá, vrut, 8,5mm", "unit": "ks", "gross": 19.5, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-175h3100-montazni-podlozka-prima-vrut-8-5mm/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22K2300": {"code": "347810", "blum": "22K2300", "label": "BLUM 22K2300 Aventos HK Top výklop slabý (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2092.74, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22k2300-aventos-hk-top-vyklop-slaby/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22K2500": {"code": "347811", "blum": "22K2500", "label": "BLUM 22K2500 Aventos HK Top výklop střední (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2092.74, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22k2500-aventos-hk-top-vyklop-stredni/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22K2700": {"code": "347812", "blum": "22K2700", "label": "BLUM 22K2700 Aventos HK Top výklop silný (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2102.96, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22k2700-aventos-hk-top-vyklop-silny/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22K2900": {"code": "347813", "blum": "22K2900", "label": "BLUM 22K2900 Aventos HK Top výklop nejsilnější (2 mechanizmy + 8 vrutů 4×35)", "unit": "sada", "gross": 2460.57, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22k2900-aventos-hk-top-vyklop-nejsilnejsi/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_22K8000": {"code": "347833", "blum": "22K8000", "label": "BLUM 22K8000 Aventos HK Top krytky bez S-D, světle šedá", "unit": "sada", "gross": 301.25, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-22k8000-aventos-hk-top-krytky-bez-s-d-svetle-seda/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_20S4200": {"code": "13781", "blum": "20S4200", "label": "BLUM 20S4200 Aventos HK/HS/HL Top čelní příchyt", "unit": "pár", "gross": 128.8, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-20s4200-aventos-hk-hs-hl-top-celni-prichyt/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_20K2B00": {"code": "231749", "blum": "20K2B00", "label": "K-BLUM 20K2B00 Aventos HK-S výklop slabý, šedá (2 mechanizmy + krytky; bez příchytů a vrutů)", "unit": "sada", "gross": 1008.84, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/k-blum-20k2b00-aventos-hk-s-vyklop-slaby-seda/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_20K2C00": {"code": "231750", "blum": "20K2C00", "label": "K-BLUM 20K2C00 Aventos HK-S výklop střední, šedá (2 mechanizmy + krytky; bez příchytů a vrutů)", "unit": "sada", "gross": 1123.73, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/k-blum-20k2c00-aventos-hk-s-vyklop-stredni-seda/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_20K2E00": {"code": "231751", "blum": "20K2E00", "label": "K-BLUM 20K2E00 Aventos HK-S výklop silný, šedá (2 mechanizmy + krytky; bez příchytů a vrutů)", "unit": "sada", "gross": 1123.73, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/k-blum-20k2e00-aventos-hk-s-vyklop-silny-seda/", "family": "blum", "sourceDate": "2026-10-26"}, "blum_609.1500": {"code": "12380", "blum": "609.1500", "label": "BLUM 609.1500 vrut 3,5x15 — spotřeba; ověřit balení při objednání", "unit": "ks", "gross": 1.22, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/blum-609-1500-vrut-3-5x15/", "family": "blum", "sourceDate": "2026-10-26", "minOrder": 100}, "blum_screw35": {"code": "228929", "blum": "Ø4×35", "label": "StrongFix vrut PZ 4×35 — spotřeba; odběr po 1000 ks", "unit": "ks", "gross": 0.63, "vat": 21, "date": "2026-10-26", "url": "https://www.demos-trade.cz/strongfix-vrut-pz-4x35mm-zapustna-hlava-zinek-bily/", "minOrder": 1000, "family": "blum", "sourceDate": "2026-10-26"}});
 
@@ -1672,7 +1674,7 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + framePlanSvg(mm=>mm*4/S.view.zoom,layerShowsEl) + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -3287,6 +3289,107 @@ function bokHas(e, side){ return !!bokSides(e)[side]; }
 /* Čela do kalkulace: u každé skříně volitelně zapnutá, s ručním počtem
    dvířek a zásuvek. Rozměry se počítají reálně (viz frontPieces):
    šířka skříně − 4 mm na šířku, výška 704 mm, zásuvky 350/223/125. */
+/* HS frame, open niche and 200mm wire pull-out. All features are explicit,
+   older projects remain unchanged until switched on. */
+function isNiche(e){return !!e&&e.spaceType==='niche';}
+function isWire(e){return !!e&&e.spaceType==='wire200'&&elKind3(e)==='base';}
+function finishDecor(){return S.project.info.decors?.finish||S.project.info.decors?.body||'dekor Bok+';}
+function nicheShelves(e){return clamp(Math.round(e.nicheShelves??2),0,12);}
+function frameEnabled(e,side){return elKind3(e)==='upper'&&!e.frameOff&&pricing().upperFrame?.[side]===true;}
+function nicheCutParts(e){
+ const W=elFrontW(e),H=elH3(e),D=elFrontD(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
+ if(w<=0||h<=0||d<=0)return [];
+ const p=(label,w,h,qty,edgeMm)=>({group:'bok',label:'Nika — '+label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez hranění (vloženo mezi dílce)',decor:finishDecor()});
+ return [p('bočnice',D,H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
+}
+function wireCutParts(e){
+ const W=elFrontW(e),H=elH3(e),D=elFrontD(e);
+ return [
+  {group:'body',label:'Drát — bočnice',w:D,h:H,qty:2},
+  {group:'body',label:'Drát — dno',w:W-36,h:D,qty:1},
+  {group:'body',label:'Drát — horní lať',w:W-36,h:120,qty:2},
+  {group:'back',label:'Drát — záda HDF',w:W,h:H,qty:1}
+ ].filter(p=>p.w>0&&p.h>0);
+}
+function wireErrors(e){
+ const errors=[];
+ if(Math.abs(elFrontW(e)-200)>.1)errors.push('Drát 509444 je určen pro korpus šířky 200 mm.');
+ if(elFrontD(e)-3<475)errors.push('Drát potřebuje alespoň 475 mm světlé hloubky (rozměr koše).');
+ if(elH3(e)-36<470)errors.push('Drát potřebuje alespoň 470 mm světlé výšky (rozměr koše).');
+ return errors;
+}
+function hsFrameRuns(side){
+ if(pricing().upperFrame?.[side]!==true)return [];
+ const lines=new Map(),extra=[];
+ for(const e of S.project.elements){
+  if(!frameEnabled(e,side))continue;
+  const f=e.front||'jih',hor=isHorizFront(f),a=hor?e.x:e.y,w=elFrontW(e),d=elFrontD(e);
+  const face=elFaceInfo(e).face,z=elZ0(e)+(side==='top'?elH3(e):0);
+  const key=[f,Math.round(face*10),Math.round(d*10),Math.round(z*10)].join('|');
+  const item={a,b:a+w,w,e,f,face,depth:d+20,z,side};
+  if(!lines.has(key))lines.set(key,[]);lines.get(key).push(item);
+  for(let q=1;q<Math.max(1,Math.round(e.qty||1));q++)extra.push({...item,els:[e],length:w,additional:true});
+ }
+ const runs=[];
+ for(const items of lines.values()){
+  for(const t of items.sort((a,b)=>a.a-b.a)){
+   const last=runs.at(-1);
+   if(last&&last.key===[t.f,t.face,t.depth,t.z].join('|')&&Math.abs(t.a-last.b)<=.1){last.b=t.b;last.length+=t.w;last.els.push(t.e);}
+   else runs.push({...t,key:[t.f,t.face,t.depth,t.z].join('|'),length:t.w,els:[t.e]});
+  }
+ }
+ return [...runs,...extra];
+}
+function hsFrameParts(){
+ const g=pricing().groups.find(g=>g.id==='bok'),kerf=+pricing().kerf||0;
+ const maxLen=Math.max(1,(pricing().rot?Math.max(g.bw,g.bh):g.bw)-kerf),parts=[];
+ for(const side of ['top','bottom'])for(const [idx,r] of hsFrameRuns(side).entries()){
+  // Only split at cabinet joints. A single overlong cabinet remains labelled
+  // and goes through the existing oversize handling rather than an invented joint.
+  const segments=[];let length=0;
+  for(const e of r.els){const w=elFrontW(e);if(length&&length+w>maxLen){segments.push(length);length=0;}length+=w;}if(length)segments.push(length);
+  segments.forEach((w,i)=>parts.push({group:'bok',label:'Opláštění HS '+(side==='top'?'horní':'spodní')+' — řada '+(idx+1)+(segments.length>1?' / díl '+(i+1):'')+(r.additional?' / další kus':''),w,h:r.depth,qty:1,edgeMm:w,edgeNote:'ABS pouze přední dlouhá hrana',decor:finishDecor(),frame:true}));
+ }
+ return parts;
+}
+function hsFrameRect(r){
+ const d=r.depth,f=r.f,face=r.face;
+ if(f==='jih')return {x:r.a,y:face-d+20,w:r.length,h:d};
+ if(f==='sever')return {x:r.a,y:face-20,w:r.length,h:d};
+ if(f==='východ')return {x:face-d+20,y:r.a,w:d,h:r.length};
+ return {x:face-20,y:r.a,w:d,h:r.length};
+}
+function frame3(sc,mat){
+ for(const side of ['top','bottom'])for(const r of hsFrameRuns(side)){
+  if(r.additional)continue;const b=hsFrameRect(r),z=side==='top'?r.z:r.z-18;
+  scBox(sc,b.x,b.y,b.x+b.w,b.y+b.h,z,z+18,mat);
+ }
+}
+function niche3(sc,e,mat){
+ const W=elFrontW(e),D=elFrontD(e),H=elH3(e),z=elZ0(e),f=e.front||'jih';
+ const box=(a,b,c,d,lo,hi)=>{
+  if(f==='jih')scBox(sc,e.x+a,e.y+c,e.x+b,e.y+d,z+lo,z+hi,mat);
+  else if(f==='sever')scBox(sc,e.x+a,e.y+D-d,e.x+b,e.y+D-c,z+lo,z+hi,mat);
+  else if(f==='východ')scBox(sc,e.x+c,e.y+a,e.x+d,e.y+b,z+lo,z+hi,mat);
+  else scBox(sc,e.x+D-d,e.y+a,e.x+D-c,e.y+b,z+lo,z+hi,mat);
+ };
+ box(0,18,0,D,0,H);box(W-18,W,0,D,0,H);box(18,W-18,0,D,0,18);box(18,W-18,0,D,H-18,H);box(18,W-18,0,18,18,H-18);
+ for(let i=1;i<=nicheShelves(e);i++){const h=18+i*(H-36)/(nicheShelves(e)+1);box(18,W-18,18,D,h-9,h+9);}
+}
+function framePlanSvg(sw,filter){
+ const seen=new Set(),out=[];
+ for(const side of ['top','bottom'])for(const r of hsFrameRuns(side)){
+  if(r.additional||filter&&!r.els.every(filter))continue;
+  const b=hsFrameRect(r),key=[b.x,b.y,b.w,b.h].join('|');if(seen.has(key))continue;seen.add(key);
+  out.push(`<rect data-frame-outline="true" x="${R(b.x)}" y="${R(b.y)}" width="${R(b.w)}" height="${R(b.h)}" fill="none" stroke="#0f766e" stroke-width="${sw(.22)}" stroke-dasharray="${sw(1.5)} ${sw(1)}" pointer-events="none"><title>Opláštění HS ${fmt(r.length)} × ${fmt(r.depth)} mm</title></rect>`);
+ }
+ return out.join('');
+}
+function framePrintHtml(){
+ const parts=hsFrameParts();if(!parts.length)return '';
+ return `<h3>Opláštění HS — ${esc(finishDecor())}, DTD 18 mm</h3><p>Panely mezi krajními Bok+, hloubka korpusu + 20 mm. ABS jen přední dlouhá hrana. Samostatné řady a směry se nespojují přes rohové mezery.</p><table class="pr-table"><thead><tr><th>Dílec</th><th>Délka mm</th><th>Hloubka mm</th><th>Ks</th><th>ABS mm/ks</th></tr></thead><tbody>${parts.map(p=>`<tr><td>${esc(p.label)}</td><td>${fmt(p.w)}</td><td>${fmt(p.h)}</td><td>${p.qty}</td><td>${fmt(p.edgeMm)}</td></tr>`).join('')}</tbody></table>`;
+}
+
 function isDishwasherSpace(e){return !!e && e.spaceType==='dishwasher' && elKind3(e)==='base';}
 function setDishwasherSpace(e,on){
  e.spaceType=on?'dishwasher':'cabinet';
@@ -3294,6 +3397,8 @@ function setDishwasherSpace(e,on){
 }
 function dishwasherNameSuggestion(e){return /myck/.test((e.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());}
 function frontCfg(e){
+  if(isNiche(e))return {on:false,doors:0,drawers:0};
+  if(isWire(e))return {on:!!e.fronts?.on,doors:1,drawers:0};
   const f = e && e.fronts;
   if(isDishwasherSpace(e))return {on:!!f?.on,doors:1,drawers:0};
   return {
@@ -3534,7 +3639,8 @@ function blendeCfg(e){
    - výška dvířek  = 704 mm (DS i HS)
    - čela zásuvek od spodu 350 / 223 / 125 mm, mezera 3 mm; horní čelo
      (poslední zásuvka nebo dvířka nad nimi) vždy dorovná do 704 mm */
-function upperOpening(e){return ((elKind3(e)==='upper'&&['hfTop','hkTop','hkS'].includes(e.opening?.type))||(elKind3(e)==='column'&&e.opening?.type==='hkS'))?e.opening.type:'hinges';}
+function upperOpening(e){
+ if(isNiche(e))return 'hinges';return ((elKind3(e)==='upper'&&['hfTop','hkTop','hkS'].includes(e.opening?.type))||(elKind3(e)==='column'&&e.opening?.type==='hkS'))?e.opening.type:'hinges';}
 function upperFrontTotal(e){return upperOpening(e)==='hkS'?Math.max(1,+(e.opening?.height??400)):Math.max(1,elH3(e)-6);}
 function hfTopHeight(e){return e.opening?.topH??Math.ceil((upperFrontTotal(e)-2)/2);}
 function upperOpeningCheck(e){
@@ -3570,6 +3676,7 @@ function upperOpeningCheck(e){
   return {errors,notice:override+(type==='hkS'?'HK-S: pracovní limit čela 400 mm dle vašeho pravidla (nikoli katalogové maximum). ':'')+'Kontrola rozsahu korpusu není potvrzení vhodnosti kování. Ověřte skutečnou světlou hloubku, hmotnost čel včetně úchytek, faktor výkonnosti, ramena a kolize dle Blum. Výpočet síly a seznam komponent jsou v části Kování Démos; odhad hmotnosti sám nepotvrzuje montáž.'};
 }
 function upperOpeningForm(e){
+ if(isNiche(e))return '';
   if(!['upper','column'].includes(elKind3(e)))return '';
   const type=upperOpening(e),top=hfTopHeight(e),check=upperOpeningCheck(e);
   return `<div class="insp-sec"><h4>${elKind3(e)==='column'?'Výklop nahoře ve sloupu':'Otevírání horní skříně'}</h4><label class="fld"><span>Kování / uspořádání čel</span><select id="iUpperOpening"><option value="hinges" ${type==='hinges'?'selected':''}>${elKind3(e)==='column'?'Bez horního výklopu':'Panty — dvířka vedle sebe'}</option><option ${elKind3(e)==='column'?'disabled':''} value="hfTop" ${type==='hfTop'?'selected':''}>Blum AVENTOS HF top — dvě čela nad sebou</option><option ${elKind3(e)==='column'?'disabled':''} value="hkTop" ${type==='hkTop'?'selected':''}>Blum AVENTOS HK top — jedno čelo</option><option value="hkS" ${type==='hkS'?'selected':''}>Blum AVENTOS HK-S — jedno čelo</option></select></label>
@@ -3582,6 +3689,8 @@ function frontPieces(e){
   const P = pricing();
   const W = elFrontW(e);
   const total = Math.max(100, +P.doorH || DOOR_H_DFLT);
+  if(isNiche(e))return {doors:[],drawers:[],wDoor:0,wDraw:0,total,blende:null,ok:true};
+  if(isWire(e))return {doors:[total],drawers:[],wDoor:Math.max(1,W-4),wDraw:Math.max(1,W-4),total,blende:null,ok:true};
   if(isDishwasherSpace(e))return {doors:[total],drawers:[],wDoor:Math.max(1,W-4),wDraw:Math.max(1,W-4),total,blende:null,ok:true};
   const gap   = +P.drawerGap >= 0 ? +P.drawerGap : DRAWER_GAP;
   const stack = (Array.isArray(P.drawerStack) && P.drawerStack.length) ? P.drawerStack : DRAWER_STACK_DFLT;
@@ -3742,7 +3851,7 @@ function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokB
 /* Výška boku+ podle druhu prvku (u sloupu do výšky sloupu). */
 function bokH(e){
   const k = elKind3(e);
-  if(k==='upper') return BOK_H_HS;
+  if(k==='upper') return (frameEnabled(e,'top')||frameEnabled(e,'bottom'))?elH3(e)+18*(+frameEnabled(e,'top')+ +frameEnabled(e,'bottom')):BOK_H_HS;
   if(k==='column') return elH3(e);
   return BOK_H_DS;
 }
@@ -4198,16 +4307,19 @@ function renderInspector(){
             <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
           </div>
         </label>
+        <label class="fld"><span>Provedení prvku</span><select id="iSpecialType"><option value="cabinet" ${!isNiche(e)&&!isWire(e)&&!isDishwasherSpace(e)?'selected':''}>Běžná skříň</option><option value="niche" ${isNiche(e)?'selected':''}>Nika — otevřená, pohledové lamino</option>${elKind3(e)==='base'?`<option value="wire200" ${isWire(e)?'selected':''}>Drát — výsuvný dvojkoš 200 mm</option><option value="dishwasher" ${isDishwasherSpace(e)?'selected':''}>Prostor pro myčku</option>`:''}</select></label>
+        ${isNiche(e)?`<label class="fld"><span>Počet polic niky</span><input id="iNicheShelves" type="number" min="0" max="12" value="${nicheShelves(e)}"></label><p class="hint">Lamino 18 mm, vložená záda. Dekor: ${esc(finishDecor())}. Dno/půda mezi bočnicemi, police před zády. ABS na předních hranách, záda bez ABS.</p>`:''}
+        ${elKind3(e)==='upper'?`<label class="chk"><input id="iFrameOff" type="checkbox" ${e.frameOff?'checked':''}> Vynechat tuto HS z opláštění</label><p class="hint">Horní/spodní opláštění celé sestavy zapnete v Kalkulaci. Hloubka ${fmt(elFrontD(e)+20)} mm, délka podle souvislé řady.</p>`:''}
         ${elKind3(e)==='base'?`<label class="chk"><input id="iDishwasher" type="checkbox" ${isDishwasherSpace(e)?'checked':''}> Prostor pro vestavnou myčku — bez korpusu</label><p class="hint">${isDishwasherSpace(e)?'Pouze 1 čelo (šířka místa − 4 mm). Bez korpusu, zad, polic, pantů a noh. PD a průběžný sokl zůstávají; ručně zapnutý Bok+ se počítá zvlášť.':dishwasherNameSuggestion(e)?'Název odpovídá myčce. Potvrďte volbu výše, jinak se prvek počítá jako běžná skříň.':'Pro myčku 600 i 450 mm zapněte tuto volbu; šířku místa zadejte v rozměrech.'}</p>`:''}
       </div>
       <div class="insp-sec">
         <h4>Dvířka a zásuvky</h4>
         <label class="chk" style="margin-bottom:8px">
-          <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> Zahrnout čela do kalkulace
+          <input type="checkbox" id="iFrOn" ${isNiche(e)?'disabled':''} ${frontCfg(e).on?'checked':''}> Zahrnout čela do kalkulace
         </label>
         <div class="row2">
-          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${isDishwasherSpace(e)||upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
-          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${isDishwasherSpace(e)||elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${isNiche(e)||isWire(e)||isDishwasherSpace(e)||upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
+          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${isNiche(e)||isWire(e)||isDishwasherSpace(e)||elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
         <p class="hint" style="margin-top:6px">${frontCfg(e).on?'<b>Rozměry čel:</b> '+frontSizesText(e):'Čela zatím nejsou zahrnuta do kalkulace.'}</p>
         ${(() => {
@@ -4341,6 +4453,15 @@ function renderInspector(){
       e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
       pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e);
     });
+    $('#iSpecialType')?.addEventListener('change',ev=>{
+      const type=ev.target.value;e.spaceType=type;
+      if(type==='dishwasher')setDishwasherSpace(e,true);
+      if(type==='niche')e.fronts={on:false,doors:0,drawers:0};
+      if(type==='wire200')e.fronts={on:true,doors:1,drawers:0};
+      pushHistoryQuiet();renderInspector();renderCanvas();
+    });
+    $('#iNicheShelves')?.addEventListener('change',ev=>{e.nicheShelves=clamp(Math.round(+ev.target.value||0),0,12);pushHistoryQuiet();renderInspector();renderCanvas();});
+    $('#iFrameOff')?.addEventListener('change',ev=>{e.frameOff=ev.target.checked;pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iDishwasher')?.addEventListener('change',ev=>{setDishwasherSpace(e,ev.target.checked);pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
@@ -4751,6 +4872,8 @@ function defaultH3(e){
 }
 function elH3(e){ const h = +e.h; return h>=100 ? h : defaultH3(e); }
 function kindLabel3(e){
+  if(isNiche(e))return 'nika — otevřená';
+  if(isWire(e))return 'Drát — výsuv 200 mm';
   const k = elKind3(e);
   return k==='upper' ? 'horní skříň' : k==='column' ? 'sloup' : 'spodní skříň';
 }
@@ -5014,11 +5137,11 @@ function elements3(sc, mats){
   S.project.elements.forEach((e, i) => {
     const h = elH3(e), z0 = elZ0(e), z1 = z0 + h;
     const mat = mats.el(e.color || '#c9c3b8');
-    scBox(sc, e.x, e.y, e.x + e.w, e.y + e.d, z0, z1, mat);
+    if(isNiche(e))niche3(sc,e,mat);else scBox(sc, e.x, e.y, e.x + e.w, e.y + e.d, z0, z1, mat);
     /* bok+ = tenký svislý panel(y) na boku/bocích skříně */
     for(const b of bokRects(e)){
       let zB0, zB1; const kb = elKind3(e);
-      if(kb==='upper')        { zB0 = B3D.upperBot;                 zB1 = B3D.upperBot + BOK_H_HS; }
+      if(kb==='upper')        { zB0 = z0-(frameEnabled(e,'bottom')?18:0); zB1 = zB0+bokH(e); }
       else if(kb==='column')  { zB0 = z0;                           zB1 = z1; }
       else                    { zB0 = B3D.floorT;                   zB1 = B3D.floorT + BOK_H_DS; }
       scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, zB0, zB1, mats.el('#d8d3c8'));
@@ -5092,6 +5215,7 @@ function buildScene3(noCeil){
   const mats = { wall:'#ece8e0', floor:'#d8d0c2', ceil:'#f6f4ef', glass:'#bcd7e8', counter:'#f0ede6', plinth:'#e7e0d3' };
   mats.el = hex => { used[hex]=1; return 'el_' + hex.replace('#',''); };
   elements3(sc, mats);
+  frame3(sc,mats.el('#d8d3c8'));
   counters3(sc);
   plinths3(sc, mats);
   room3(sc, mats, noCeil);
@@ -5213,7 +5337,7 @@ function doExport3D(){
 
 const DECOR_FIELDS = [
   ['front','Čela / dvířka'], ['worktop','Pracovní deska'],
-  ['body','Korpusy a pohledové boky'], ['backsplash','Zástěna'],
+  ['body','Korpusy'], ['finish','Bok+, opláštění HS a niky'], ['backsplash','Zástěna'],
   ['handles','Úchytky'], ['floor','Podlaha']
 ];
 function projectPngViews(){
@@ -5409,6 +5533,7 @@ function pngBlende3(sc){
 function buildPngScene(){
   const sc=mkScene();
   elements3(sc,{el:()=> 'body'});
+  frame3(sc,'body');
   const runs=pngCounterRuns();
   pngCounterMesh(sc,runs);
   pngBackDetails(sc,runs); pngBlende3(sc);
@@ -5422,6 +5547,7 @@ function buildPngScene(){
       else scBox(sc,e.x-ft,e.y+a,e.x,e.y+b,lo,hi,mat);
     };
     const cfg=frontCfg(e), W=elFrontW(e);
+    if(isNiche(e))continue;
     if(elKind3(e)==='base'&&e.appliances?.oven?.on)continue; // čelo trouby a spodní výsuv vykreslí pngAppliances
     if(cfg.on){
       const fp=frontPieces(e), start=2+(fp.blende?.cutL||0);
@@ -5783,7 +5909,7 @@ function PRICE_DEFAULTS(){ return ({
     { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
     { id:'top',   name:'Pracovní deska – 38 mm',           bw:4100, bh:640,  price:5500, waste:10, half:true },
-    { id:'bok',   name:'Bok+ a sokl – lamino DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
+    { id:'bok',   name:'Bok+, rám HS, niky a sokl – DTD 18 mm',   bw:2800, bh:2070, price:2400, waste:15 },
     { id:'back',  name:'Zadní díl – HDF 3 mm',             bw:2800, bh:2070, price:850,  waste:15 },
     { id:'zast',  name:'Zástěna – panel 4 100 × 640 mm',   bw:4100, bh:640,  price:5500, waste:0, lin:true, half:true },
     { id:'tl',    name:'TL – těsnící lišta 4 100 mm',      bw:4100, bh:0,    price:1200, waste:0, lin:true, half:true }
@@ -5799,6 +5925,7 @@ function pricing(){
     if(S.project) S.project.pricing = p;
     return p;
   }
+  const finishGroup=p.groups?.find(g=>g.id==='bok');if(finishGroup?.name==='Bok+ a sokl – lamino DTD 18 mm')finishGroup.name='Bok+, rám HS, niky a sokl – DTD 18 mm';
   if(!p.hardwareCatalog || typeof p.hardwareCatalog!=='object')p.hardwareCatalog={};
   for(const [key,item] of Object.entries(DEMOS_HARDWARE)){
     if(!p.hardwareCatalog[key])p.hardwareCatalog[key]={...item};
@@ -5947,6 +6074,7 @@ function topDepthOfRun(r){
 
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
 function upperCutParts(e){
+  if(isNiche(e))return nicheCutParts(e);
   const W=elFrontW(e),D=elFrontD(e),H=elH3(e),inner=W-36;
   return [
     {group:'body',label:'bočnice HS',w:D,h:H,qty:2},
@@ -6166,6 +6294,11 @@ function hardwareForEl(e){
     rows.push({...p,key,tag,elementId:e.id,qty:qty*count,totalGross:roundMoney(p.gross*qty*count)});
   };
   add('leg',cabinetLegCount(e));
+  if(isNiche(e)){if(!nicheCutParts(e).length)warnings.push(tag+': rozměry niky nestačí pro 18mm bočnice a vložená záda.');return {rows,warnings,notices,reports};}
+  if(isWire(e)){
+   const errors=wireErrors(e);if(errors.length)warnings.push(...errors.map(x=>tag+': '+x));else add('wire200',1);
+   return {rows,warnings,notices,reports};
+  }
   if(!fr.on)return {rows,warnings,notices,reports};
   const sm=strongMaxModel(e);
   if(fp.drawers.length){
@@ -6215,6 +6348,7 @@ function hardwareCalc(){
 }
 function hardwareGroupDescription(g){
  const parts=[],has=k=>g.rows.some(r=>r.key===k);
+ if(has('wire200'))parts.push('Drát — dvojkoš 200 mm s tlumenými výsuvy, kompletní sada');
  if(has('leg'))parts.push('Rektifikační nohy 150 mm — 4 ks/skříň ('+g.rows.filter(r=>r.key==='leg').reduce((n,r)=>n+r.qty,0)+' ks celkem)');
  const lift=g.reports[0]?.model;
  if(lift){
@@ -6256,6 +6390,9 @@ function hardwareCatalogForm(){
  return `<details class="insp-help"><summary>Ceník Démos / vlastní ceny</summary><p class="hint">Ceny vždy s DPH 21 %. Ruční úpravy zůstanou uložené v projektu. Ověřené ceny jsou ze dne 26. 10. 2026; další aktualizace je nepřepisuje.</p><table class="p-tbl"><thead><tr><th>Položka</th><th>Kč/MJ s DPH</th><th>Zdroj</th></tr></thead><tbody>${Object.entries(catalog).filter(([key])=>DEMOS_HARDWARE[key]).map(([key,p])=>`<tr><td>${esc(p.label)}<br>${esc(p.code)} · ${esc(p.unit)}${p.custom?' · vlastní cena':''}</td><td><input class="p-in num" data-hw-price="${key}" type="number" min="0" step="0.01" value="${p.gross}"></td><td><a href="${esc(p.url)}" target="_blank" rel="noopener">Démos</a></td></tr>`).join('')}</tbody></table></details>`;
 }
 function hardwareForm(e){
+ if(isNiche(e))return '<p class="hint">Otevřená nika — bez čel, pantů a výsuvů. U spodní niky / sloupu zůstávají standardní 4 nohy. Závěsné/montážní kování zde není oceněné.</p>';
+ if(isWire(e)){const h=hardwareForEl(e);return `<p class="hint"><b>Drát — StrongWire 509444, 200 mm</b><br>Komplet: dvojkoš 509408 + pár tlumených výsuvů 92004T. Bez nábytkových pantů a běžných polic. Cena kompletu ${money2(pricing().hardwareCatalog.wire200.gross)} s DPH; nohy zvlášť. Ověřeno 27. 10. 2026.<br>${esc(h.warnings.join(' '))}</p><label class="fld"><span>Kování Drátu + nohy</span><select data-hw-field="mode"><option value="auto" ${e.hardware?.mode!=='off'?'selected':''}>Zahrnout do ceny</option><option value="off" ${e.hardware?.mode==='off'?'selected':''}>Nezahrnovat</option></select></label>`;}
+
  if(isDishwasherSpace(e))return '<p class="hint">Myčka má vlastní nohy i zavěšení čela. Nábytkové panty, podložky a nohy se neúčtují; samotný spotřebič není oceněný.</p>';
  const fr=frontCfg(e);if(!fr.on&&!cabinetLegCount(e))return '';
  const fp=frontPieces(e),type=upperOpening(e),cfg=e.hardware||{},h=hardwareForEl(e);
@@ -6317,7 +6454,11 @@ function materialParts(){
     const tag = (e.name || (k === 'upper' ? 'Horní skříň' : k === 'column' ? 'Sloup' : 'Spodní skříň'))
               + (q > 1 ? ' (' + q + '×)' : '');
     /* korpus: 2 bočnice, dno, horní deska, 2 police */
-    if(k==='upper'){
+    if(isNiche(e)){
+      nicheCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote,decor:p.decor}));
+    }else if(isWire(e)){
+      wireCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
+    }else if(k==='upper'){
       upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
     }else if(!isDishwasherSpace(e)){
     add('body', tag + ' – bočnice',        D, H, 2*q);
@@ -6344,7 +6485,7 @@ function materialParts(){
     /* bok+ na každé zapnuté straně */
     if(bokAny(e)){
       const nb = (bokHas(e,'L') ? 1 : 0) + (bokHas(e,'R') ? 1 : 0);
-      add('bok', tag + ' – bok+', bokDepthOf(e), bokH(e), nb*q);
+      add('bok', tag + ' – bok+', bokDepthOf(e), bokH(e), nb*q,{decor:finishDecor()});
     }
   }
 
@@ -6380,6 +6521,7 @@ function materialParts(){
       len, B3D.sokl, 1));
   });
 
+  parts.push(...hsFrameParts());
   return parts.map(pt=>pt.group==='purchasedFront'?{...pt,edgeMm:0,edgeNote:'Hotová fóliovaná dvířka Trachea — bez hranění ABS'}:pt);
 }
 
@@ -6916,6 +7058,7 @@ function renderPriceModal(){
     </table>
 
     <p class="hint">Zákaznická nabídka se tiskne přehledně na A4 na výšku. Výkresy zachovávají formát z Údajů projektu; kompletní interní podklady se tisknou samostatně přes Interní PDF.</p>
+    <div class="p-h">Orámování / opláštění HS</div><p class="hint">DTD 18 mm, dekor ${esc(finishDecor())}. Panely mezi krajními Bok+, korpus + 20 mm do hloubky. ABS jen vpředu. Každá souvislá řada zvlášť, dlouhé řady dělené na spojích skříní dle délky desky.</p><label class="chk"><input id="pFrameTop" type="checkbox" ${P.upperFrame?.top?'checked':''}> Horní opláštění HS</label><label class="chk"><input id="pFrameBottom" type="checkbox" ${P.upperFrame?.bottom?'checked':''}> Spodní opláštění HS</label><p class="hint">Bok+ u orámované HS automaticky kryje i tloušťku zapnutých panelů (18 mm za každý). Korpusy se nepřesouvají.</p>
     <div class="p-h">Kování podle skříní</div>
     <button class="tb" id="pPrintTechnical" type="button">Uložit / tisk pro dílnu — hotové PDF</button><p class="hint">Dílenský export vytvoří přímo hotový soubor PDF, A4 na výšku. Po vytvoření stiskněte Otevřít PDF nebo Stáhnout PDF. V náhledu pak zvolte Sdílet → Uložit do Souborů nebo Tisk. Prohlížeč už znovu nestránkuje HTML, takže nevkládá prázdné listy mezi stránky. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
@@ -7005,6 +7148,7 @@ function bindPriceInputs(){
   body._pbound = true;
   body.addEventListener('input', ev => {
     const el = ev.target, P = pricing();
+    if(['pFrameTop','pFrameBottom'].includes(el.id)){P.upperFrame=P.upperFrame||{};P.upperFrame[el.id==='pFrameTop'?'top':'bottom']=el.checked;renderPriceModal();save();renderCanvas();return;}
     if(['pLedEnabled','pLedReserve','pLedSupply'].includes(el.id)){
       P.led=P.led||{};if(el.id==='pLedEnabled')P.led.enabled=el.checked;if(el.id==='pLedReserve')P.led.reserve=+el.value;if(el.id==='pLedSupply')P.led.supply=el.value;updatePriceTotals();save();return;
     }
@@ -7147,6 +7291,7 @@ function customerQuoteData(){
  }
  for(const g of C.hardware.groups){
   const lift=g.reports[0]?.model;
+  if(isWire(getEl(g.elementId))&&!g.rows.some(r=>r.key==='wire200'))add('unpriced-wire','Drát — výsuvný dvojkoš 200 mm, neoceněný',g.count,'ks',null);
   const blumRows=g.rows.filter(r=>r.key.startsWith('blum_'));
   if(lift){
    if(blumRows.length)add('lift-'+lift.type,'Výklopy '+blumName(lift.type)+' — komplet',g.count,'ks',sum(blumRows));
@@ -7155,6 +7300,7 @@ function customerQuoteData(){
   for(const r of g.rows){
    if(['hinge','plate'].includes(r.key)||r.key.startsWith('blum_')&&lift)continue;
    if(r.key==='leg')add('legs','Rektifikační nohy 150 mm',r.qty,'ks',r.totalGross);
+   else if(r.key==='wire200')add('wire200','Drát — výsuvný dvojkoš 200 mm, komplet',r.qty,'ks',r.totalGross);
    else if(/^sm(89|185|249)$/.test(r.key))add(r.key,'Zásuvkové sady StrongMax H'+r.key.slice(2),r.qty,'ks',r.totalGross);
    else if(r.key==='lift'){
     const type=upperOpening(getEl(g.elementId));
@@ -7535,6 +7681,11 @@ function buildPrint(technicalRequested=true){
           <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)</td>
         </tr>`).join('');
       if(bokRows) out += bokRows;
+      if(isNiche(e)||isWire(e)){
+       const parts=isNiche(e)?nicheCutParts(e):wireCutParts(e);
+       out+=parts.map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'}${isNiche(e)?' · '+esc(finishDecor())+' · '+esc(p.edgeNote)+' · '+fmt(p.edgeMm)+' mm/ks':''}</td></tr>`).join('');
+       return out;
+      }
       if(k3v==='upper'||k3v==='column'){
         const check=upperOpeningCheck(e),typ=upperOpening(e);
         if(typ!=='hinges')out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>${esc(typ==='hfTop'?'HF top':typ==='hkTop'?'HK top':'HK-S')}</b> — ${check.errors.length?'NEVYHOVUJÍCÍ ZADÁNÍ: '+esc(check.errors.join(' ')):'Rozsah korpusu zkontrolován.'} ${esc(check.notice)}</td></tr>`;
@@ -7644,7 +7795,7 @@ function buildPrint(technicalRequested=true){
       <div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">B · Horní sestava (HS) – horní skříňky</b>${nCols?` <span style="font-weight:400;color:#666">(sloupy jsou vykázané v sekci DS – kreslí se i do výkresu HS)</span>`:''}</div>
       <table class="pr-table">${tableHead}<tbody>${listHS.map((e,i)=>rowFor(e,i)).join('')}</tbody>
       <tfoot><tr><td colspan="5">Celková šířka HS</td><td class="num">${fmt(totalHS)}</td><td></td></tr></tfoot></table>`;
-    tables += soklHtml + frontsHtml;
+    tables += soklHtml + frontsHtml + framePrintHtml();
     pages.push(`
     <section class="pr-page">
       <div class="pr-head">
@@ -7802,6 +7953,7 @@ function drawingSvg(P, opt){
 
   // bok+ (boční panely) – kreslí se zvlášť, nejsou skříně
   parts.push(boksPrintSvg(sw, filter));
+  parts.push(framePlanSvg(sw,filter));
 
   // značky instalací
   parts.push(symbolsSvg(sw, false, x => R(x), false, 0.35, mm => R(mm/k), 640)); // písmo kót instalací v mm papíru
