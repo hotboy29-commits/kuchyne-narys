@@ -1200,7 +1200,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-26-nabidka-v83'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-26-nabidka-v84'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3287,8 +3287,15 @@ function bokHas(e, side){ return !!bokSides(e)[side]; }
 /* Čela do kalkulace: u každé skříně volitelně zapnutá, s ručním počtem
    dvířek a zásuvek. Rozměry se počítají reálně (viz frontPieces):
    šířka skříně − 4 mm na šířku, výška 704 mm, zásuvky 350/223/125. */
+function isDishwasherSpace(e){return !!e && e.spaceType==='dishwasher' && elKind3(e)==='base';}
+function setDishwasherSpace(e,on){
+ e.spaceType=on?'dishwasher':'cabinet';
+ if(on){e.kind='base';e.fronts={on:true,doors:1,drawers:0};}
+}
+function dishwasherNameSuggestion(e){return /myck/.test((e.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());}
 function frontCfg(e){
   const f = e && e.fronts;
+  if(isDishwasherSpace(e))return {on:!!f?.on,doors:1,drawers:0};
   return {
     on:      !!(f && f.on),
     doors:   f && f.doors   != null ? clamp(Math.round(+f.doors   || 0), 0, 20) : 0,
@@ -3575,6 +3582,7 @@ function frontPieces(e){
   const P = pricing();
   const W = elFrontW(e);
   const total = Math.max(100, +P.doorH || DOOR_H_DFLT);
+  if(isDishwasherSpace(e))return {doors:[total],drawers:[],wDoor:Math.max(1,W-4),wDraw:Math.max(1,W-4),total,blende:null,ok:true};
   const gap   = +P.drawerGap >= 0 ? +P.drawerGap : DRAWER_GAP;
   const stack = (Array.isArray(P.drawerStack) && P.drawerStack.length) ? P.drawerStack : DRAWER_STACK_DFLT;
 
@@ -4190,7 +4198,7 @@ function renderInspector(){
             <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
           </div>
         </label>
-
+        ${elKind3(e)==='base'?`<label class="chk"><input id="iDishwasher" type="checkbox" ${isDishwasherSpace(e)?'checked':''}> Prostor pro vestavnou myčku — bez korpusu</label><p class="hint">${isDishwasherSpace(e)?'Pouze 1 čelo (šířka místa − 4 mm). Bez korpusu, zad, polic, pantů a noh. PD a průběžný sokl zůstávají; ručně zapnutý Bok+ se počítá zvlášť.':dishwasherNameSuggestion(e)?'Název odpovídá myčce. Potvrďte volbu výše, jinak se prvek počítá jako běžná skříň.':'Pro myčku 600 i 450 mm zapněte tuto volbu; šířku místa zadejte v rozměrech.'}</p>`:''}
       </div>
       <div class="insp-sec">
         <h4>Dvířka a zásuvky</h4>
@@ -4198,8 +4206,8 @@ function renderInspector(){
           <input type="checkbox" id="iFrOn" ${frontCfg(e).on?'checked':''}> Zahrnout čela do kalkulace
         </label>
         <div class="row2">
-          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
-          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
+          ${elKind3(e)==='column' ? '' : `<label class="fld"><span>Dvířka (ks)</span><input id="iFrDoors" ${isDishwasherSpace(e)||upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).doors}"></label>`}
+          <label class="fld"><span>${elKind3(e)==='column' ? 'Výsuvy dole (ks)' : 'Zásuvky (ks)'}</span><input id="iFrDrawers" ${isDishwasherSpace(e)||elKind3(e)==='upper'&&upperOpening(e)!=='hinges'?'disabled':''} type="number" min="0" max="20" step="1" value="${frontCfg(e).drawers}"></label>
         </div>
         <p class="hint" style="margin-top:6px">${frontCfg(e).on?'<b>Rozměry čel:</b> '+frontSizesText(e):'Čela zatím nejsou zahrnuta do kalkulace.'}</p>
         ${(() => {
@@ -4333,6 +4341,7 @@ function renderInspector(){
       e.fronts.drawers = clamp(Math.round(+ev.target.value || 0), 0, 20);
       pushHistoryQuiet(); renderCanvas(); refreshStrongMaxInspector(e);
     });
+    $('#iDishwasher')?.addEventListener('change',ev=>{setDishwasherSpace(e,ev.target.checked);pushHistoryQuiet();renderInspector();renderCanvas();});
     $('#iKindBase').onclick  = () => setElKind3(e, 'base');
     $('#iKindUpper').onclick = () => setElKind3(e, 'upper');
     $('#iKindColumn').onclick = () => setElKind3(e, 'column');
@@ -6145,10 +6154,10 @@ function blumForm(e){
  <label><input data-blum-confirm type="checkbox" ${m.confirmed?'checked':''} ${!m.confirmable?'disabled':''}> Ověřil jsem hmotnosti, prostor, kolize, profil v místech uchycení a montáž dle Blumu.</label><p class="hint">Potvrzení je možné až se skutečnými údaji. Změna rozměrů či parametrů ho zneplatní. Široké sestavy vyžadují individuální návrh.</p></details>`:''}`;
 }
 
-function cabinetLegCount(e){return ['base','column'].includes(elKind3(e))?4:0;}
+function cabinetLegCount(e){if(isDishwasherSpace(e))return 0;return ['base','column'].includes(elKind3(e))?4:0;}
 function hardwareForEl(e){
   const rows=[],warnings=[],notices=[],reports=[],fr=frontCfg(e),cfg=e.hardware||{},catalog=pricing().hardwareCatalog;
-  if(cfg.mode==='off')return {rows,warnings,notices,reports};
+  if(isDishwasherSpace(e)||cfg.mode==='off')return {rows,warnings,notices,reports};
   const fp=frontPieces(e),count=Math.max(1,Math.round(e.qty||1)),tag=e.name||'Skříň '+(S.project.elements.indexOf(e)+1);
   const add=(key,qty)=>{
     if(!qty)return;
@@ -6247,6 +6256,7 @@ function hardwareCatalogForm(){
  return `<details class="insp-help"><summary>Ceník Démos / vlastní ceny</summary><p class="hint">Ceny vždy s DPH 21 %. Ruční úpravy zůstanou uložené v projektu. Ověřené ceny jsou ze dne 26. 10. 2026; další aktualizace je nepřepisuje.</p><table class="p-tbl"><thead><tr><th>Položka</th><th>Kč/MJ s DPH</th><th>Zdroj</th></tr></thead><tbody>${Object.entries(catalog).filter(([key])=>DEMOS_HARDWARE[key]).map(([key,p])=>`<tr><td>${esc(p.label)}<br>${esc(p.code)} · ${esc(p.unit)}${p.custom?' · vlastní cena':''}</td><td><input class="p-in num" data-hw-price="${key}" type="number" min="0" step="0.01" value="${p.gross}"></td><td><a href="${esc(p.url)}" target="_blank" rel="noopener">Démos</a></td></tr>`).join('')}</tbody></table></details>`;
 }
 function hardwareForm(e){
+ if(isDishwasherSpace(e))return '<p class="hint">Myčka má vlastní nohy i zavěšení čela. Nábytkové panty, podložky a nohy se neúčtují; samotný spotřebič není oceněný.</p>';
  const fr=frontCfg(e);if(!fr.on&&!cabinetLegCount(e))return '';
  const fp=frontPieces(e),type=upperOpening(e),cfg=e.hardware||{},h=hardwareForEl(e);
  const lift=cfg.lift?.type===type?cfg.lift:{};
@@ -6309,7 +6319,7 @@ function materialParts(){
     /* korpus: 2 bočnice, dno, horní deska, 2 police */
     if(k==='upper'){
       upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
-    }else{
+    }else if(!isDishwasherSpace(e)){
     add('body', tag + ' – bočnice',        D, H, 2*q);
     add('body', tag + ' – dno',            W, D, 1*q);
     add('body', tag + ' – horní deska',    W, D, 1*q);
@@ -7500,7 +7510,7 @@ function buildPrint(technicalRequested=true){
       const wNom = elFrontW(e), dNom = elFrontD(e);
       const pw = wNom - 2*LAM;            // šířka půdy i latí (podél čela)
       const k3v = elKind3(e);
-      const noteX = (k3v==='base') ? (e.note||'') : ((k3v==='upper'?'horní skříň':'sloup') + (e.note?' — '+e.note:''));
+      const noteX = isDishwasherSpace(e) ? ('Prostor pro myčku — bez korpusu, HDF, polic, pantů a noh; pouze čelo.'+(e.note?' '+e.note:'')) : (k3v==='base') ? (e.note||'') : ((k3v==='upper'?'horní skříň':'sloup') + (e.note?' — '+e.note:''));
       let out = `<tr>
         <td class="num">${i+1}</td>
         <td><span class="pr-tdot" style="background:${e.color}"></span>${esc(e.name || '—')}</td>
@@ -7530,7 +7540,7 @@ function buildPrint(technicalRequested=true){
         if(typ!=='hinges')out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>${esc(typ==='hfTop'?'HF top':typ==='hkTop'?'HK top':'HK-S')}</b> — ${check.errors.length?'NEVYHOVUJÍCÍ ZADÁNÍ: '+esc(check.errors.join(' ')):'Rozsah korpusu zkontrolován.'} ${esc(check.notice)}</td></tr>`;
         if(k3v==='upper')out += upperCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · š × v/hl (mm)</td></tr>`).join('');
       }
-      if(elKind3(e)==='base' && pw >= 1){
+      if(elKind3(e)==='base' && !isDishwasherSpace(e) && pw >= 1){
         out += `<tr class="pr-sub"><td class="num"></td>
           <td>└ půda</td>
           <td class="num">${fmt(pw)}</td>
