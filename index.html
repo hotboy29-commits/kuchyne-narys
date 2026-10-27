@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-27-nabidka-v86'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-27-nabidka-v87'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -7118,7 +7118,7 @@ function renderPriceModal(){
     <div class="p-h">Orámování / opláštění HS</div><p class="hint">DTD 18 mm, dekor ${esc(finishDecor())}. Panely mezi krajními Bok+, korpus + 20 mm do hloubky. ABS jen vpředu. Rohy L/U navazují přes blende na tupo; průběžný panel vyberte níže. Dlouhé řady dělené na spojích skříní dle délky desky.</p><label class="chk"><input id="pFrameTop" type="checkbox" ${P.upperFrame?.top?'checked':''}> Horní opláštění HS</label><label class="chk"><input id="pFrameBottom" type="checkbox" ${P.upperFrame?.bottom?'checked':''}> Spodní opláštění HS</label><p class="hint">Bok+ u orámované HS automaticky kryje i tloušťku zapnutých panelů (18 mm za každý). Korpusy se nepřesouvají.</p>
     <div id="frameCornerControls">${frameCornerOptions()}</div>
     <div class="p-h">Kování podle skříní</div>
-    <button class="tb" id="pPrintTechnical" type="button">Uložit / tisk pro dílnu — hotové PDF</button><p class="hint">Dílenský export vytvoří přímo hotový soubor PDF, A4 na výšku. Po vytvoření stiskněte Otevřít PDF nebo Stáhnout PDF. V náhledu pak zvolte Sdílet → Uložit do Souborů nebo Tisk. Prohlížeč už znovu nestránkuje HTML, takže nevkládá prázdné listy mezi stránky. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka tiskne pouze cenovou nabídku, bez interních poznámek. V dialogu tisku vypněte Záhlaví a zápatí, aby prohlížeč nepřidal adresu webu.</p>
+    <button class="tb" id="pPrintTechnical" type="button">Uložit / tisk pro dílnu — hotové PDF</button><p class="hint">Dílenský export vytvoří přímo hotový soubor PDF, A4 na výšku. Po vytvoření stiskněte Otevřít PDF nebo Stáhnout PDF. V náhledu pak zvolte Sdílet → Uložit do Souborů nebo Tisk. Prohlížeč už znovu nestránkuje HTML, takže nevkládá prázdné listy mezi stránky. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka vytvoří také hotové PDF, pouze cenovou nabídku bez interních poznámek. Obě PDF lze uložit nebo tisknout i při spuštění z ikony na ploše iPadu.</p>
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     <div id="pLED">${ledPriceForm(C.led)}</div>
     ${hardwareCatalogForm()}
@@ -7636,8 +7636,7 @@ function buildPricePrint(){
 }
 function printPriceOnly(){
   if(!S.project.elements.length){toast('Není co počítat – nakresli aspoň jednu skříň');return;}
-  buildPricePrint();toast('Uložit jako PDF · Další nastavení → vypnout Záhlaví a zápatí (adresa webu).');
-  setTimeout(()=>window.print(),250);
+  return exportCustomerPdf();
 }
 
 /* ─────────────────────────── 15. EXPORT PDF ─────────────────────────── */
@@ -8151,9 +8150,11 @@ async function workshopVectorPage(pdf,page){
  range.detach();
 }
 
-async function createWorkshopPdf(onProgress=()=>{}){
+function createWorkshopPdf(onProgress=()=>{}){return createDocumentPdf(false,onProgress);}
+function createCustomerPdf(onProgress=()=>{}){return createDocumentPdf(true,onProgress);}
+async function createDocumentPdf(customer=false,onProgress=()=>{}){
  if(!window.workshopFonts||!window.jspdf?.jsPDF)throw new Error('Chybí lokální PDF knihovna. Obnovte aplikaci.');
- buildPrint(true);
+ if(customer)buildPricePrint();else buildPrint(true);
  const root=$('#printRoot'),saved=root.getAttribute('style');
  const shield=document.createElement('div');
  shield.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#f8fafc;display:flex;align-items:center;justify-content:center;font:17px system-ui;color:#172554;text-align:center;padding:30px';
@@ -8165,9 +8166,9 @@ async function createWorkshopPdf(onProgress=()=>{}){
   if(!pages.length)throw new Error('Žádné stránky k exportu.');
   const pdf=new window.jspdf.jsPDF({orientation:'portrait',unit:'mm',format:'a4',compress:true});
   for(const style of ['normal','bold']){pdf.addFileToVFS('Workshop-'+style+'.ttf',window.workshopFonts[style]);pdf.addFont('Workshop-'+style+'.ttf','Workshop',style);}
-  pdf.setProperties({title:(S.project.info.name||'Projekt')+' — dílenské podklady',creator:'Dílenské podklady',subject:'Výkresy, přířezy, materiál a kování'});
+  pdf.setProperties({title:(S.project.info.name||'Projekt')+(customer?' — nabídka':' — dílenské podklady'),creator:customer?'Cenová nabídka':'Dílenské podklady',subject:customer?'Cenová nabídka pro zákazníka':'Výkresy, přířezy, materiál a kování'});
   for(let i=0;i<pages.length;i++){
-   shield.textContent='Připravuji dílenské PDF — strana '+(i+1)+' / '+pages.length+'. Prosím vyčkejte.';onProgress(i+1,pages.length);
+   shield.textContent=(customer?'Připravuji nabídku PDF — strana ':'Připravuji dílenské PDF — strana ')+(i+1)+' / '+pages.length+'. Prosím vyčkejte.';onProgress(i+1,pages.length);
    await new Promise(resolve=>setTimeout(resolve,0));
    if(i)pdf.addPage('a4','portrait');
    await workshopVectorPage(pdf,pages[i]);
@@ -8177,16 +8178,18 @@ async function createWorkshopPdf(onProgress=()=>{}){
   shield.remove();if(saved===null)root.removeAttribute('style');else root.setAttribute('style',saved);
  }
 }
-async function exportWorkshopPdf(){
+function exportWorkshopPdf(){return exportDocumentPdf(false);}
+function exportCustomerPdf(){return exportDocumentPdf(true);}
+async function exportDocumentPdf(customer=false){
  if(workshopPdfBusy){toast('PDF se právě připravuje.');return;}
  if(!S.project.elements.length&&!S.project.walls.length){toast('Není co exportovat – nakresli aspoň zeď');return;}
  workshopPdfBusy=true;
  try{
-  const blob=await createWorkshopPdf();const url=URL.createObjectURL(blob);
+  const blob=await (customer?createCustomerPdf():createWorkshopPdf());const url=URL.createObjectURL(blob);
   const modal=document.createElement('div');modal.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#ffffffee;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;text-align:center;font:18px system-ui';
-  const title=document.createElement('b');title.textContent='PDF je hotové';modal.appendChild(title);
+  const title=document.createElement('b');title.textContent=customer?'Nabídka PDF je hotová':'PDF je hotové';modal.appendChild(title);
   const open=document.createElement('a');open.href=url;open.target='_blank';open.rel='noopener';open.textContent='Otevřít PDF → uložit / tisknout';open.style.cssText='padding:18px 24px;background:#0f766e;color:white;border-radius:12px;text-decoration:none';modal.appendChild(open);
-  const save=document.createElement('a');save.href=url;save.download=(S.project.info.name||'Projekt')+' — dílna.pdf';save.textContent='Stáhnout PDF';modal.appendChild(save);
+  const save=document.createElement('a');save.href=url;save.download=(S.project.info.name||'Projekt')+(customer?' — nabídka.pdf':' — dílna.pdf');save.textContent='Stáhnout PDF';modal.appendChild(save);
   const hint=document.createElement('p');hint.textContent='V náhledu PDF zvolte Sdílet → Uložit do Souborů nebo Tisk.';modal.appendChild(hint);
   const close=document.createElement('button');close.textContent='Zpět do projektu';close.className='tb';close.onclick=()=>modal.remove();modal.appendChild(close);document.body.appendChild(modal);
  }catch(e){console.error(e);toast('PDF se nepodařilo vytvořit: '+e.message);}
