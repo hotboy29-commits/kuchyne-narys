@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-jen-lamino-v95'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-cele-koruny-v96'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -6360,7 +6360,7 @@ function strongMaxProjectWarnings(){
   return S.project.elements.flatMap((e,i)=>{const m=strongMaxModel(e);return m.errors.map(x=>(e.name||'Skříň '+(i+1))+': '+x);});
 }
 
-function money2(n){return Number(n).toLocaleString('cs-CZ',{minimumFractionDigits:2,maximumFractionDigits:2})+' Kč';}
+function money2(n){return Math.round(Number(n)).toLocaleString('cs-CZ',{minimumFractionDigits:0,maximumFractionDigits:0})+' Kč';}
 function roundMoney(n){return Math.round((n+Number.EPSILON)*100)/100;}
 /* Sources: Blum CZ AVENTOS top pp.9–10,14–15,33–34,37;
    Blum catalogue 2024/25 pp.56–57,716. SI units only: mm × kg.
@@ -7553,10 +7553,13 @@ function customerQuoteData(){
  if(C.led.profileMm&&briefSupply('led'))rows.push({section:'Osvětlení',label:'LED sestava — profil, krytka, pásek a zdroj'+(C.led.warnings.length?' (neúplná cena)':''),qty:'1 sestava',gross:C.led.gross});
  rows.push(...C.goods.rows.map(r=>({...r,section:'Dodávky'})));
 
- const delta=roundMoney(C.total-rows.reduce((n,r)=>n+(r.gross??0),0));
- if(delta)rows.push({section:'Souhrn',label:'Zaokrouhlení',qty:'',gross:delta});
+ // Nabídka v celých Kč: nejprve řádky, potom jejich součet. Vstupní sazby se nemění.
+ for(const r of rows)if(r.gross!=null)r.gross=Math.round(r.gross);
+ const quoteTotal=rows.reduce((n,r)=>n+(r.gross??0),0);
+ const quoteBase=Math.round(rows.reduce((n,r)=>n+(r.gross??0)/(1+(r.section==='Materiál'?C.rate:21)/100),0));
+ const quoteC={...C,total:quoteTotal,base:quoteBase,vat:quoteTotal-quoteBase};
  const incomplete=!!(C.manufacturingWarnings.length||C.goods.warnings.length||briefChecks().length||C.purchasedFronts.qty||C.hardware.warnings.length||C.led.warnings.length||strongMaxProjectWarnings().length);
- return {C,rows,incomplete};
+ return {C:quoteC,rows,incomplete};
 }
 function customerQuoteHtml(){
  const {C,rows,incomplete}=customerQuoteData(),i=S.project.info;
