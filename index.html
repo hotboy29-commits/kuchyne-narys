@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-prodejni-lamino-v94'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-jen-lamino-v95'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -6087,8 +6087,6 @@ function PRICE_DEFAULTS(){ return ({
   vatRate: 21,          // sazba DPH [%]
   vatIncluded: true,    // ceny v ceníku jsou VČETNĚ DPH
   edgeShare: 100,       // % obvodu dílů, které se hraní
-  reserveFactor: 1.5,
-  materialPriceBasis: "purchase",
   purGross: 24.20,
   cutGross: 72.60,
   handlingGross: 12.10,
@@ -6167,9 +6165,9 @@ function pricing(){
   }
   p.vatRate     = clamp(num(p.vatRate, D.vatRate), 0, 100);
   p.edgeShare   = clamp(num(p.edgeShare, D.edgeShare), 0, 100);
-  for(const key of ['reserveFactor','purGross','cutGross','handlingGross','decorEdgeGross'])
-    p[key]=Math.max(key==='reserveFactor'?1:0,Number.isFinite(+p[key])&&p[key]!==null&&p[key]!==''?+p[key]:D[key]);
-  p.materialPriceBasis=p.materialPriceBasis==='sale'?'sale':'purchase';
+  for(const key of ['purGross','cutGross','handlingGross','decorEdgeGross'])
+    p[key]=Math.max(0,Number.isFinite(+p[key])&&p[key]!==null&&p[key]!==''?+p[key]:D[key]);
+  delete p.materialPriceBasis; delete p.reserveFactor; // Zrušená společná přirážka se nesmí obnovit ze starého JSON.
   p.edgePrice   = Math.max(0, num(p.edgePrice, D.edgePrice));
   p.doorW       = Math.max(200, num(p.doorW, D.doorW));
   p.doorH       = clamp(num(p.doorH, D.doorH), 100, 2000);
@@ -7116,13 +7114,12 @@ function priceCalc(){
   const handledSheets=serviceSheets.reduce((n,r)=>n+Math.ceil(r.sheets),0);
   const servicesGross=centreEdgeM*P.purGross+cutArea*P.cutGross+handledSheets*P.handlingGross;
   const materialInput=rows.reduce((n,r)=>n+r.total,0)+edgeTotal;
-  const materialFactor=P.materialPriceBasis==='sale'?1:P.reserveFactor;
   const centreMaterialInput=rows.filter(r=>isCutCentreGroup(r.g.id)).reduce((n,r)=>n+r.total,0)+centreEdgeTotal;
   const laminateInput=rows.filter(r=>['body','front','bok'].includes(r.g.id)).reduce((n,r)=>n+r.total,0);
-  // Ceny lamina jsou veřejné prodejní ceny, nikdy nákupní základ k násobení.
-  const reserveTotal=(centreMaterialInput-laminateInput)*(materialFactor-1)+servicesGross/inputVat*(P.reserveFactor-1);
+  // Výslovně potvrzeno: ×1,5 pouze samotné lamino, vše ostatní bez přirážky.
+  const laminateMarkup=laminateInput*0.5;
   const servicesTotal=servicesGross/inputVat;
-  const materialTotal=materialInput+servicesTotal+reserveTotal;
+  const materialTotal=materialInput+servicesTotal+laminateMarkup;
   const rate = +P.vatRate || 0;
   let base, vat, total;
   if(P.vatIncluded){                 // ceny už DPH obsahují
@@ -7138,7 +7135,7 @@ function priceCalc(){
   base=roundMoney(materialBase+hardware.base+led.base+goods.base);vat=roundMoney(materialVat+hardware.vat+led.vat+goods.vat);total=roundMoney(base+vat);
   return {
     manufacturingWarnings:manufacturingWarnings(rows), hardware, led, goods, purchasedFronts:purchasedFrontSummary(parts), materialBase, materialVat, materialGross,
-    parts, rows, edgeM, exactEdgeM, edgeTotal, materialTotal, billedEdgeM, billedEdges, cutArea, handledSheets, servicesTotal, servicesGross, reserveTotal, materialInput, materialFactor, centreMaterialInput, centreEdgeTotal, centreEdgeM,
+    parts, rows, edgeM, exactEdgeM, edgeTotal, materialTotal, billedEdgeM, billedEdges, cutArea, handledSheets, servicesTotal, servicesGross, laminateMarkup, materialInput, centreMaterialInput, centreEdgeTotal, centreEdgeM,
     base, vat, total, rate, vatIncluded:P.vatIncluded,
     zast: Z,
     sheets: rows.reduce((s2, r) => s2 + r.sheets, 0)
@@ -7238,7 +7235,7 @@ function renderPriceModal(){
         (!r.linear && r.sheetsArea !== r.sheetsPack)
           ? `<div style="font-size:10.5px;color:var(--ink-3)">plošně ${r.sheetsArea} / rozvrhem ${r.sheetsPack}</div>` : ''
       }${r.nSplit ? `<div style="font-size:10.5px;color:var(--ink-3)">${r.nSplit} dílů děleno</div>` : ''}${r.oversized ? `<div style="font-size:10.5px;color:#b91c1c">díl větší než deska!</div>` : ''}</td>
-      <td class="num"><input class="p-in num" type="number" step="10" min="0" data-g="${r.g.id}" data-f="price" value="${r.g.price}">${['body','front','bok'].includes(r.g.id)?'<small>Prodejní cena — bez násobku</small>':''}</td>
+      <td class="num"><input class="p-in num" type="number" step="10" min="0" data-g="${r.g.id}" data-f="price" value="${r.g.price}">${['body','front','bok'].includes(r.g.id)?'<small>Pouze lamino: zadaná cena × 1,5</small>':''}</td>
       <td class="num" id="pTotal_${r.g.id}"><b>${kc(r.total)}</b></td>
     </tr>`).join('');
 
@@ -7261,11 +7258,10 @@ function renderPriceModal(){
       <div><span>Desek celkem</span><b id="pSumSheets">${fmtQty(C.sheets)} ks</b><small>včetně prořezu a půlek</small></div>
     </div>
 
-    <div class="p-h">Nářezové centrum a cenová rezerva</div>
-    <p class="hint">Ceny lamina (korpus, čela, Bok+/opláštění/sokl) jsou PRODEJNÍ: zadaná cena × počet desek, bez další přirážky. Platí i pro starší projekty. Násobek zůstává jen pro nákupní ABS, HDF podle volby níže a nářezové služby. PD, zástěna, TL, kování, LED a dodávky se nenásobí. Rezerva nezaručuje úplnost nářezu.</p>
-    <label>Ceny HDF a ABS (nikoli lamina) <select data-reserve="materialPriceBasis"><option value="purchase" ${P.materialPriceBasis==='purchase'?'selected':''}>Nákupní základ HDF a ABS – násobit</option><option value="sale" ${P.materialPriceBasis==='sale'?'selected':''}>Již prodejní – nenásobit HDF a ABS</option></select></label>
-    ${[['reserveFactor','Násobek pouze nářezového centra (min. 1)'],['decorEdgeGross','Dekorová ABS Kč/m s DPH (dle režimu HDF a ABS)'],['purGross','PUR nákup Kč/m s DPH'],['cutGross','Řezání nákup Kč/m² lamina a HDF s DPH'],['handlingGross','Manipulace nákup Kč/tabule s DPH']].map(([k,label])=>`<label>${label} <input type="number" min="${k==='reserveFactor'?1:0}" step="0.01" data-reserve="${k}" value="${P[k]}"></label>`).join('')}
-    <p class="hint">Výchozí služby podle dokladu DT: PUR 20 Kč bez DPH/m, manipulace 10 Kč bez DPH/tabule; řezání konzervativně vyšší sazba 60 Kč bez DPH/m² pro lamino a HDF (u HDF odhad, nikoli ověřený ceník; bez PD a zástěny). Hrany se zaokrouhlují nahoru na celé metry po skupinách. Dekorová ABS 29,72 Kč/m s DPH. Pouze nářezové služby se násobí rezervou; montáž není zahrnuta.</p>
+    <div class="p-h">Lamino a nářezové služby</div>
+    <p class="hint"><b>Jen samotné lamino × 1,5:</b> korpusy, čela, Bok+, opláštění a sokl. Například 2 400 Kč/desku → 3 600 Kč/desku. ABS, PUR, řezání, manipulace, HDF, PD, zástěna, TL, kování, LED a ostatní dodávky jsou bez jakékoliv další přirážky. Původní společná rezerva se nepřebírá ani ze starých projektů.</p>
+    ${[['decorEdgeGross','Dekorová ABS Kč/m s DPH'],['purGross','PUR Kč/m s DPH'],['cutGross','Řezání Kč/m² lamina a HDF s DPH'],['handlingGross','Manipulace Kč/tabule s DPH']].map(([k,label])=>`<label>${label} <input type="number" min="0" step="0.01" data-service="${k}" value="${P[k]}"></label>`).join('')}
+    <p class="hint">Sazby služeb se účtují přímo, bez přirážky. Výchozí řezání 72,60 Kč/m² s DPH je odhad podle vyšší sazby z dokladu DT, nikoli ověřená sazba pro každý dekor či HDF. Hrany se zaokrouhlují na celé metry po skupinách; řezání podle nakoupených tabulí. Montáž není zahrnuta.</p>
     <div id="pReserveSummary">${reserveSummary(C)}</div>
     <div class="p-h">Deskový materiál</div>
     <table class="p-tbl">
@@ -7383,7 +7379,7 @@ function bindPriceInputs(){
   body._pbound = true;
   body.addEventListener('input', ev => {
     const el = ev.target, P = pricing();
-    if(el.dataset?.reserve){const k=el.dataset.reserve;if(k==='materialPriceBasis')P[k]=el.value;else if(el.value!==''&&Number.isFinite(+el.value)&&+el.value>=(k==='reserveFactor'?1:0))P[k]=+el.value;updatePriceTotals();save();return;}
+    if(el.dataset?.service){const k=el.dataset.service;if(['decorEdgeGross','purGross','cutGross','handlingGross'].includes(k)&&el.value!==''&&Number.isFinite(+el.value)&&+el.value>=0)P[k]=+el.value;updatePriceTotals();save();return;}
     if(el.dataset?.frameCorner){P.upperFrame=P.upperFrame||{};P.upperFrame.cornerThrough=P.upperFrame.cornerThrough||{};P.upperFrame.cornerThrough[el.dataset.frameCorner]=el.value;renderPriceModal();save();renderCanvas();return;}
     if(['pFrameTop','pFrameBottom'].includes(el.id)){P.upperFrame=P.upperFrame||{};P.upperFrame[el.id==='pFrameTop'?'top':'bottom']=el.checked;renderPriceModal();save();renderCanvas();return;}
     if(['pLedEnabled','pLedReserve','pLedSupply'].includes(el.id)){
@@ -7506,19 +7502,18 @@ function savePricing(){
 /* ── kalkulace jako stránka pro tisk / PDF ── */
 /* Customer summary: quantities of hardware assemblies, not a cabinet-by-cabinet BOM.
    Material rows quote supply for the project; purchase units stay in internal records. */
-function reserveSummary(C){return `<p>Vstup materiálu a ABS: <b>${money2(C.materialInput)}</b> · služby: <b>${money2(C.servicesTotal)}</b> · přirážka pouze nářezového centra: <b>${money2(C.reserveTotal)}</b> (${C.vatIncluded?'s':'bez'} DPH). PUR nářezu ${C.centreEdgeM} m; řezání ${num2(C.cutArea)} m²; manipulace ${C.handledSheets} tabulí.</p>`;}
+function reserveSummary(C){return `<p>Vstup materiálu a ABS: <b>${money2(C.materialInput)}</b> · služby: <b>${money2(C.servicesTotal)}</b> · přirážka pouze samotného lamina: <b>${money2(C.laminateMarkup)}</b> (${C.vatIncluded?'s':'bez'} DPH). PUR nářezu ${C.centreEdgeM} m; řezání ${num2(C.cutArea)} m²; manipulace ${C.handledSheets} tabulí.</p>`;}
 function customerQuoteData(){
  const C=priceCalc(),rows=[],factor=C.vatIncluded?1:1+C.rate/100;
- const materialFactor=C.materialFactor;
  const materials=C.rows.filter(r=>r.area>0||r.sheets>0);
  const lamino=materials.filter(r=>['body','front','bok'].includes(r.g.id));
- // Zákaznické sloučení: součet původních zaokrouhlených řádků, beze změny ceny.
- const laminoGross=roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor);
- const absGross=C.edgeM>0?roundMoney((C.edgeTotal+C.centreEdgeTotal*(materialFactor-1))*factor):0;
- const processingGross=C.servicesGross>0?roundMoney(C.servicesGross*pricing().reserveFactor):0;
+ // Sloučení lamina (×1,5), ABS a služeb (bez přirážky).
+ const laminoGross=roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor*1.5);
+ const absGross=C.edgeM>0?roundMoney(C.edgeTotal*factor):0;
+ const processingGross=C.servicesGross>0?roundMoney(C.servicesGross):0;
  if(lamino.length||absGross||processingGross)rows.push({section:'Materiál',label:'Lamino',qty:'',gross:roundMoney(laminoGross+absGross+processingGross)});
  const names={top:'Pracovní deska',back:'Záda skříní — HDF',zast:'Zástěna',zastena:'Zástěna',tl:'Těsnicí lišta'};
- for(const r of materials.filter(r=>!['body','front','bok'].includes(r.g.id)))rows.push({section:'Materiál',label:names[r.g.id]||r.g.name,qty:'',gross:roundMoney(r.total*factor*(isCutCentreGroup(r.g.id)?materialFactor:1))});
+ for(const r of materials.filter(r=>!['body','front','bok'].includes(r.g.id)))rows.push({section:'Materiál',label:names[r.g.id]||r.g.name,qty:'',gross:roundMoney(r.total*factor)});
 
  if(C.purchasedFronts.qty)rows.push({section:'Materiál',label:'Dvířka Trachea — neoceněná',qty:C.purchasedFronts.qty+' ks',gross:null});
  const buckets=new Map();
@@ -7622,7 +7617,7 @@ function pricePageHtml(opt){
       </tbody>
       <tfoot>
         <tr><td colspan="4">Nářezové služby (PUR, řezání, manipulace)</td><td class="num">${fmt(C.servicesTotal)}</td></tr>
-        <tr><td colspan="4">Přirážka pouze nářezového centra</td><td class="num">${fmt(C.reserveTotal)}</td></tr>
+        <tr><td colspan="4">Přirážka pouze samotného lamina</td><td class="num">${fmt(C.laminateMarkup)}</td></tr>
         <tr><td colspan="4">Materiál celkem ${C.vatIncluded ? 'včetně DPH' : 'bez DPH'}</td>
             <td class="num">${fmt(C.materialTotal)}</td></tr>
         <tr><td colspan="4">DPH materiálu ${fmt(C.rate)} %</td><td class="num">${money2(C.materialVat)}</td></tr>
