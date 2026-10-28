@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-zadani-v88'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-vypocty-v89'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3256,7 +3256,7 @@ function setElFrontD(e, v){ if(isHorizFront(e.front || 'jih')) e.d = v; else e.w
 const BOK_W_DFLT    = 18;  // tloušťka boku+ [mm]
 const BOK_BACK_DFLT = 50;  // za zadní hranu skříně ke zdi [mm] (skříň stojí 50 mm od zdi)
 const BOK_FRONT_DFLT = 20; // přesah před čelo (přes dvířka) [mm]
-const BOK_H_DS = 900;      // výška boku+ u DS [mm] = sokl 150 + skříň 720 + deska ~30
+const BOK_H_DS = 900;      // výchozí nářez DS: hotových 870 + rezerva 30 mm
 const BOK_H_HS = 750;      // výška boku+ u HS [mm]
 // Pozn.: hloubka boku+ = hloubka skříně + 50 (ke zdi) + 20 (před čelo) = 510+70 = 580 mm
 
@@ -3310,12 +3310,31 @@ function nicheCutParts(e){
  const p=(label,w,h,qty,edgeMm)=>({group:'bok',label:'Nika — '+label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez hranění (vloženo mezi dílce)',decor:finishDecor()});
  return [p('bočnice',D,H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
 }
+// Confirmed DS construction: 18mm sides, inset bottom, two 120mm rails.
+function baseCutParts(e){
+ const W=elFrontW(e),H=elH3(e),D=elFrontD(e),inner=W-36;
+ if(inner<=0||H<=36||D<240)return [];
+ const p=(label,w,h,qty,edgeMm,group='body')=>({group,label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez ABS'});
+ return [p('bočnice DS',D,H,2,H),p('dno DS',inner,D,1,inner),p('horní lať přední DS',inner,120,1,inner),p('horní lať zadní DS',inner,120,1,0),p('police DS',inner,Math.max(200,D-20),2,inner),p('záda HDF DS',W,H,1,0,'back')];
+}
+// A dimensional envelope, not a certification of shelf/partition collisions.
+function installationEnvelope(e){
+ if(isDishwasherSpace(e))return {w:elFrontW(e),h:B3D.sokl+elH3(e),d:elFrontD(e)};
+ return {w:Math.max(0,elFrontW(e)-36),h:Math.max(0,elH3(e)-36),d:Math.max(0,(isNiche(e)?nicheFullDepth(e)-18:elFrontD(e)-3))};
+}
+function manufacturingWarnings(rows){
+ const out=rows.filter(r=>r.oversized).map(r=>r.g.name+': dílec se nevejde vcelku do zadané desky. Není automaticky rozdělen; změňte materiál nebo konstrukci.');
+ for(const e of S.project.elements)if(elKind3(e)==='base'&&!isDishwasherSpace(e)&&!isNiche(e)&&!isWire(e)&&!baseCutParts(e).length)out.push((e.name||'DS')+': neplatné rozměry pro 18mm korpus a dvě latě 120 mm.');
+ return out;
+}
+function manufacturingAlert(c){return c.manufacturingWarnings.length?'<p style="color:#b91c1c"><b>NEOVĚŘENÝ NÁŘEZ — CENA NENÍ KONEČNÁ:</b> '+esc(c.manufacturingWarnings.join(' '))+'</p>':'';}
 function wireCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=elFrontD(e);
  return [
   {group:'body',label:'Drát — bočnice',w:D,h:H,qty:2},
   {group:'body',label:'Drát — dno',w:W-36,h:D,qty:1},
-  {group:'body',label:'Drát — horní lať',w:W-36,h:120,qty:2},
+  {group:'body',label:'Drát — horní lať přední',w:W-36,h:120,qty:1,edgeMm:W-36},
+  {group:'body',label:'Drát — horní lať zadní',w:W-36,h:120,qty:1,edgeMm:0},
   {group:'back',label:'Drát — záda HDF',w:W,h:H,qty:1}
  ].filter(p=>p.w>0&&p.h>0);
 }
@@ -3905,11 +3924,12 @@ function bokBack(e){
 function bokFront(e){ const b = bokCfg(e); return b && b.front != null ? +b.front : BOK_FRONT_DFLT; }
 function bokDepthOf(e){ return (isHorizFront(e.front||'jih') ? e.d : e.w) + bokBack(e) + bokFront(e); }
 /* Výška boku+ podle druhu prvku (u sloupu do výšky sloupu). */
+function bokFinishedH(e){return B3D.sokl+elH3(e);}
 function bokH(e){
   const k = elKind3(e);
   if(k==='upper') return (frameEnabled(e,'top')||frameEnabled(e,'bottom'))?elH3(e)+18*(+frameEnabled(e,'top')+ +frameEnabled(e,'bottom')):BOK_H_HS;
   if(k==='column') return elH3(e);
-  return BOK_H_DS;
+  return bokFinishedH(e)+30;
 }
 /* Obdélník boku+ na zadané straně (L/R „při pohledu na čelo“). */
 function bokRectFor(e, side){
@@ -5202,7 +5222,7 @@ function elements3(sc, mats){
       let zB0, zB1; const kb = elKind3(e);
       if(kb==='upper')        { zB0 = z0-(frameEnabled(e,'bottom')?18:0); zB1 = zB0+bokH(e); }
       else if(kb==='column')  { zB0 = z0;                           zB1 = z1; }
-      else                    { zB0 = B3D.floorT;                   zB1 = B3D.floorT + BOK_H_DS; }
+      else                    { zB0 = B3D.floorT;                   zB1 = B3D.floorT + bokFinishedH(e); }
       scBox(sc, b.x, b.y, b.x + b.w, b.y + b.h, zB0, zB1, mats.el('#d8d3c8'));
     }
   });
@@ -5413,9 +5433,9 @@ function briefGoods(){
  if(!briefActive())return {rows,warnings,gross:0,base:0,vat:0};
  for(const [k,label]of BRIEF_ITEMS){const v=briefItem(k);if(!v.supplied||(!BRIEF_GOODS.includes(k)&&!briefManual(k)))continue;
   const hasDifferentModel=S.project.elements.some(e=>briefAssigned(e,k)&&e.briefOverrides?.[k]?.model&&e.briefOverrides[k].model!==v.model);
-  const qty=Number.isFinite(v.qty)&&v.qty>0?Math.round(v.qty):null,gross=!hasDifferentModel&&Number.isFinite(v.gross)&&v.gross>=0?v.gross:null;
+  const qty=Number.isInteger(v.qty)&&v.qty>0?v.qty:null,gross=!hasDifferentModel&&Number.isFinite(v.gross)&&v.gross>=0?v.gross:null;
   if(hasDifferentModel)warnings.push(label+': vlastní model u skříně se liší od oceněného modelu v zadání. Sjednoťte model dodávky nebo tuto položku oceňte samostatně; její částka zde není zahrnuta.');
-  if(qty===null||gross===null)warnings.push(label+': doplňte počet a jednotkovou cenu s DPH.');
+  if(qty===null||gross===null)warnings.push(label+': doplňte celý počet kusů alespoň 1 a jednotkovou cenu s DPH.');
   rows.push({key:k,label:label+(v.model?' — '+v.model:''),number:qty,qty:qty===null?'nezadáno':qty+' ks',unitGross:gross,gross:qty===null||gross===null?null:roundMoney(qty*gross)});
  }
  const gross=roundMoney(rows.reduce((n,r)=>n+(r.gross??0),0)),base=roundMoney(gross/1.21);
@@ -5429,10 +5449,11 @@ function briefChecks(){
  for(const e of S.project.elements){
   if(elKind3(e)==='upper'&&!isNiche(e))warnings.push(...upperOpeningCheck(e).errors.map(x=>(e.name||'HS')+': '+x));
   for(const k of BRIEF_EQUIPMENT.filter(k=>briefAssigned(e,k))){const v=briefForEl(e,k),name=BRIEF_ITEMS.find(x=>x[0]===k)[1],tag=(e.name||'Skříň')+' / '+name;
-   // Installation-space dimensions are not inferred from product outer dimensions.
-   if(v.installW>0&&v.installW>elFrontW(e)-(isDishwasherSpace(e)?0:36))warnings.push(tag+': požadovaná instalační šířka přesahuje prostor.');
-   if(v.installD>0&&v.installD>elFrontD(e))warnings.push(tag+': požadovaná instalační hloubka přesahuje korpus.');
-   if(v.installH>0&&v.installH>elH3(e))warnings.push(tag+': požadovaná instalační výška přesahuje prvek.');
+   // Available envelope accounts for side, top/bottom and back thickness. Shelves/partitions still require verification.
+   const available=installationEnvelope(e);
+   if(v.installW>0&&v.installW>available.w)warnings.push(tag+': požadovaná instalační šířka přesahuje prostor.');
+   if(v.installD>0&&v.installD>available.d)warnings.push(tag+': požadovaná instalační hloubka přesahuje korpus.');
+   if(v.installH>0&&v.installH>available.h)warnings.push(tag+': požadovaná instalační výška přesahuje dostupnou výšku '+available.h+' mm.');
   }
  }
  for(const k of BRIEF_EQUIPMENT){const v=briefItem(k);if(!v.supplied||!Number.isFinite(v.qty)||(!BRIEF_GOODS.includes(k)&&!briefManual(k)))continue;
@@ -5443,7 +5464,7 @@ function briefChecks(){
 }
 function briefField(k,f,label,v,type='text',options=null){
  const attr=`data-brief-key="${k}" data-brief-field="${f}"`;
- return `<label class="fld"><span>${label}</span>${options?`<select ${attr}>${options.map(([value,text])=>`<option value="${value}" ${String(v??'')===value?'selected':''}>${text}</option>`).join('')}</select>`:type==='textarea'?`<textarea ${attr} rows="2">${esc(v??'')}</textarea>`:`<input ${attr} type="${type}" ${type==='number'?'min="0" step="any"':''} value="${esc(v??'')}">`}</label>`;
+ return `<label class="fld"><span>${label}</span>${options?`<select ${attr}>${options.map(([value,text])=>`<option value="${value}" ${String(v??'')===value?'selected':''}>${text}</option>`).join('')}</select>`:type==='textarea'?`<textarea ${attr} rows="2">${esc(v??'')}</textarea>`:`<input ${attr} type="${type}" ${type==='number'?(f==='qty'?'min="1" step="1"':'min="0" step="any"'):''} value="${esc(v??'')}">`}</label>`;
 }
 function renderProjectBrief(){
  let root=$('#projectBrief');if(!root){root=document.createElement('div');root.id='projectBrief';root.className='span2';$('#modalProject .grid').insertBefore(root,$('#fNotes').closest('label'));}
@@ -5482,7 +5503,7 @@ function saveProjectBrief(){
 }
 function briefInspector(e){
  if(!briefActive())return '';
- return `<details class="insp-sec"><summary>Zadání projektu / přiřazené vybavení</summary><p class="hint">Modely a rozměry se přebírají ze zadání. Vlastní rozměr spotřebiče níže má přednost; tlačítkem lze obnovit propojení. Přiřazení samo nepřestavuje korpus ani nemění druh skříně.</p>`+BRIEF_EQUIPMENT.map(k=>{
+ return `<details class="insp-sec"><summary>Zadání projektu / přiřazené vybavení</summary><p class="hint">Modely a rozměry se přebírají ze zadání. Vlastní rozměr spotřebiče níže má přednost; tlačítkem lze obnovit propojení. Přiřazení samo nepřestavuje korpus ani nemění druh skříně. Kontrola prostoru odečítá tloušťky dílců; police, příčky, přívody a skutečnou hloubku mezery pro myčku ověřte samostatně.</p>`+BRIEF_EQUIPMENT.map(k=>{
   const v=briefForEl(e,k),name=BRIEF_ITEMS.find(x=>x[0]===k)[1],assigned=briefAssigned(e,k),fixed=['sink','hob','oven','micro'].includes(k)||k==='dishwasher'&&isDishwasherSpace(e)||k==='wire'&&isWire(e);
   return `<div style="margin:8px 0"><label class="chk"><input data-brief-assign="${k}" type="checkbox" ${assigned?'checked':''} ${fixed?'disabled':''}>${name}</label>${fixed&&!assigned?'<small>Zapněte v části Spotřebiče / Provedení prvku.</small>':''}${assigned?`<small>${esc(v.model||'Model nezadán')} · ${briefSupply(k)?'naše dodávka':'dodávka zákazníka'}</small><label class="fld"><span>Vlastní model — odlišný model vyžaduje nové ocenění</span><input data-brief-override="${k}" value="${esc(e.briefOverrides?.[k]?.model||'')}"></label>${['sink','hob','oven','micro'].includes(k)?`<button type="button" class="tb" data-brief-relink="${k}">Rozměry z projektu</button>`:''}`:''}</div>`;
  }).join('')+'</details>';
@@ -6637,9 +6658,11 @@ function materialParts(){
     if(isNiche(e)){
       nicheCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote,decor:p.decor}));
     }else if(isWire(e)){
-      wireCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
+      wireCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,Number.isFinite(p.edgeMm)?{edgeMm:p.edgeMm,edgeNote:p.edgeMm?'ABS přední hrana':'bez ABS'}:null));
     }else if(k==='upper'){
       upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
+    }else if(k==='base'&&!isDishwasherSpace(e)){
+      baseCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote}));
     }else if(!isDishwasherSpace(e)){
     add('body', tag + ' – bočnice',        D, H, 2*q);
     add('body', tag + ' – dno',            W, D, 1*q);
@@ -6712,39 +6735,33 @@ function materialParts(){
    na pilu (kerf). Počet desek = max(plošný výpočet s prořezem, rozvržení).
 
    Vrací pole desek; každá má seznam volných obdélníků a umístěných dílů. */
-function packSheets(pieces, bw, bh, allowRot, kerf){
+function packSheets(pieces,bw,bh,allowRot,kerf){
+ let best=packSheetsTrial(pieces,bw,bh,allowRot,kerf,0);
+ // Try several deterministic guillotine orders; never alter a cut size or
+ // invent joints just to obtain fewer sheets. One sheet is already optimal.
+ for(let order=1;order<4&&best.length>1;order++){
+  const trial=packSheetsTrial(pieces,bw,bh,allowRot,kerf,order);
+  if(trial.length<best.length)best=trial;
+ }
+ return best;
+}
+function packSheetsTrial(pieces, bw, bh, allowRot, kerf, order=0){
   const K = Math.max(0, +kerf || 0);
   const eps = 1e-6;
   const maxL = Math.max(bw, bh);          // nejdelší rozměr desky
   const minS = Math.min(bw, bh);          // nejkratší rozměr desky
 
-  /* 1) příprava dílů: co se na desku nevejde vcelku, rozdělí se na části
-        (v realitě se sokl i jiné dlouhé díly nastavují) – a označí se to. */
-  const list = [];
-  for(const pt of pieces){
-    const q = Math.max(0, Math.round(+pt.qty || 0));
-    for(let i=0;i<q;i++){
-      let w = +pt.w, h = +pt.h;
-      const fitsRaw = (w + K <= bw + eps && h + K <= bh + eps)
-                   || (allowRot && w + K <= bh + eps && h + K <= bw + eps);
-      if(!fitsRaw){
-        const long = Math.max(w, h), short = Math.min(w, h);
-        if(short + K > minS + eps){
-          list.push({ w, h, label:pt.label, oversize:true });
-          continue;
-        }
-        const parts = Math.max(2, Math.ceil((long + K) / maxL));
-        if(w >= h){ w = long / parts; h = short; } else { w = short; h = long / parts; }
-        for(let k=0;k<parts;k++)
-          list.push({ w, h, label:pt.label, split:true, partOf:parts });
-      } else {
-        list.push({ w, h, label:pt.label });
-      }
-    }
+  /* Never invent construction joints. Long worktop/plinth pieces are split
+     explicitly upstream; every cut part here must fit as a whole. */
+  const list=[];
+  for(const pt of pieces)for(let i=0;i<Math.max(0,Math.round(+pt.qty||0));i++){
+   const w=+pt.w,h=+pt.h;
+   const fitsRaw=(w<=bw+eps&&h<=bh+eps)||(allowRot&&h<=bw+eps&&w<=bh+eps);
+   list.push({w,h,label:pt.label,oversize:!fitsRaw});
   }
 
   /* 2) co největší díly první */
-  list.sort((a,b) => (b.w*b.h) - (a.w*a.h) || (b.h - a.h) || (b.w - a.w));
+  list.sort((a,b) => (order===1?Math.max(b.w,b.h)-Math.max(a.w,a.h):order===2?b.h-a.h:order===3?b.w-a.w:0) || (b.w*b.h)-(a.w*a.h) || b.h-a.h || b.w-a.w);
 
   const sheets = [];
   const fits = (r, w, h) => w <= r.w + eps && h <= r.h + eps;
@@ -6776,27 +6793,16 @@ function packSheets(pieces, bw, bh, allowRot, kerf){
       sheets.push(s);
       continue;
     }
-    /* řez se přidává jen tam, kde po dílu ještě zbývá místo – díl na celou
-       šířku desky (např. pracovní deska 600 na desce 600) řez nepotřebuje */
-    const w = p.w + ((p.w + K <= bw + eps) ? K : 0);
-    const h = p.h + ((p.h + K <= bh + eps) ? K : 0);
-    let done = false;
-    for(const s of sheets){
-      if(s.oversize) continue;
-      let i = findFree(s, w, h);
-      if(i < 0 && allowRot) i = findFree(s, h, w);
-      if(i >= 0){
-        if(fits(s.free[i], w, h)) place(s, i, w, h, false, p);
-        else place(s, i, h, w, true, p);
-        done = true; break;
-      }
-    }
-    if(done) continue;
-
-    const s = { free:[{ x:0, y:0, w:bw, h:bh }], placed:[], oversize:false };
-    if(fits(s.free[0], w, h)) place(s, 0, w, h, false, p);
-    else if(allowRot && fits(s.free[0], h, w)) place(s, 0, h, w, true, p);
-    else { s.oversize = true; s.placed.push({ w:p.w, h:p.h, oversize:true, label:p.label }); }
+    const tryPlace=(s)=>{
+      let i=findFree(s,p.w,p.h),rot=false;
+      if(i<0&&allowRot){i=findFree(s,p.h,p.w);rot=i>=0;}
+      if(i<0)return false;
+      const r=s.free[i],w=rot?p.h:p.w,h=rot?p.w:p.h;
+      place(s,i,Math.min(r.w,w+K),Math.min(r.h,h+K),rot,p);return true;
+    };
+    if(sheets.some(s=>!s.oversize&&tryPlace(s)))continue;
+    const s={free:[{x:0,y:0,w:bw,h:bh}],placed:[],oversize:false};
+    if(!tryPlace(s)){s.oversize=true;s.placed.push({w:p.w,h:p.h,oversize:true,label:p.label});}
     sheets.push(s);
   }
   return sheets;
@@ -6839,7 +6845,8 @@ function lensPackable(lens, caps){
 }
 
 /* Nejmenší počet CELÝCH desek (může být 0,5; 1; 1,5 …) na seznam délek kusů. */
-function minBoardsInHalves(lengths, boardLen){
+function minBoardsInHalves(lengths, boardLen, kerf=pricing().kerf){
+  const K=Math.max(0,+kerf||0);
   const B = Math.max(200, +boardLen || 4100);
   const H = B / 2;                                   // půlka
   const lens = (lengths || []).filter(l => l > 0.5).sort((a,b) => b - a);
@@ -6851,7 +6858,7 @@ function minBoardsInHalves(lengths, boardLen){
     const caps = [];
     for(let i=0;i<Math.floor(n/2);i++) caps.push(B);
     if(n % 2) caps.push(H);
-    if(lensPackable(lens, caps)) return n / 2;
+    if(lensPackable(lens.map(l=>l+K), caps.map(c=>c+K))) return n / 2;
   }
   return lens.length;                                // pojistka
 }
@@ -7047,7 +7054,7 @@ function priceCalc(){
       const nPieces = lens.length;
       const qty = minBoardsInHalves(lens, g.bw);
       return { g, area:a, need:0, boardArea:ba, sheets:qty, qty, byLen:true,
-               totalLen, nPieces, oversized: lens.some(l => l > (+g.bw || 4100) + 1e-6),
+               totalLen, nPieces, oversized: pieces.some(p=>p.w>g.bw+1e-6||p.h>g.bh+1e-6),
                nSplit:0, sheetsArea:0, sheetsPack:0, byArea:false,
                total: qty * (+g.price || 0) };
     }
@@ -7092,7 +7099,7 @@ function priceCalc(){
   const materialBase=base,materialVat=vat,materialGross=total,hardware=hardwareCalc(),led=ledCalc(),goods=briefGoods();
   base=roundMoney(materialBase+hardware.base+led.base+goods.base);vat=roundMoney(materialVat+hardware.vat+led.vat+goods.vat);total=roundMoney(base+vat);
   return {
-    hardware, led, goods, purchasedFronts:purchasedFrontSummary(parts), materialBase, materialVat, materialGross,
+    manufacturingWarnings:manufacturingWarnings(rows), hardware, led, goods, purchasedFronts:purchasedFrontSummary(parts), materialBase, materialVat, materialGross,
     parts, rows, edgeM, exactEdgeM, edgeTotal, materialTotal,
     base, vat, total, rate, vatIncluded:P.vatIncluded,
     zast: Z,
@@ -7209,7 +7216,7 @@ function renderPriceModal(){
     <div id="pPurchasedFrontStatus" style="color:#b91c1c">${esc(C.purchasedFronts.warnings.join(" "))}</div>
     <div id="pHardwareStatus" style="color:#b91c1c"></div>
     <div class="p-sum">
-      <div><span id="pSumLabel">${C.goods.warnings.length?"MEZISOUČET — dodávky neoceněné":C.purchasedFronts.qty?"MEZISOUČET — bez čel Trachea":C.led.warnings.length?"MEZISOUČET — LED neúplné":briefActive()?"Materiál, kování, LED a dodávky":"Materiál + oceněné kování a LED"}</span><b id="pSumTotal">${money2(C.total)}</b>
+      <div><span id="pSumLabel">${C.manufacturingWarnings.length?"MEZISOUČET — neověřený nářez":C.goods.warnings.length?"MEZISOUČET — dodávky neoceněné":C.purchasedFronts.qty?"MEZISOUČET — bez čel Trachea":C.led.warnings.length?"MEZISOUČET — LED neúplné":briefActive()?"Materiál, kování, LED a dodávky":"Materiál + oceněné kování a LED"}</span><b id="pSumTotal">${money2(C.total)}</b>
         <small id="pSumHint">včetně DPH · materiál ${fmt(C.rate)} %, kování 21 %</small></div>
       <div><span>Bez DPH</span><b id="pSumBase">${money2(C.base)}</b><small>základ daně</small></div>
       <div><span>DPH</span><b id="pSumVat">${money2(C.vat)}</b><small>materiál + kování + LED</small></div>
@@ -7243,6 +7250,7 @@ function renderPriceModal(){
     <div id="frameCornerControls">${frameCornerOptions()}</div>
     <div class="p-h">Kování podle skříní</div>
     <button class="tb" id="pPrintTechnical" type="button">Uložit / tisk pro dílnu — hotové PDF</button><p class="hint">Dílenský export vytvoří přímo hotový soubor PDF, A4 na výšku. Po vytvoření stiskněte Otevřít PDF nebo Stáhnout PDF. V náhledu pak zvolte Sdílet → Uložit do Souborů nebo Tisk. Prohlížeč už znovu nestránkuje HTML, takže nevkládá prázdné listy mezi stránky. Interní PDF i Tisk pro dílnu obsahují kompletní výkresy, přířezy, materiál, detailní kování, LED a upozornění. Tlačítko Nabídka pro zákazníka vytvoří také hotové PDF, pouze cenovou nabídku bez interních poznámek. Obě PDF lze uložit nebo tisknout i při spuštění z ikony na ploše iPadu.</p>
+    <div id="pManufacturingWarnings">${manufacturingAlert(C)}</div>
     ${briefPriceHtml()}
     <div id="pHardware">${hardwareTable(C.hardware)}</div>
     <div id="pLED">${ledPriceForm(C.led)}</div>
@@ -7406,6 +7414,7 @@ function bindPriceInputs(){
 /* Přepočítá jen čísla v otevřeném okně – fokus v poli zůstane. */
 function updatePriceTotals(){
   const C = priceCalc();
+  const mw=$('#pManufacturingWarnings');if(mw)mw.innerHTML=manufacturingAlert(C);
   for(const r of C.rows){
     const a = $('#pArea_' + r.g.id);
     if(a) a.textContent = r.linear ? (num2(r.lenM) + ' m') : (num2(r.area) + ' m²');
@@ -7425,7 +7434,7 @@ function updatePriceTotals(){
   const sh = $('#pSumHint');  if(sh) sh.textContent = 'včetně DPH · materiál '+fmt(C.rate)+' %, kování 21 %';
   const hw=$('#pHardware');if(hw)hw.innerHTML=hardwareTable(C.hardware);
   const pfStatus=$('#pPurchasedFrontStatus');if(pfStatus)pfStatus.textContent=C.purchasedFronts.warnings.join(' ');
-  const sumLabel=$('#pSumLabel');if(sumLabel)sumLabel.textContent=C.goods.warnings.length?'MEZISOUČET — dodávky neoceněné':C.purchasedFronts.qty?'MEZISOUČET — bez čel Trachea':C.led.warnings.length?'MEZISOUČET — LED neúplné':briefActive()?'Materiál, kování, LED a dodávky':'Materiál + oceněné kování a LED';
+  const sumLabel=$('#pSumLabel');if(sumLabel)sumLabel.textContent=C.manufacturingWarnings.length?'MEZISOUČET — neověřený nářez':C.goods.warnings.length?'MEZISOUČET — dodávky neoceněné':C.purchasedFronts.qty?'MEZISOUČET — bez čel Trachea':C.led.warnings.length?'MEZISOUČET — LED neúplné':briefActive()?'Materiál, kování, LED a dodávky':'Materiál + oceněné kování a LED';
   const hwStatus=$('#pHardwareStatus');if(hwStatus)hwStatus.textContent=C.hardware.warnings.length?'NEÚPLNÁ CENA KOVÁNÍ — doplňte '+C.hardware.warnings.length+' nevyřešených položek níže.':C.hardware.notices.length?'PŘEDBĚŽNÝ VÝBĚR BLUM — cena obsahuje návrh, nikoli potvrzenou objednávku.':'';
   save();
 }
@@ -7498,7 +7507,7 @@ function customerQuoteData(){
  rows.push(...C.goods.rows.map(r=>({...r,section:'Dodávky'})));
  const delta=roundMoney(C.total-rows.reduce((n,r)=>n+(r.gross??0),0));
  if(delta)rows.push({section:'Souhrn',label:'Zaokrouhlení',qty:'',gross:delta});
- const incomplete=!!(C.goods.warnings.length||briefChecks().length||C.purchasedFronts.qty||C.hardware.warnings.length||C.led.warnings.length||strongMaxProjectWarnings().length);
+ const incomplete=!!(C.manufacturingWarnings.length||C.goods.warnings.length||briefChecks().length||C.purchasedFronts.qty||C.hardware.warnings.length||C.led.warnings.length||strongMaxProjectWarnings().length);
  return {C,rows,incomplete};
 }
 function customerQuoteHtml(){
@@ -7571,6 +7580,7 @@ function pricePageHtml(opt){
       </tfoot>
     </table>
 
+    ${manufacturingAlert(C)}
     <p style="color:#b91c1c">${esc(C.purchasedFronts.warnings.join(" "))}</p>
     <div style="margin-top:6mm;display:flex;gap:6mm">
       <div style="flex:1;border:.6pt solid #ccc;border-radius:2mm;padding:3mm 4mm">
@@ -7863,7 +7873,7 @@ function buildPrint(technicalRequested=true){
           <td class="num">${fmt(bokDepthOf(e))}</td>
           <td class="num">1</td>
           <td class="num">${fmt(bh)}</td>
-          <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)</td>
+          <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)${elKind3(e)==='base'?'; hotová výška '+fmt(bokFinishedH(e))+' mm pod PD + 30 mm nářezová rezerva':''}</td>
         </tr>`).join('');
       if(bokRows) out += bokRows;
       if(isNiche(e)||isWire(e)){
@@ -7876,24 +7886,7 @@ function buildPrint(technicalRequested=true){
         if(typ!=='hinges')out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>${esc(typ==='hfTop'?'HF top':typ==='hkTop'?'HK top':'HK-S')}</b> — ${check.errors.length?'NEVYHOVUJÍCÍ ZADÁNÍ: '+esc(check.errors.join(' ')):'Rozsah korpusu zkontrolován.'} ${esc(check.notice)}</td></tr>`;
         if(k3v==='upper')out += upperCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · š × v/hl (mm)</td></tr>`).join('');
       }
-      if(elKind3(e)==='base' && !isDishwasherSpace(e) && pw >= 1){
-        out += `<tr class="pr-sub"><td class="num"></td>
-          <td>└ půda</td>
-          <td class="num">${fmt(pw)}</td>
-          <td class="num">${fmt(dNom)}</td>
-          <td class="num">1</td>
-          <td class="num">${fmt(pw)}</td>
-          <td>šířka skříně − 2× ${LAM} mm</td>
-        </tr>
-        <tr class="pr-sub"><td class="num"></td>
-          <td>└ lať</td>
-          <td class="num">${fmt(pw)}</td>
-          <td class="num">120</td>
-          <td class="num">2</td>
-          <td class="num">${fmt(pw*2)}</td>
-          <td>2 ks, hloubka 120 mm</td>
-        </tr>`;
-      }
+      if(elKind3(e)==='base'&&!isDishwasherSpace(e))out+=baseCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*smq}</td><td class="num">${fmt(p.w*p.qty*smq)}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · ${esc(p.edgeNote)} · ${fmt(p.edgeMm)} mm/ks</td></tr>`).join('');
       return out;
     };
     /* Výpis se dělí stejně jako výkresy: DS (spodní skříňky + sloupy)
