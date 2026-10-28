@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-rezerva-v90'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-digestor-v91'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -4414,6 +4414,7 @@ function renderInspector(){
       </div>
       <div id="strongMaxBox"></div><div id="hardwareBox"></div>
       ${upperOpeningForm(e)}
+      ${hoodInspector(e)}
       ${briefInspector(e)}
       <details class="insp-sec insp-fold" data-insp-fold="bok"><summary>Bok+ <small>${bokAny(e)?"zapnuto":"bez panelů"}</small></summary>
         <div class="row2">
@@ -5501,14 +5502,19 @@ function saveProjectBrief(){
  S.project.info.brief=b;
  if(b.enabled){const pd=b.items.pd;if(pd.depth>0){pricing().topDepth=clamp(pd.depth,300,1200);pd.depth=pricing().topDepth;const g=pricing().groups.find(g=>g.id==='top');g.bh=Math.max(g.bh,pd.depth);}if(pd.thickness!=null)pd.thickness=clamp(pd.thickness,1,150);}
 }
+function hoodInspector(e){
+ if(elKind3(e)!=='upper'||isNiche(e))return '';
+ return `<div class="insp-sec"><h4>Spotřebič v HS</h4><label class="chk"><input id="iHood" type="checkbox" ${briefAssigned(e,'hood')?'checked':''}> Digestoř</label>${briefAssigned(e,'hood')?`<p>${esc(briefForEl(e,'hood').model||'Model nezadán')} · ${briefActive()?(briefSupply('hood')?'naše dodávka':'dodá zákazník'):'dodávku nastavte v zadání'}</p><label class="fld"><span>Vlastní model digestoře (odlišný model vyžaduje nové ocenění)</span><input data-brief-override="hood" value="${esc(e.briefOverrides?.hood?.model||'')}"></label>`:''}<p class="hint">Přiřazení digestoře vynechá automatické LED pod touto HS. Ruční volba LED má přednost. Korpus, police ani výřez se automaticky nemění; ověřte montáž podle výrobce. Dodavatele a cenu nastavte v zadání projektu.</p></div>`;
+}
 function briefInspector(e){
  if(!briefActive())return '';
- return `<details class="insp-sec"><summary>Zadání projektu / přiřazené vybavení</summary><p class="hint">Modely a rozměry se přebírají ze zadání. Vlastní rozměr spotřebiče níže má přednost; tlačítkem lze obnovit propojení. Přiřazení samo nepřestavuje korpus ani nemění druh skříně. Kontrola prostoru odečítá tloušťky dílců; police, příčky, přívody a skutečnou hloubku mezery pro myčku ověřte samostatně.</p>`+BRIEF_EQUIPMENT.map(k=>{
+ return `<details class="insp-sec"><summary>Zadání projektu / přiřazené vybavení</summary><p class="hint">Modely a rozměry se přebírají ze zadání. Vlastní rozměr spotřebiče níže má přednost; tlačítkem lze obnovit propojení. Přiřazení samo nepřestavuje korpus ani nemění druh skříně. Kontrola prostoru odečítá tloušťky dílců; police, příčky, přívody a skutečnou hloubku mezery pro myčku ověřte samostatně.</p>`+BRIEF_EQUIPMENT.filter(k=>k!=='hood'||elKind3(e)!=='upper'||isNiche(e)).map(k=>{
   const v=briefForEl(e,k),name=BRIEF_ITEMS.find(x=>x[0]===k)[1],assigned=briefAssigned(e,k),fixed=['sink','hob','oven','micro'].includes(k)||k==='dishwasher'&&isDishwasherSpace(e)||k==='wire'&&isWire(e);
   return `<div style="margin:8px 0"><label class="chk"><input data-brief-assign="${k}" type="checkbox" ${assigned?'checked':''} ${fixed?'disabled':''}>${name}</label>${fixed&&!assigned?'<small>Zapněte v části Spotřebiče / Provedení prvku.</small>':''}${assigned?`<small>${esc(v.model||'Model nezadán')} · ${briefSupply(k)?'naše dodávka':'dodávka zákazníka'}</small><label class="fld"><span>Vlastní model — odlišný model vyžaduje nové ocenění</span><input data-brief-override="${k}" value="${esc(e.briefOverrides?.[k]?.model||'')}"></label>${['sink','hob','oven','micro'].includes(k)?`<button type="button" class="tb" data-brief-relink="${k}">Rozměry z projektu</button>`:''}`:''}</div>`;
  }).join('')+'</details>';
 }
 function bindBriefInspector(e){
+ const hood=$('#iHood');if(hood)hood.onchange=()=>{e.briefRefs=e.briefRefs||{};e.briefRefs.hood=hood.checked;pushHistory();save();renderInspector();renderCanvas();};
  $$('#inspBody [data-brief-assign]').forEach(n=>n.onchange=()=>{e.briefRefs=e.briefRefs||{};e.briefRefs[n.dataset.briefAssign]=n.checked;pushHistory();renderInspector();});
  $$('#inspBody [data-brief-override]').forEach(n=>n.onchange=()=>{const k=n.dataset.briefOverride;e.briefOverrides=e.briefOverrides||{};e.briefOverrides[k]=e.briefOverrides[k]||{};if(n.value.trim())e.briefOverrides[k].model=n.value.trim();else delete e.briefOverrides[k].model;pushHistory();});
  $$('#inspBody [data-brief-relink]').forEach(n=>n.onclick=()=>{const a=e.appliances?.[n.dataset.briefRelink];if(a){delete a.w;delete a.size;}pushHistory();renderInspector();});
@@ -6958,7 +6964,7 @@ function ledCabinetOn(e){
  if(elKind3(e)!=='upper')return false;
  if(e.ledMode==='off')return false;
  if(e.ledMode==='on')return true;
- return !(briefActive()&&briefAssigned(e,'hood'))&&!/digesto[rř]/i.test(e.name||'');
+ return !(e.briefRefs?.hood!==undefined?briefAssigned(e,'hood'):/digesto[rř]/i.test(e.name||''));
 }
 function ledIntervalsSubtract(spans,cut){
  return spans.flatMap(s=>cut.b<=s.a||cut.a>=s.b?[s]:[{a:s.a,b:Math.min(s.b,cut.a)},{a:Math.max(s.a,cut.b),b:s.b}].filter(x=>x.b-x.a>.01));
@@ -7542,6 +7548,9 @@ function customerQuoteData(){
  rows.push(...[...buckets.entries()].sort(([a],[b])=>(order.includes(a)?order.indexOf(a):99)-(order.includes(b)?order.indexOf(b):99)).map(([,r])=>({...r,qty:fmtQty(r.number)+' '+r.unit})));
  if(C.led.profileMm&&briefSupply('led'))rows.push({section:'Osvětlení',label:'LED sestava — profil, krytka, pásek a zdroj'+(C.led.warnings.length?' (neúplná cena)':''),qty:'1 sestava',gross:C.led.gross});
  rows.push(...C.goods.rows.map(r=>({...r,section:'Dodávky'})));
+ if(briefActive())for(const [key,label]of BRIEF_ITEMS){
+  if(!briefSupply(key))rows.push({key,section:'Dodávka zákazníka',label:label+' — dodá zákazník'+(briefItem(key).model?' — '+briefItem(key).model:''),qty:'',gross:0,customerSupplied:true});
+ }
  const delta=roundMoney(C.total-rows.reduce((n,r)=>n+(r.gross??0),0));
  if(delta)rows.push({section:'Souhrn',label:'Zaokrouhlení',qty:'',gross:delta});
  const incomplete=!!(C.manufacturingWarnings.length||C.goods.warnings.length||briefChecks().length||C.purchasedFronts.qty||C.hardware.warnings.length||C.led.warnings.length||strongMaxProjectWarnings().length);
@@ -7550,7 +7559,7 @@ function customerQuoteData(){
 function customerQuoteHtml(){
  const {C,rows,incomplete}=customerQuoteData(),i=S.project.info;
  const date=new Date(i.date||Date.now()).toLocaleDateString('cs-CZ');
- const body=rows.map((r,index)=>`<tr data-quote-item="${index}"><td>${esc(r.label)}</td><td class="num">${esc(r.qty)}</td><td class="num cq-price">${r.gross==null?'NEOCENĚNO':money2(r.gross)}</td></tr>`).join('');
+ const body=rows.map((r,index)=>`<tr data-quote-item="${index}"><td>${esc(r.label)}</td><td class="num">${esc(r.qty)}</td><td class="num cq-price">${r.customerSupplied?'Není zahrnuto v ceně':r.gross==null?'NEOCENĚNO':money2(r.gross)}</td></tr>`).join('');
  return `<section class="pr-page customer-quote"><div class="pr-head cq-head"><div><div class="pr-kicker">Cenová nabídka kuchyně</div><h2>${esc(i.name||'Kuchyňská sestava')}</h2><div class="cq-meta">${esc([i.client,i.clientPhone,i.address].filter(Boolean).join(' · '))}<br>${esc([date,i.designer,i.designerContact].filter(Boolean).join(' · '))}</div></div></div>
  ${incomplete?'<p class="cq-alert">NEÚPLNÁ NABÍDKA: neoceněné nebo nevyřešené části nejsou zahrnuté. Uvedený součet je pouze mezisoučet oceněných položek.</p>':''}
  <table class="pr-table cq-table"><colgroup><col style="width:64%"><col style="width:13%"><col style="width:23%"></colgroup><thead><tr><th>Položka</th><th class="num">Počet</th><th class="num">Cena s DPH</th></tr></thead><tbody>${body}</tbody><tfoot><tr><td colspan="2">Celkem bez DPH</td><td class="num">${money2(C.base)}</td></tr><tr><td colspan="2">DPH celkem</td><td class="num">${money2(C.vat)}</td></tr><tr class="cq-grand"><td colspan="2">${incomplete?'MEZISOUČET S DPH — NEÚPLNÁ NABÍDKA':'CELKOVÁ CENA S DPH'}</td><td class="num" data-quote-total>${money2(C.total)}</td></tr></tfoot></table>
