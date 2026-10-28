@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-narez-v92'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-lamino-v93'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -7510,11 +7510,14 @@ function customerQuoteData(){
  const materialFactor=C.materialFactor;
  const materials=C.rows.filter(r=>r.area>0||r.sheets>0);
  const lamino=materials.filter(r=>['body','front','bok'].includes(r.g.id));
- if(lamino.length)rows.push({section:'Materiál',label:'Lamino',qty:'',gross:roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor*materialFactor)});
+ // Zákaznické sloučení: součet původních zaokrouhlených řádků, beze změny ceny.
+ const laminoGross=roundMoney(lamino.reduce((n,r)=>n+r.total,0)*factor*materialFactor);
+ const absGross=C.edgeM>0?roundMoney((C.edgeTotal+C.centreEdgeTotal*(materialFactor-1))*factor):0;
+ const processingGross=C.servicesGross>0?roundMoney(C.servicesGross*pricing().reserveFactor):0;
+ if(lamino.length||absGross||processingGross)rows.push({section:'Materiál',label:'Lamino',qty:'',gross:roundMoney(laminoGross+absGross+processingGross)});
  const names={top:'Pracovní deska',back:'Záda skříní — HDF',zast:'Zástěna',zastena:'Zástěna',tl:'Těsnicí lišta'};
  for(const r of materials.filter(r=>!['body','front','bok'].includes(r.g.id)))rows.push({section:'Materiál',label:names[r.g.id]||r.g.name,qty:'',gross:roundMoney(r.total*factor*(isCutCentreGroup(r.g.id)?materialFactor:1))});
- if(C.edgeM>0)rows.push({section:'Materiál',label:'Hranění dílců — ABS',qty:'',gross:roundMoney((C.edgeTotal+C.centreEdgeTotal*(materialFactor-1))*factor)});
- if(C.servicesGross>0)rows.push({section:'Materiál',label:'Zpracování materiálu — PUR, řezání a manipulace',qty:'',gross:roundMoney(C.servicesGross*pricing().reserveFactor)});
+
  if(C.purchasedFronts.qty)rows.push({section:'Materiál',label:'Dvířka Trachea — neoceněná',qty:C.purchasedFronts.qty+' ks',gross:null});
  const buckets=new Map();
  const add=(key,label,qty,unit,gross)=>{
