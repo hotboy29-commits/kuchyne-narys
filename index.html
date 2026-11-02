@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-hs-horni-panel-v98'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-tisk-bez-meritka-v99'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -8199,14 +8199,7 @@ function drawingSvg(P, opt){
     parts.push(dimPrint(wbR.x, wbR.y-od, wbR.x+wbR.w, wbR.y-od, 'x', k, 1.1, '#334155'));
     parts.push(dimPrint(wbR.x-od, wbR.y, wbR.x-od, wbR.y+wbR.h, 'y', k, 1.1, '#334155'));
   }
-  // měřítko
-  /* měřítko – jasně označené a odsazené pod výkres, ať nejde zaměnit s kótou */
-  const bx = b.x + b.w - 1000, by = b.y + b.h + 7 / k;   // 7 mm pod výkresem
-  parts.push(`<line x1="${bx}" y1="${by}" x2="${bx+1000}" y2="${by}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
-  parts.push(`<line x1="${bx}" y1="${by-60}" x2="${bx}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
-  parts.push(`<line x1="${bx+1000}" y1="${by-60}" x2="${bx+1000}" y2="${by+60}" stroke="#111" stroke-width="${sw(PEN.scale)}"/>`);
-  parts.push(`<text x="${bx+500}" y="${by-110}" text-anchor="middle" font-size="${fs(2.6)}" fill="#111"
-    style="font-family:Helvetica,Arial,sans-serif">MĚŘÍTKO · úsečka = 1 000 mm</text>`);
+  // Pomocná úsečka a popisek měřítka se netisknou; kóty zůstávají.
 
   parts.push(`</g>`);
   return `<svg viewBox="0 0 ${R(vw)} ${R(vh)}" width="${R(vw)}mm" height="${R(vh)}mm" xmlns="http://www.w3.org/2000/svg">${parts.join('')}</svg>`;
