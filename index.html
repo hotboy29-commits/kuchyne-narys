@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-bar-pd-v97'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-hs-horni-panel-v98'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3303,7 +3303,7 @@ function nicheFullDepth(e){return elFrontD(e)+20;}
 function nichePlanRect(e){const r={x:e.x,y:e.y,w:e.w,h:e.d};if(!isNiche(e))return r;const f=e.front||'jih';if(isHorizFront(f)){r.h+=20;if(f==='sever')r.y-=20;}else{r.w+=20;if(f==='západ')r.x-=20;}return r;}
 
 function nicheShelves(e){return clamp(Math.round(e.nicheShelves??2),0,12);}
-function frameEnabled(e,side){return elKind3(e)==='upper'&&!e.frameOff&&pricing().upperFrame?.[side]===true;}
+function frameEnabled(e,side){return elKind3(e)==='upper'&&(side!=='bottom'||!e.frameOff)&&pricing().upperFrame?.[side]===true;}
 function nicheCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=nicheFullDepth(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
  if(w<=0||h<=0||d<=0)return [];
@@ -4385,7 +4385,7 @@ function renderInspector(){
         </label>
         <label class="fld"><span>Provedení prvku</span><select id="iSpecialType"><option value="cabinet" ${!isNiche(e)&&!isWire(e)&&!isDishwasherSpace(e)?'selected':''}>Běžná skříň</option><option value="niche" ${isNiche(e)?'selected':''}>Nika — otevřená, pohledové lamino</option>${elKind3(e)==='base'?`<option value="wire200" ${isWire(e)?'selected':''}>Drát — výsuvný dvojkoš 200 mm</option><option value="dishwasher" ${isDishwasherSpace(e)?'selected':''}>Prostor pro myčku</option>`:''}</select></label>
         ${isNiche(e)?`<label class="fld"><span>Hotová hloubka niky (včetně +20)</span><input id="iNicheFullDepth" type="number" min="120" step="5" value="${nicheFullDepth(e)}"></label>${e.nicheDepthReview?`<p class="hint">Nika ze starší verze: původní hloubka ${fmt(e.nicheDepthReview)} mm. Pokud už šlo o hotovou hloubku, zadejte tuto hodnotu do pole výše; nebude se znovu přičítat 20 mm.</p>`:""}<label class="fld"><span>Počet polic niky</span><input id="iNicheShelves" type="number" min="0" max="12" value="${nicheShelves(e)}"></label><p class="hint">Skutečná hloubka niky ${fmt(nicheFullDepth(e))} mm = referenční HS ${fmt(elFrontD(e))} + 20 mm. Opláštění zůstává ${fmt(elFrontD(e)+20)} mm, nikoli o dalších 20 více. Lamino 18 mm, vložená záda. Dekor: ${esc(finishDecor())}. Dno/půda mezi bočnicemi, police před zády. ABS na předních hranách, záda bez ABS.</p>`:''}
-        ${elKind3(e)==='upper'?`<label class="chk"><input id="iFrameOff" type="checkbox" ${e.frameOff?'checked':''}> Vynechat tuto HS z opláštění</label><p class="hint">Horní/spodní opláštění celé sestavy zapnete v Kalkulaci. Hloubka ${fmt(elFrontD(e)+20)} mm, délka podle souvislé řady.</p>`:''}
+        ${elKind3(e)==='upper'?`<label class="chk"><input id="iFrameOff" type="checkbox" ${e.frameOff?'checked':''}> Vynechat spodní opláštění této HS (např. digestoř)</label><p class="hint">Horní opláštění pokračuje i nad touto skříní. Horní/spodní opláštění celé sestavy zapnete v Kalkulaci. Hloubka ${fmt(elFrontD(e)+20)} mm, délka podle souvislé řady.</p>`:''}
         ${elKind3(e)==='base'?`<label class="chk"><input id="iDishwasher" type="checkbox" ${isDishwasherSpace(e)?'checked':''}> Prostor pro vestavnou myčku — bez korpusu</label><p class="hint">${isDishwasherSpace(e)?'Pouze 1 čelo (šířka místa − 4 mm). Bez korpusu, zad, polic, pantů a noh. PD a průběžný sokl zůstávají; ručně zapnutý Bok+ se počítá zvlášť.':dishwasherNameSuggestion(e)?'Název odpovídá myčce. Potvrďte volbu výše, jinak se prvek počítá jako běžná skříň.':'Pro myčku 600 i 450 mm zapněte tuto volbu; šířku místa zadejte v rozměrech.'}</p>`:''}
       </div>
       <div class="insp-sec">
