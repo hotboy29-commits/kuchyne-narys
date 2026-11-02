@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-tisk-bez-meritka-v99'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-citelny-pudorys-v100'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -8115,13 +8115,13 @@ function drawingSvg(P, opt){
     parts.push(`<rect x="${pr.x}" y="${pr.y}" width="${Math.max(pr.w,1)}" height="${Math.max(pr.h,1)}"
       fill="${e.color}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
     const fv = FRONT_VEC[e.front||'jih'];
-    const m = Math.min(80, e.w*0.14, e.d*0.14);
+    const m = Math.min(0.7/k, e.w*0.06, e.d*0.06); // značka těsně u čela, mimo text
     let dl = '';
     if(fv[1]===1)  dl = `M${e.x+m} ${e.y+e.d-m} H${e.x+e.w-m}`;
     if(fv[1]===-1) dl = `M${e.x+m} ${e.y+m} H${e.x+e.w-m}`;
     if(fv[0]===1)  dl = `M${e.x+e.w-m} ${e.y+m} V${e.y+e.d-m}`;
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
-    if(dl) parts.push(`<path d="${dl}" stroke="${e.color}" stroke-width="${sw(PEN.el)}" fill="none"/>`);
+    if(dl) parts.push(`<path data-print-front="${esc(e.id)}" d="${dl}" stroke="${e.color}" stroke-width="${sw(PEN.el)}" fill="none"/>`);
 
     const capPx = Math.min(e.w, e.d);
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
@@ -8131,12 +8131,12 @@ function drawingSvg(P, opt){
       const maxChars=Math.max(3,Math.floor((elFrontW(e)-12)/(size*.66)));
       let text=String(e.name||''),lines=[];
       while(text.length>maxChars){let cut=text.lastIndexOf(' ',maxChars);if(cut<maxChars*.35)cut=maxChars;lines.push(text.slice(0,cut));text=text.slice(cut).trimStart();}if(text)lines.push(text);
-      const margin=((lines.length-1)*size*1.12+(withDim?size:0))/2+size*.9;
+      const margin=((lines.length-1)*size*1.12+(withDim?size:0))/2+size*.9+m+1/k;
       const {x:cx,y:cy}=frontLabelPosition(e,margin,false);
       const top=cy-((lines.length-1)*size*1.12+(withDim?size:0))/2;
       parts.push(`<g data-print-label="${esc(e.id)}" transform="rotate(${frontLabelAngle(e)} ${R(cx)} ${R(cy)})"><title>${esc(e.name||'')}</title>`);
-      lines.forEach((line,i)=>parts.push(`<text x="${R(cx)}" y="${R(top+i*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}" font-weight="700" fill="#0d1117" style="font-family:Helvetica,Arial,sans-serif">${esc(line)}</text>`));
-      if(withDim)parts.push(`<text x="${R(cx)}" y="${R(top+lines.length*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs(clamp(size*k*.66,1.7,2.6))}" fill="#374151" style="font-family:Helvetica,Arial,sans-serif">${fmt(elFrontW(e))} × ${fmt(isNiche(e)?nicheFullDepth(e):elFrontD(e))}</text>`);
+      lines.forEach((line,i)=>parts.push(`<text x="${R(cx)}" y="${R(top+i*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${size}" font-weight="700" fill="#0d1117" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs(.55)};stroke-linejoin:round">${esc(line)}</text>`));
+      if(withDim)parts.push(`<text x="${R(cx)}" y="${R(top+lines.length*size*1.12)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs(clamp(size*k*.66,1.7,2.6))}" fill="#374151" style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs(.55)};stroke-linejoin:round">${fmt(elFrontW(e))} × ${fmt(isNiche(e)?nicheFullDepth(e):elFrontD(e))}</text>`);
       parts.push('</g>');
     }
   }
