@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-cele-koruny-v96'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-bar-pd-v97'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -5175,41 +5175,8 @@ function scBox(sc, x0,y0,x1,y1, z0,z1, mat){
 
 /* ── pracovní desky nad souvislými řadami spodních skříněk ── */
 function counters3(sc){
-  const bases = [];
-  for(const e of S.project.elements){
-    if(elKind3(e) !== 'base') continue;
-    const f = e.front || 'jih', w = e.w, d = e.d;
-    let front, range0, range1, rect;
-    if(f==='jih')      { front = e.y + d; range0 = e.x;         range1 = e.x + w; rect = { y0:e.y,  y1:e.y+d }; }
-    else if(f==='sever'){ front = e.y;   range0 = e.x;         range1 = e.x + w; rect = { y0:e.y,  y1:e.y+d }; }
-    else if(f==='východ'){ front = e.x + w; range0 = e.y;      range1 = e.y + d; rect = { x0:e.x,  x1:e.x+w }; }
-    else                { front = e.x;   range0 = e.y;         range1 = e.y + d; rect = { x0:e.x,  x1:e.x+w }; }
-    bases.push({ e, f, front:R(front), r0:R(range0), r1:R(range1), rect, h:elH3(e) });
-  }
-  const groups = {};
-  for(const b of bases){
-    const key = b.f + ':' + b.front;
-    (groups[key] = groups[key] || []).push(b);
-  }
-  for(const key in groups){
-    const row = groups[key];
-    const hTop = Math.max(...row.map(b => b.h));
-    row.sort((a,b) => a.r0 - b.r0);
-    let runs = [];
-    for(const b of row){
-      if(runs.length && b.r0 - runs[runs.length-1].r1 <= 90) runs[runs.length-1].r1 = Math.max(runs[runs.length-1].r1, b.r1);
-      else runs.push({ r0:b.r0, r1:b.r1, rect:b.rect });
-    }
-    for(const run of runs){
-      const f = row[0].f, z0 = B3D.floorT + B3D.sokl + hTop, z1 = B3D.floorT + B3D.sokl + hTop + worktopThickness();
-      let x0,y0,x1,y1;
-      if(f==='jih')      { x0 = run.r0; x1 = run.r1; y1 = row[0].front; y0 = Math.min(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y0)); }
-      else if(f==='sever'){ x0 = run.r0; x1 = run.r1; y0 = row[0].front; y1 = Math.max(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.y1)); }
-      else if(f==='východ'){ y0 = run.r0; y1 = run.r1; x1 = row[0].front; x0 = Math.min(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.x0)); }
-      else               { y0 = run.r0; y1 = run.r1; x0 = row[0].front; x1 = Math.max(...row.filter(b=>b.r0>=run.r0-1&&b.r1<=run.r1+1).map(b=>b.rect.x1)); }
-      scBox(sc, x0,y0,x1,y1, z0,z1, 'counter');
-    }
-  }
+  // Stejná geometrie PD jako v naší PNG vizualizaci.
+  pngCounterMesh(sc,pngCounterRuns());
 }
 
 /* ── celá sestava prvků (skříně + sloupy + bok+) ── */
@@ -5609,14 +5576,26 @@ function pngStyle(mat){
 
 /* Exportní pracovní desky: skutečná hloubka a napojení sousedních kolmých řad.
    Nákupní rezervy ani prořez se do viditelných rozměrů nepřidávají. */
+/* PD nesmí hledat oporu na libovolně vzdálené zdi ani na zdi před čelem.
+   Mělčí volně stojící korpus: zadní hrana zarovno, přesah 40 mm před dveře. */
+function counterPlacement(e){
+  const f=e.front||'jih',horizontal=isHorizFront(f),d=elFrontD(e);
+  const rear=f==='jih'?e.y:f==='sever'?e.y+e.d:f==='východ'?e.x:e.x+e.w;
+  const candidate=wallFaceBehind(e),sign=(f==='jih'||f==='východ')?1:-1;
+  const gap=candidate==null?Infinity:(rear-candidate)*sign;
+  const wall=candidate!=null&&gap>=-0.5&&gap<=100?candidate:null;
+  const shallow=wall==null&&d<510;
+  const ft=frontCfg(e).on?(frontMaterial().thickness||18):0;
+  const depth=shallow?d+ft+40:Math.max(200,+pricing().topDepth||TOP_DEPTH_DFLT,d);
+  const back=wall!=null?wall:shallow?rear:rear-sign*EL_WALL_GAP;
+  return {back,depth,shallow,wall,rear,frontOverhang:shallow?40:null};
+}
 function pngCounterRuns(){
   const rows=[];
   for(const e of S.project.elements){
     if(elKind3(e)!=='base')continue;
-    const f=e.front||'jih', horizontal=isHorizFront(f), depth=topDepthOfRun({f,el:[e]});
-    const wall=wallFaceBehind(e);
-    let back=wall;
-    if(back==null)back=f==='jih'?e.y-EL_WALL_GAP:f==='sever'?e.y+e.d+EL_WALL_GAP:f==='východ'?e.x-EL_WALL_GAP:e.x+e.w+EL_WALL_GAP;
+    const f=e.front||'jih', horizontal=isHorizFront(f);
+    const {depth,back}=counterPlacement(e);
     let x0=e.x,x1=e.x+e.w,y0=e.y,y1=e.y+e.d;
     if(f==='jih'){y0=back;y1=back+depth;}
     else if(f==='sever'){y1=back;y0=back-depth;}
@@ -6267,13 +6246,10 @@ function topPiecesForRun(r){
    Bere se nastavená hloubka, a kdyby byla některá spodní skříň hlubší,
    vyhraje skříň – deska musí skříň překrýt. */
 function topDepthOfRun(r){
-  const P = pricing();
-  const horiz = (r.f === 'jih' || r.f === 'sever');
-  const perp = e => horiz ? e.d : e.w;
-  const bases = (r.el || []).filter(e => elKind3(e) === 'base');
-  const runDeep = horiz ? (r.y1 - r.y0) : (r.x1 - r.x0);
-  const baseDeep = bases.length ? Math.max(...bases.map(perp)) : runDeep;
-  return Math.max(200, Math.max(+P.topDepth || TOP_DEPTH_DFLT, baseDeep));
+  const bases=(r.el||[]).filter(e=>elKind3(e)==='base');
+  if(bases.length)return Math.max(...bases.map(e=>counterPlacement(e).depth));
+  const horizontal=isHorizFront(r.f);
+  return Math.max(200,+pricing().topDepth||TOP_DEPTH_DFLT,(horizontal?r.y1-r.y0:r.x1-r.x0)||0);
 }
 
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
