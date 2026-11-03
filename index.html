@@ -627,6 +627,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <label class="fld" id="fLaminoDecorWrap"><span>Dekor lamina čel</span><input id="fDecor_front" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Pracovní deska</span><input id="fDecor_worktop" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Bok+, rám HS a niky — společný dekor</span><input id="fDecor_finish" placeholder="Zadejte dekorové lamino — nezávislé na bílém korpusu"></label>
+      <label class="fld span2"><label><input id="fCladding" type="checkbox"> Opláštění boků skříněk</label><p class="hint">Při zapnutí budou viditelné boky skříněk opláštěny dekorativním lamem a objeví se v kalkulaci.</p></label>
       <label class="fld"><span>Korpusy</span><input id="fDecor_body" placeholder="8100 PE — bílá (výchozí)"></label>
       <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
@@ -1691,7 +1692,7 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + framePlanSvg(mm=>mm*4/S.view.zoom,layerShowsEl) + guidesMarkup();
+  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + (pricing().cladding ? claddingBokMarkup() : '') + framePlanSvg(mm=>mm*4/S.view.zoom,layerShowsEl) + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -3995,6 +3996,22 @@ function bokRects(e){
   if(sd.R) out.push(bokRectFor(e, 'R'));
   return out;
 }
+
+/* Opláštění boků skříněk – červené přerušované obrysy boků, když je zapnuté v Údajích projektu. */
+function claddingBokMarkup(){
+  const z = S.view.zoom;
+  let out = '';
+  for(const e of S.project.elements){
+    if(!layerShowsEl(e)) continue;
+    const k = elKind3(e);
+    if(k !== 'base' && k !== 'upper' && k !== 'column') continue;
+    for(const r of bokRects(e)){
+      out += `<rect x="${R(r.x)}" y="${R(r.y)}" width="${Math.max(R(r.w), 0.5)}" height="${Math.max(R(r.h), 0.5)}"\n        fill="none" stroke="#dc2626" stroke-width="${2/z}" stroke-dasharray="4 ${4/z}" pointer-events="none"/>`;
+    }
+  }
+  return out;
+}
+
 /* Kreslení boků na plátně (obrazovka): tenký pruh u konce skříně. */
 /* Čela v půdorysu – tenké pruhy na líci skříně (dvířka po kusech). */
 function frontsMarkup(){
@@ -6037,6 +6054,7 @@ function openProjectModal(){
   $('#fSplashHeight').value = i.splashHeight || '';
   DECOR_FIELDS.forEach(([k])=>{ $('#fDecor_'+k).value = i.decors?.[k] || ''; });
   $('#fLedEnabled').checked = S.project.pricing?.led?.enabled!==false;
+  $('#fCladding').checked = S.project.pricing?.cladding === true;
   refreshProjectFrontForm();
   renderProjectBrief();
   $('#modalProject').classList.remove('hidden');
@@ -6052,6 +6070,7 @@ function saveProjectInfo(){
   i.decors = Object.fromEntries(DECOR_FIELDS.map(([k])=>[k,$('#fDecor_'+k).value.trim()]));
   saveProjectFrontMaterial();
   const P=pricing();P.led=P.led||{};P.led.enabled=$('#fLedEnabled').checked;
+  P.cladding = $('#fCladding').checked;
   saveProjectBrief();
   $('#projTitle').textContent = i.name || 'Nový nárys';
   closeProjectModal(); pushHistory(); render();
@@ -6123,6 +6142,7 @@ function PRICE_DEFAULTS(){ return ({
   zastena: false,       // počítat zástěnu (samostatná položka)
   tl: false,            // počítat TL – těsnící lištu (samostatná položka)
   zastReserve: 100,     // rezerva k délce zástěny/TL na každou řadu [mm]
+  cladding: false,      // opláštění boků skříněk – zobrazí se ve výkresu i kalkulaci
   groups: [
     { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
@@ -7273,7 +7293,15 @@ function renderPriceModal(){
         <th>Materiál</th><th class="num">Plocha</th><th class="num">Dílů</th><th class="num">Prořez</th>
         <th class="num">Desky</th><th class="num">Kč / deska</th><th class="num">Celkem</th>
       </tr></thead>
-      <tbody>${rowsHtml}
+      <tbody>${rowsHtml}${P.cladding ? `<tr>
+        <td>Opláštění boků skříněk<small>· viditelné boky dle zvoleného dekoru boků+</small></td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="num">0</td>
+        <td class="num"><b>0 Kč</b></td>
+      </tr>` : ''}
         <tr>
           <td><b>Hrana ABS</b><div class="p-sub">Základní sazba Kč/m; dekor samostatně výše. Účtované metry zaokrouhlené po skupinách.</div></td>
           <td class="num"><b id="pEdgeM">${num2(C.edgeM)}</b> m<br><small>Korpusy, nika a opláštění: přední hrany. StrongMax: dno 0, záda 1× šířka. Procento pouze pro ostatní dílce (např. čela).</small></td>
