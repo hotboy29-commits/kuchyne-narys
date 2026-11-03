@@ -530,6 +530,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <button class="tb toggle" id="btnBlendeAuto" aria-pressed="true" title="L-blende: vnitřní 50 × 50 mm. Zapnout / vypnout."><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#dc2626"></span>blende</button>
       <button class="tb toggle" id="btnDimInst" aria-pressed="true" title="Kóty instalací (voda / elektro / VD…)">⚡</button>
       <button class="tb toggle" id="btnMagnet" aria-pressed="true" title="Magnetické přichytávání">🧲</button>
+      <button class="tb toggle" id="btnGap" aria-pressed="false" title="Zobrazit mezery mezi skříněmi (červené značky a rozměr v mm)">⚠</button>
     </div>
 
     <div class="group" title="Zobrazená vrstva výkresu – sloupy jsou v obou">
@@ -560,6 +561,7 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
         <g id="layerElems"></g>
         <g id="layerGuides"></g>
         <g id="layerDims" style="pointer-events:none"></g>
+        <g id="layerGaps" style="pointer-events:none"></g>
         <g id="layerUI"></g>
       </g>
     </svg>
@@ -1288,6 +1290,7 @@ const S = {
   showDims: true,
   showFronts: true,     // kreslit čela (dvířka, zásuvky) i v půdorysu
   showDimInst: true,      // kóty instalací (voda/elektro…) – barva = typ značky
+  showGaps: false,        // zobrazit mezery mezi sousedními skříněmi (červené značky)
   layer: 'all',            // zobrazená vrstva: all | DS | HS
   guides: [],                // dočasná magnetická vodítka během tažení
   draft: null,               // rozkreslená zeď / obdélník / odstup
@@ -1318,6 +1321,10 @@ const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
 const uid = p => p + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const fmt = n => Math.round(n).toLocaleString('cs-CZ').replace(/\u00A0|\u202F/g,' ');
 const esc = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Bezpečný atribut: dynamic IDs/barvy nesmí rozbít HTML atribut ani vložit vlastní element/obsluhu.
+const qa = s => String(s??'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 const R = n => Math.round(n*100)/100;
 
 function bbox(e){ return { x:e.x, y:e.y, w:e.w, h:e.d }; }
@@ -1409,7 +1416,7 @@ function windowsSvg(pen, hits, lw=2){
         <line x1="${R(g.b.x)}" y1="${R(g.b.y)}" x2="${R(b2.x)}" y2="${R(b2.y)}"/>
       </g>
       ${hits?`<line x1="${R((g.a.x+a2.x)/2)}" y1="${R((g.a.y+a2.y)/2)}" x2="${R((g.b.x+b2.x)/2)}" y2="${R((g.b.y+b2.y)/2)}"
-        stroke="transparent" stroke-width="${pen(24)+Math.abs(g.o)}" data-winhit="${win.id}" style="cursor:pointer"/>`:''}
+        stroke="transparent" stroke-width="${pen(24)+Math.abs(g.o)}" data-winhit="${qa(win.id)}" style="cursor:pointer"/>`:''}
     </g>`;
   }).join('');
 }
@@ -1435,7 +1442,7 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
       const lx = ft.x - a.rx*out, ly = ft.y - a.ry*out;
       const ths='paint-order:stroke;stroke:#fff;stroke-width:'+dimF(0.7)+'px;';
       const fs1 = dimF(2.8);
-      dim=`<g stroke="${dc}" fill="none">
+      dim=`<g stroke="${qa(dc)}" fill="none">
         <line x1="${R(st.x)}" y1="${R(st.y)}" x2="${R(ft.x)}" y2="${R(ft.y)}" stroke-width="${pen(1.6)}" stroke-dasharray="${pen(2.2)} ${pen(2.2)}"/>
         <line x1="${R(ft.x)}" y1="${R(ft.y)}" x2="${R(lx)}" y2="${R(ly)}" stroke-width="${pen(1.0)}" stroke-dasharray="${pen(4)} ${pen(3)}"/>
         <line x1="${R(sm.x)}" y1="${R(sm.y)}" x2="${R(ft.x)}" y2="${R(ft.y)}" stroke-width="${pen(0.9)}" stroke-dasharray="${pen(3)} ${pen(3)}"/>
@@ -1445,12 +1452,12 @@ function symbolsSvg(pen, hits, fsz, halo, lw=3.5, dimFs, dimOut){
       <text x="${R(lx)}" y="${R(ly)}" text-anchor="middle" dominant-baseline="middle" font-size="${fs1}" font-weight="700" fill="${dc}" style="font-family:Helvetica,Arial,sans-serif;${ths}">od rohu ${fmt(a.along)}</text>`;
     }
     return `<g>${dim}
-      <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':t.color}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
+      <circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R}" fill="#ffffff" stroke="${sel?'#2563eb':qa(t.color)}" stroke-width="${pen(lw*(sel?1.8:1))}"/>
       <text x="${sm.x}" y="${sm.y}" text-anchor="middle" dominant-baseline="central" font-size="${fsz(140)}"
-        font-weight="700" fill="${t.color}" style="font-family:Helvetica,Arial,sans-serif;${hs}">${t.code}</text>
+        font-weight="700" fill="${qa(t.color)}" style="font-family:Helvetica,Arial,sans-serif;${hs}">${t.code}</text>
       ${sm.note?`<text x="${sm.x}" y="${sm.y+SYM_R+fsz(130)}" text-anchor="middle" font-size="${fsz(120)}" fill="#334155"
         style="font-family:Helvetica,Arial,sans-serif;${hs}">${esc(sm.note)}</text>`:''}
-      ${hits?`<circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R+40}" fill="transparent" data-symhit="${sm.id}" style="cursor:pointer"/>`:''}
+      ${hits?`<circle cx="${sm.x}" cy="${sm.y}" r="${SYM_R+40}" fill="transparent" data-symhit="${qa(sm.id)}" style="cursor:pointer"/>`:''}
     </g>`;
   }).join('');
 }
@@ -1654,7 +1661,7 @@ function requestRender(kind){
     if(k === 'canvas') doRenderCanvas(); else doRender();
   });
 }
-function render(){ syncBlendeAuto(); syncLabelsBtn(); requestRender('full'); }
+function render(){ syncBlendeAuto(); syncLabelsBtn(); syncGapsBtn(); requestRender('full'); }
 /* Stav tlačítka popisků (Aa) – svítí, jen když jsou popisky vidět. */
 function syncLabelsBtn(){
   const b = document.querySelector('#btnLabels');
@@ -1695,6 +1702,7 @@ function doRenderCanvas(){
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
+  $('#layerGaps').innerHTML   = S.showGaps ? gapsMarkup() : '';
   $('#layerUI').innerHTML     = uiMarkup();
   updateStatus();
   updateDrawbar();
@@ -1707,7 +1715,7 @@ function updateSymPal(){
   if(S.tool !== 'sym'){ pal.classList.add('hidden'); return; }
   pal.classList.remove('hidden');
   pal.innerHTML = SYMBOL_TYPES.map(t=>`<button class="tb${(S.symType||'zasuvka')===t.id?' on':''}"
-    data-symtype="${t.id}" title="${t.label}"><b style="color:${t.color}">${t.code}</b>&nbsp;${t.label}</button>`).join('');
+    data-symtype="${t.id}" title="${t.label}"><b style="color:${qa(t.color)}">${t.code}</b>&nbsp;${t.label}</button>`).join('');
 }
 
 /** Lišta s tlačítky pro dokončení rozkreslené zdi – dvojklik není nutný. */
@@ -1773,14 +1781,14 @@ function wallsMarkup(){
       const nn = segNormal(sg), ox = nn.nx*side*t/2, oy = nn.ny*side*t/2;
       return `<path d="M${sg.a.x+ox} ${sg.a.y+oy} L${sg.b.x+ox} ${sg.b.y+oy}"
         fill="none" stroke="transparent" stroke-width="${Math.max(t, 24/z)}"
-        data-wallseg="${w.id}:${i}" style="cursor:pointer"/>`;
+        data-wallseg="${qa(w.id)}:${i}" style="cursor:pointer"/>`;
     }).join('');
     const col = sel && S.sel.seg == null ? '#2563eb' : '#2b3138';
-    return `<g data-wall="${w.id}">
+    return `<g data-wall="${qa(w.id)}">
       ${w.closed ? `<path d="${d}" fill="#f8fafc" stroke="none"/>` : ''}
       <path d="${wallBandPath(w)}" fill="${col}" fill-rule="evenodd" stroke="${col}" stroke-width="${1.5/z}" stroke-linejoin="miter"/>
       ${hl}
-      <path d="${wallBandPath(w)}" fill="transparent" stroke="transparent" stroke-width="${2/z}" data-wallhit="${w.id}" style="cursor:pointer"/>
+      <path d="${wallBandPath(w)}" fill="transparent" stroke="transparent" stroke-width="${2/z}" data-wallhit="${qa(w.id)}" style="cursor:pointer"/>
       ${hits}
     </g>`;
   }).join('');
@@ -1869,16 +1877,16 @@ function elementsMarkup(){
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
     const up = elKind3(e)==='upper';
     const dash = up ? ` stroke-dasharray="${R(11/z)} ${R(7/z)}"` : '';
-    labels.push(`<g data-el-label="${e.id}" transform="rotate(${frontLabelAngle(e)} ${LP.x} ${LP.y})" pointer-events="none">      ${LB.name ? `<text x="${LP.x}" y="${LP.y - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
+    labels.push(`<g data-el-label="${qa(e.id)}" transform="rotate(${frontLabelAngle(e)} ${LP.x} ${LP.y})" pointer-events="none">      ${LB.name ? `<text x="${LP.x}" y="${LP.y - LB.fsN*0.12}" text-anchor="middle" dominant-baseline="middle"
             font-size="${LB.fsN}" font-weight="700" fill="#111827"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsN*0.24}">${esc(LB.name)}</text>` : ''}
       ${LB.dim ? `<text x="${LP.x}" y="${LP.y + (LB.name ? LB.fsN*0.95 : LB.fsD*0.2)}" text-anchor="middle" dominant-baseline="middle"
             font-size="${LB.fsD}" fill="#4b5563"
             style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${LB.fsD*0.22}">${LB.dim}</text>` : ''}</g>`);
-    return `<g data-el="${e.id}"><title>${esc(e.name||'Skříň')}</title>
+    return `<g data-el="${qa(e.id)}"><title>${esc(e.name||'Skříň')}</title>
       <rect x="${pr.x}" y="${pr.y}" width="${Math.max(pr.w,1)}" height="${Math.max(pr.h,1)}"
-            fill="${c}${up?'0a':'22'}" stroke="${sel?'#2563eb':c}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
-      <path d="${dl}" stroke="${c}" stroke-width="${2/z}" fill="none" opacity=".8"/>
+            fill="${qa(c)}${up?'0a':'22'}" stroke="${sel?'#2563eb':qa(c)}" stroke-width="${(sel?3.5:2)/z}"${dash} style="cursor:move"/>
+      <path d="${dl}" stroke="${qa(c)}" stroke-width="${2/z}" fill="none" opacity=".8"/>
 
     </g>`;
   }).join('');
@@ -1898,7 +1906,7 @@ function guidesMarkup(){
       <line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="${sel?'#2563eb':'#c2410c'}"
             stroke-width="${(sel?2.4:1.6)/z}" stroke-dasharray="${18/z} ${10/z}" opacity=".9"/>
       <line x1="${g.a.x}" y1="${g.a.y}" x2="${g.b.x}" y2="${g.b.y}" stroke="transparent"
-            stroke-width="${24/z}" data-guidehit="${g.id}" style="cursor:pointer"/>
+            stroke-width="${24/z}" data-guidehit="${qa(g.id)}" style="cursor:pointer"/>
     </g>`;
   }).join('');
 }
@@ -2020,6 +2028,91 @@ function dimAlongSeg(sgm, wall, opts={}){
     + `<text x="${(a.x+b.x)/2}" y="${(a.y+b.y)/2}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fs}" font-weight="700" fill="${color}" transform="rotate(${rot} ${(a.x+b.x)/2} ${(a.y+b.y)/2})"
         style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${fs*0.3}px">${opts.text || fmt(len)}</text>`;
+}
+
+/* ── KONTROLA MEZER MEZI SKŘÍNĚMI ─────────────────────────────
+   Najde sousední skříně, které nejsou úplně přiléhající,
+   a vypíše velikost mezery v mm. Zapíná/vypíná tlačítkem v liště. */
+function findGaps(){
+  const els = S.project.elements.filter(layerShowsEl);
+  const gaps = [];
+  const MAX_GAP = 100;   // mm – víc už není „mezera“, je to úmyslný odstup
+  const MIN_GAP = 1;     // mm – menší je považováno za přiléhající
+  const MIN_OVERLAP = 40;// mm – minimální překrytí, aby se počítalo jako sousedí
+
+  for(let i = 0; i < els.length; i++){
+    for(let j = i + 1; j < els.length; j++){
+      const a = els[i], b = els[j];
+
+      // Horizontální sousedství: a vlevo od b
+      const gx = b.x - (a.x + a.w);
+      const oy = Math.max(0, Math.min(a.y + a.d, b.y + b.d) - Math.max(a.y, b.y));
+      if(gx > MIN_GAP && gx < MAX_GAP && oy > MIN_OVERLAP){
+        gaps.push({
+          id: a.id + '~' + b.id,
+          a: a.id, b: b.id,
+          gap: R(gx),
+          type: 'h',
+          x: R(a.x + a.w),
+          y: R(Math.max(a.y, b.y)),
+          h: R(oy),
+          nameA: esc(a.name || 'Skříň'),
+          nameB: esc(b.name || 'Skříň')
+        });
+      }
+
+      // Vertikální sousedství: a nad b
+      const gy = b.y - (a.y + a.d);
+      const ox = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+      if(gy > MIN_GAP && gy < MAX_GAP && ox > MIN_OVERLAP){
+        gaps.push({
+          id: a.id + '~' + b.id,
+          a: a.id, b: b.id,
+          gap: R(gy),
+          type: 'v',
+          x: R(Math.max(a.x, b.x)),
+          y: R(a.y + a.d),
+          w: R(ox),
+          nameA: esc(a.name || 'Skříň'),
+          nameB: esc(b.name || 'Skříň')
+        });
+      }
+    }
+  }
+  return gaps;
+}
+
+function gapsMarkup(){
+  const z = S.view.zoom;
+  const gaps = findGaps();
+  if(!gaps.length) return '';
+  const parts = [];
+  const fs = clamp(130 / z, 80, 220);
+  const sw = fs * 0.3;
+  for(const g of gaps){
+    if(g.type === 'h'){
+      // Vertikální červená značka v mezeře mezi skříněmi vedle sebe
+      parts.push(
+        `<rect x="${g.x}" y="${g.y}" width="3" height="${Math.max(g.h, 12)}" fill="#dc2626" opacity=".85"/>`,
+        `<text x="${g.x + 5}" y="${g.y + g.h/2}" dominant-baseline="middle"\n            font-size="${fs}" font-weight="800" fill="#b91c1c"\n            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw}px">${g.gap} mm</text>`
+      );
+    } else {
+      // Vodorovná červená značka v mezeře mezi skříněmi nad sebou
+      parts.push(
+        `<rect x="${g.x}" y="${g.y}" width="${Math.max(g.w, 12)}" height="3" fill="#dc2626" opacity=".85"/>`,
+        `<text x="${g.x + g.w/2}" y="${g.y - 7}" text-anchor="middle"\n            font-size="${fs}" font-weight="800" fill="#b91c1c"\n            style="font-family:Helvetica,Arial,sans-serif;paint-order:stroke;stroke:#fff;stroke-width:${sw}px">${g.gap} mm</text>`
+      );
+    }
+  }
+  return parts.join('');
+}
+
+function syncGapsBtn(){
+  const btn = $('#btnGap');
+  if(!btn) return;
+  const on = !!S.showGaps;
+  btn.classList.toggle('active', on);
+  btn.title = on ? 'Skrýt mezery mezi skříněmi' : 'Zobrazit mezery mezi skříněmi (červené značky)';
 }
 
 function dimsMarkup(){
@@ -4382,7 +4475,7 @@ function renderInspector(){
     if(!e){ S.sel = null; return renderInspector(); }
     const OR = projectOrigin();
     box.innerHTML = `
-      <div class="insp-title"><i class="tool-dot" style="background:${e.color}"></i><strong>${esc(e.name || 'Obdélník')}</strong></div>
+      <div class="insp-title"><i class="tool-dot" style="background:${qa(e.color)}"></i><strong>${esc(e.name || 'Obdélník')}</strong></div>
       <div class="insp-sec">
         <label class="fld"><span>Název skříně</span>
           <input id="iName" maxlength="40" placeholder="např. Vestavná skříň A" value="${esc(e.name)}"></label>
@@ -4474,7 +4567,7 @@ function renderInspector(){
       </details>
       ${applianceForm(e)}
       <details class="insp-sec insp-fold" data-insp-fold="appearance"><summary>Barva a poznámka</summary>
-        <div class="swatches">${COLORS.map(c=>`<button class="sw-btn${c===e.color?' on':''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}</div>
+        <div class="swatches">${COLORS.map(c=>`<button class="sw-btn${c===e.color?' on':''}" data-color="${qa(c)}" style="background:${c}" title="${qa(c)}"></button>`).join('')}</div>
         <h4>Poznámka</h4>
         <label class="fld"><textarea id="iNote" rows="3" placeholder="materiál, kování, atyp…">${esc(e.note)}</textarea></label>
       </details>
@@ -7911,7 +8004,7 @@ function buildPrint(technicalRequested=true){
       const noteX = isDishwasherSpace(e) ? ('Prostor pro myčku — bez korpusu, HDF, polic, pantů a noh; pouze čelo.'+(e.note?' '+e.note:'')) : (k3v==='base') ? (e.note||'') : ((k3v==='upper'?'horní skříň':'sloup') + (e.note?' — '+e.note:''));
       let out = `<tr>
         <td class="num">${i+1}</td>
-        <td><span class="pr-tdot" style="background:${e.color}"></span>${esc(e.name || '—')}</td>
+        <td><span class="pr-tdot" style="background:${qa(e.color)}"></span>${esc(e.name || '—')}</td>
         <td class="num">${fmt(wNom)}</td>
         <td class="num">${fmt(dNom)}</td>
         <td class="num">${e.qty||1}</td>
@@ -8051,7 +8144,7 @@ function buildPrint(technicalRequested=true){
         <tbody>${syms.map(sm => {
           const t = symType(sm.type), ORp = projectOrigin();
           const wa = sm.wallId!=null ? S.project.walls.find(x=>x.id===sm.wallId) : null;
-          return `<tr><td><b style="color:${t.color}">${t.code}</b></td><td>${t.label}</td><td>${esc(sm.note||'')}</td><td class="num">${fmt(Math.round(sm.x-ORp.x))}</td><td class="num">${fmt(Math.round(sm.y-ORp.y))}</td><td>${wa?esc(wa.name||'zeď')+'·'+((+sm.seg||0)+1):'—'}</td><td class="num">${wa?fmt(Math.round(sm.along||0)):'—'}</td><td class="num">${wa?fmt(Math.round(sm.off||0)):'—'}</td></tr>`;
+          return `<tr><td><b style="color:${qa(t.color)}">${t.code}</b></td><td>${t.label}</td><td>${esc(sm.note||'')}</td><td class="num">${fmt(Math.round(sm.x-ORp.x))}</td><td class="num">${fmt(Math.round(sm.y-ORp.y))}</td><td>${wa?esc(wa.name||'zeď')+'·'+((+sm.seg||0)+1):'—'}</td><td class="num">${wa?fmt(Math.round(sm.along||0)):'—'}</td><td class="num">${wa?fmt(Math.round(sm.off||0)):'—'}</td></tr>`;
         }).join('')}</tbody>
       </table>` : ''}
       ${info.notes ? `<div class="pr-notes-inline" style="white-space:pre-wrap">${esc(info.notes)}</div>` : ''}
@@ -8080,7 +8173,7 @@ function legendHtml(filter){
   const fEls = filter ? S.project.elements.filter(filter) : S.project.elements;
   const used = [...new Map(fEls.map(e=>[e.name||'bez názvu', e])).values()];
   const symUsed = [...new Map(S.project.symbols.map(sm=>[sm.type, symType(sm.type)])).values()];
-  return (used.length>6?'<span class="lg">Skříně — názvy jsou uvedeny přímo ve výkresu.</span>':used.map(e => `<span class="lg"><i class="sw" style="background:${e.color}"></i>${esc(e.name||'bez názvu')}</span>`).join(''))
+  return (used.length>6?'<span class="lg">Skříně — názvy jsou uvedeny přímo ve výkresu.</span>':used.map(e => `<span class="lg"><i class="sw" style="background:${qa(e.color)}"></i>${esc(e.name||'bez názvu')}</span>`).join(''))
     + `<span class="lg"><i class="sw" style="background:#2b3138"></i>Zeď</span>`
     + (S.project.windows.length ? `<span class="lg"><i class="sw" style="background:#fff;border:1.6px solid #0f172a"></i>Okno</span>` : '')
     + symUsed.map(t => `<span class="lg"><i class="sw" style="background:${t.color};border-radius:50%"></i>${t.code} – ${t.label}</span>`).join('')
@@ -8140,7 +8233,7 @@ function drawingSvg(P, opt){
     if(filter && !filter(e)) continue;
     const upEl = elKind3(e)==='upper';const pr=nichePlanRect(e);
     parts.push(`<rect x="${pr.x}" y="${pr.y}" width="${Math.max(pr.w,1)}" height="${Math.max(pr.h,1)}"
-      fill="${e.color}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
+      fill="${qa(e.color)}${upEl?'08':'14'}" stroke="#1f2937" stroke-width="${sw(PEN.el)}"${upEl?` stroke-dasharray="${R(1.7/k)} ${R(1.1/k)}"`:''}/>`);
     const fv = FRONT_VEC[e.front||'jih'];
     const m = Math.min(0.7/k, e.w*0.06, e.d*0.06); // značka těsně u čela, mimo text
     let dl = '';
@@ -8148,7 +8241,7 @@ function drawingSvg(P, opt){
     if(fv[1]===-1) dl = `M${e.x+m} ${e.y+m} H${e.x+e.w-m}`;
     if(fv[0]===1)  dl = `M${e.x+e.w-m} ${e.y+m} V${e.y+e.d-m}`;
     if(fv[0]===-1) dl = `M${e.x+m} ${e.y+m} V${e.y+e.d-m}`;
-    if(dl) parts.push(`<path data-print-front="${esc(e.id)}" d="${dl}" stroke="${e.color}" stroke-width="${sw(PEN.el)}" fill="none"/>`);
+    if(dl) parts.push(`<path data-print-front="${esc(e.id)}" d="${dl}" stroke="${qa(e.color)}" stroke-width="${sw(PEN.el)}" fill="none"/>`);
 
     const capPx = Math.min(e.w, e.d);
     if(capPx*k >= 5){                            // ~5 mm na papíře → popisek se vejde
@@ -8509,6 +8602,11 @@ function bindUi(){
     S.magnet = !S.magnet;
     $('#btnMagnet').setAttribute('aria-pressed', S.magnet?'true':'false');
     toast(S.magnet ? 'Magnet zapnutý' : 'Magnet vypnutý');
+  };
+  $('#btnGap').onclick = () => {
+    S.showGaps = !S.showGaps;
+    syncGapsBtn();
+    render();
   };
   $('#btnLayerAll').onclick = () => setLayer('all');
   $('#btnLayerDS').onclick  = () => setLayer('DS');
