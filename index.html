@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-boky-hs-v102'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-blende-prirezy-v103'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3662,9 +3662,23 @@ function blendeCornersCalc(P, on){
     const cuts = {};
     cuts[A.id] = (B.x + B.w / 2) < px ? 'L' : 'R';   // A = vodorovné čelo
     cuts[B.id] = (A.y + A.d / 2) < py ? 'L' : 'R';   // B = svislé čelo
-    out.push({ x:R(rx), y:R(ry), w:transposed?D:W, h:transposed?W:D, els:[A.id, B.id], cuts, kind:blendeClass(A), sideX:transposed?(dir>0?'L':'R'):(FB.f==='východ'?'L':'R'), sideY:transposed?(FB.f==='východ'?'T':'B'):(dir>0?'T':'B') });
+    out.push({ x:R(rx), y:R(ry), w:transposed?D:W, h:transposed?W:D, els:[A.id, B.id], gluedTo:A.id, cuts, kind:blendeClass(A), sideX:transposed?(dir>0?'L':'R'):(FB.f==='východ'?'L':'R'), sideY:transposed?(FB.f==='východ'?'T':'B'):(dir>0?'T':'B') });
   }
   return out;
+}
+/* A in corner detection has the blende along its face; B only abuts it.
+   This identity survives rotation/transposition and is not guessed from names. */
+function blendeOwner(b){return getEl(b.gluedTo||b.els[0]);}
+function workshopCabinetName(e){
+ const name=e.name||(elKind3(e)==='upper'?'Horní skříň':'Spodní skříň');
+ const duplicate=!e.name||S.project.elements.filter(x=>x.name===e.name).length>1;
+ return name+(duplicate?' [č. '+(S.project.elements.findIndex(x=>x.id===e.id)+1)+']':'');
+}
+function blendeCoverParts(e){
+ return blendeCorners().filter(b=>blendeOwner(b)?.id===e.id).map(b=>({group:'body',label:'Bok navíc k blende',w:elH3(e),h:elFrontD(e),qty:1,edgeMm:elH3(e),edgeNote:'ABS pouze přední hrana po výšce',ownerId:e.id,ownerName:workshopCabinetName(e),blendeCover:true,cornerKey:frameCornerKey(b)}));
+}
+function blendeStockParts(){
+ return blendeCorners().map(b=>{const e=blendeOwner(b);return {group:frontMaterial().trachea?'purchasedFront':'front',label:'Blende',w:704,h:200,qty:1,edgeMm:frontMaterial().trachea?0:1808,edgeNote:frontMaterial().trachea?'Hotový dílec Trachea; rozříznout v dílně na dvě ramena':'ABS po celém obvodu; rozříznout v dílně na dvě ramena',ownerId:e?.id,ownerName:e?workshopCabinetName(e):'',frontKind:'Blende',blendeStock:true,cornerKey:frameCornerKey(b)};});
 }
 /* Two 18 mm boards form an L: inner edges 50×50, outer envelope 68×68.
    Inside faces align with the front surfaces of the adjacent 18 mm doors.
@@ -5409,7 +5423,7 @@ function briefGoods(){
  const gross=roundMoney(rows.reduce((n,r)=>n+(r.gross??0),0)),base=roundMoney(gross/1.21);
  return {rows,warnings,gross,base,vat:roundMoney(gross-base)};
 }
-function briefPartSupplied(pt){if(!briefActive())return true;if(pt.group==='top')return briefSupply('pd');if(pt.group==='purchasedFront'||pt.group==='front'&&/– (dvířka|čelo zásuvky)/.test(pt.label))return briefSupply('doors');return true;}
+function briefPartSupplied(pt){if(!briefActive())return true;if(pt.group==='top')return briefSupply('pd');if(pt.blendeStock)return briefSupply('doors');if(pt.group==='purchasedFront'||pt.group==='front'&&/– (dvířka|čelo zásuvky)/.test(pt.label))return briefSupply('doors');return true;}
 function briefDimensions(e,k){const v=briefForEl(e,k),out={};if(v.w>0)out.w=v.w;if(['sink','hob'].includes(k)){if(v.d>0)out.size=v.d;}else if(v.h>0)out.size=v.h;return out;}
 function briefChecks(){
  if(!briefActive())return [];
@@ -6668,10 +6682,10 @@ function materialParts(){
       const FP = frontPieces(e);
       if(FP.doors.length){
         const heights=[...new Set(FP.doors)];
-        heights.forEach(h=>add(frontMaterial().trachea?'purchasedFront':'front',tag+' – dvířka '+FP.wDoor+' × '+h,FP.wDoor,h,FP.doors.filter(x=>x===h).length*q));
+        heights.forEach(h=>add(frontMaterial().trachea?'purchasedFront':'front',tag+' – dvířka '+FP.wDoor+' × '+h,FP.wDoor,h,FP.doors.filter(x=>x===h).length*q,{ownerId:e.id,ownerName:workshopCabinetName(e),frontKind:'Dvířka'}));
       }
       FP.drawers.forEach((h, i) => add(frontMaterial().trachea?'purchasedFront':'front',
-        tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q));
+        tag + ' – čelo zásuvky ' + (i+1) + ' ' + FP.wDraw + ' × ' + h, FP.wDraw, h, 1*q,{ownerId:e.id,ownerName:workshopCabinetName(e),frontKind:'Čelo zásuvky '+(i+1)}));
     }
     strongMaxModel(e).parts.forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote}));
     /* bok+ na každé zapnuté straně */
@@ -6681,19 +6695,9 @@ function materialParts(){
     }
   }
 
-  /* BLENDE – jedna na každý roh, kde se potkají dvě kolmé řady.
-     Je to L-profil 68 × 68 (vnitřní 50 × 50) ze dvou dílců, výška = výška sousedních skříní. */
-  let _nBlD = 0, _nBlH = 0;
-  blendeCorners().forEach(b => {
-    const hs = b.els.map(id => { const e2 = getEl(id); return e2 ? elH3(e2) : 0; });
-    const hB = Math.max(...hs, 0) || BOK_H_DS;
-    /* spodní a horní rohy se počítají zvlášť – horní blende je jinak vysoká */
-    const isU = b.kind === 'u';
-    const n = isU ? (++_nBlH) : (++_nBlD);
-    for(const width of [68,50]) add('front', (isU ? 'Blende do horního rohu ' : 'Blende do rohu ') + n +
-      ' – L vnitřní 50 × 50 (vnější 68 × 68), rameno '+width+' × '+fmt(Math.round(hB))+' × 18 mm',width,hB,1);
-
-  });
+  // Jediný objednávaný polotovar na roh, dva hotové L dílce až v dílně.
+  for(const pt of blendeStockParts())parts.push(pt);
+  for(const e of S.project.elements)for(const pt of blendeCoverParts(e))parts.push({...pt,label:pt.label+' — '+pt.ownerName,decor:bodyDecor()});
 
   /* pracovní deska a sokl pod souvislými řadami DS
      Když je řada delší než deska, rozdělí se na kusy – hranice se trefí
@@ -7905,6 +7909,7 @@ function buildPrint(technicalRequested=true){
           <td>panel ${fmt(bh)} × ${fmt(bokDepthOf(e))} × ${bkw} mm (v × hl × tl)${elKind3(e)==='base'?'; hotová výška '+fmt(bokFinishedH(e))+' mm pod PD + 30 mm nářezová rezerva':''}</td>
         </tr>`).join('');
       if(bokRows) out += bokRows;
+      out+=blendeCoverParts(e).map(p=>`<tr class="pr-sub" data-blende-cover="${esc(e.id)}"><td></td><td>└ ${esc(p.label)} — ${esc(p.ownerName)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty}</td><td class="num">${fmt(p.w*p.qty)}</td><td>DTD 18 mm · ${esc(bodyDecor())} · ${esc(p.edgeNote)} · ${fmt(p.edgeMm)} mm/ks</td></tr>`).join('');
       if(isNiche(e)||isWire(e)){
        const parts=isNiche(e)?nicheCutParts(e):wireCutParts(e);
        out+=parts.map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'}${isNiche(e)?' · '+esc(finishDecor())+' · '+esc(p.edgeNote)+' · '+fmt(p.edgeMm)+' mm/ks':''}</td></tr>`).join('');
@@ -7965,26 +7970,24 @@ function buildPrint(technicalRequested=true){
       if(!fp.length) return '';
       const map = new Map();
       for(const pt of fp){
-        const isB = /blende/.test(pt.label);
-        const pieceKind=isB?'blende':pt.label.includes(' – čelo zásuvky ')?'čelo zásuvky':'dvířka';
-        const key = pieceKind + pt.w + '×' + pt.h;
-        if(!map.has(key)) map.set(key, { w:pt.w, h:pt.h, qty:0, blende:isB, pieceKind });
-        map.get(key).qty += pt.qty;
+        const isB=pt.blendeStock===true;
+        const pieceKind=pt.frontKind||(pt.label.includes(' – čelo zásuvky ')?'Čelo zásuvky':'Dvířka');
+        const owner=pt.ownerName||pt.label.split(' – ')[0];
+        const key=[pt.ownerId||owner,pieceKind,pt.w,pt.h].join('|');
+        if(!map.has(key))map.set(key,{w:pt.w,h:pt.h,qty:0,blende:isB,pieceKind,owner});
+        map.get(key).qty+=pt.qty;
       }
-      const list = [...map.values()].sort((a,b) => (b.w - a.w) || (b.h - a.h));
-      const rows = list.map(o => {
-        const typ = o.blende ? ('blende ' + P.blendeW + ' × ' + P.blendeD + ' mm')
-                  : o.pieceKind;
-        return `<tr><td>${typ}${!o.blende&&!briefSupply('doors')?' — dodá zákazník; neobjednávat':''}</td><td class="num">${fmt(o.w)}</td><td class="num">${fmt(o.h)}</td><td class="num">${o.qty} ks</td></tr>`;
-      }).join('');
+      const list=[...map.values()];
+      const rows=list.map(o=>`<tr><td>${esc(o.pieceKind)} — ${esc(o.owner)}${!briefSupply('doors')?' — dodá zákazník; neobjednávat':''}${o.blende?'<br><small>Jeden přířez 704 × 200 mm; '+(frontMaterial().trachea?'hotový dílec Trachea':'ABS kolem dokola')+'; v dílně rozříznout na dvě ramena.</small>':''}</td><td class="num">${fmt(o.w)}</td><td class="num">${fmt(o.h)}</td><td class="num">${o.qty} ks</td></tr>`).join('');
       const total = list.reduce((a,o) => a + o.qty, 0);
-      return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Čela – rozměry k ověření / objednání</b><p>${esc(projectFrontLabel())}${frontMaterial().trachea?". TRACHEA NEOCENĚNA; tvar, minimální rozměry a dostupnost potvrďte u výrobce. Blende zůstává lamino DTD 18 mm.":""}</p></div>
+      return `<div class="pr-sub" style="margin-top:4mm"><b style="font-size:12.5px">Čela – rozměry k ověření / objednání</b><p>${esc(projectFrontLabel())}${frontMaterial().trachea?". TRACHEA NEOCENĚNA; tvar, minimální rozměry a dostupnost potvrďte u výrobce. Blende se objednává ve stejném materiálu jako čela.":""}</p></div>
         <table class="pr-table" style="margin-top:1mm">
-          <thead><tr><th>Druh</th><th class="num">Šířka (mm)</th><th class="num">Výška (mm)</th><th class="num">Počet</th></tr></thead>
+          <thead><tr><th>Druh — skříň</th><th class="num">Rozměr 1 (mm)</th><th class="num">Rozměr 2 (mm)</th><th class="num">Počet</th></tr></thead>
           <tbody>${rows}</tbody>
           <tfoot><tr><td colspan="3">Celkem čel</td><td class="num">${total} ks</td></tr></tfoot>
         </table>
         <div style="color:#666;font-size:7.5pt;margin-top:0.8mm">
+          Dvířka a čela: šířka × výška. Blende: objednávaný přířez 704 × 200 mm, ohraněný po celém obvodu (u lamina).<br>
           Šířka čela = šířka skříně − 4 mm (600 → 596; na dvě dvířka 297; myčka 450 → 446).
           V rohu je líc blende v rovině dveří a čelo je od ní 2 mm;
           skříň 600 mm v rohu → dvířka ${600 - 18 - 4} mm.
