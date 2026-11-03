@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-citelny-pudorys-v100'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-narez-ds-hs-v101'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3308,14 +3308,14 @@ function nicheCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=nicheFullDepth(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
  if(w<=0||h<=0||d<=0)return [];
  const p=(label,w,h,qty,edgeMm)=>({group:'bok',label:'Nika — '+label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez hranění (vloženo mezi dílce)',decor:finishDecor()});
- return [p('bočnice',D,H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
+ return [p('bočnice',elKind3(e)==='base'?H:D,elKind3(e)==='base'?D:H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
 }
 // Confirmed DS construction: 18mm sides, inset bottom, two 120mm rails.
 function baseCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=elFrontD(e),inner=W-36;
  if(inner<=0||H<=36||D<240)return [];
  const p=(label,w,h,qty,edgeMm,group='body')=>({group,label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez ABS'});
- return [p('bočnice DS',D,H,2,H),p('dno DS',inner,D,1,inner),p('horní lať přední DS',inner,120,1,inner),p('horní lať zadní DS',inner,120,1,0),p('police DS',inner,Math.max(200,D-20),2,inner),p('záda HDF DS',W,H,1,0,'back')];
+ return [p('bočnice DS',H,D,2,H),p('dno DS',inner,D,1,inner),p('horní lať přední DS',inner,120,1,inner),p('horní lať zadní DS',inner,120,1,0),p('police DS',inner,Math.max(200,D-20),2,inner),p('záda HDF DS',W,H,1,0,'back')];
 }
 // A dimensional envelope, not a certification of shelf/partition collisions.
 function installationEnvelope(e){
@@ -3331,7 +3331,7 @@ function manufacturingAlert(c){return c.manufacturingWarnings.length?'<p style="
 function wireCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=elFrontD(e);
  return [
-  {group:'body',label:'Drát — bočnice',w:D,h:H,qty:2},
+  {group:'body',label:'Drát — bočnice',w:H,h:D,qty:2,edgeMm:H,edgeNote:'ABS přední hrana po výšce'},
   {group:'body',label:'Drát — dno',w:W-36,h:D,qty:1},
   {group:'body',label:'Drát — horní lať přední',w:W-36,h:120,qty:1,edgeMm:W-36},
   {group:'body',label:'Drát — horní lať zadní',w:W-36,h:120,qty:1,edgeMm:0},
@@ -6255,12 +6255,12 @@ function topDepthOfRun(r){
 /* Rozpis jednotlivých dílů, ze kterých se počítá plocha. */
 function upperCutParts(e){
   if(isNiche(e))return nicheCutParts(e);
-  const W=elFrontW(e),D=elFrontD(e),H=elH3(e),inner=W-36;
+  const W=elFrontW(e),D=elFrontD(e),H=elH3(e),inner=W-36,horizontalDepth=D-15;
   return [
     {group:'body',label:'bočnice HS',w:D,h:H,qty:2},
-    {group:'body',label:'dno HS',w:inner,h:D,qty:1},
-    {group:'body',label:'půda HS',w:inner,h:D,qty:1},
-    {group:'body',label:'police HS',w:inner,h:Math.max(200,D-20),qty:2},
+    {group:'body',label:'dno HS',w:inner,h:horizontalDepth,qty:1},
+    {group:'body',label:'půda HS',w:inner,h:horizontalDepth,qty:1},
+    {group:'body',label:'police HS',w:inner,h:horizontalDepth,qty:2},
     {group:'back',label:'záda HDF HS',w:W,h:H,qty:1}
   ].filter(p=>p.w>0&&p.h>0);
 }
@@ -7913,7 +7913,7 @@ function buildPrint(technicalRequested=true){
       if(k3v==='upper'||k3v==='column'){
         const check=upperOpeningCheck(e),typ=upperOpening(e);
         if(typ!=='hinges')out+=`<tr class="pr-sub"><td></td><td colspan="6"><b>${esc(typ==='hfTop'?'HF top':typ==='hkTop'?'HK top':'HK-S')}</b> — ${check.errors.length?'NEVYHOVUJÍCÍ ZADÁNÍ: '+esc(check.errors.join(' ')):'Rozsah korpusu zkontrolován.'} ${esc(check.notice)}</td></tr>`;
-        if(k3v==='upper')out += upperCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · š × v/hl (mm)</td></tr>`).join('');
+        if(k3v==='upper')out += upperCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*(e.qty||1)}</td><td class="num">${fmt(p.w*p.qty*(e.qty||1))}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · délka × šířka dílce (mm)</td></tr>`).join('');
       }
       if(elKind3(e)==='base'&&!isDishwasherSpace(e))out+=baseCutParts(e).map(p=>`<tr class="pr-sub"><td></td><td>└ ${esc(p.label)}</td><td class="num">${fmt(p.w)}</td><td class="num">${fmt(p.h)}</td><td class="num">${p.qty*smq}</td><td class="num">${fmt(p.w*p.qty*smq)}</td><td>${p.group==='back'?'HDF 3 mm':'DTD 18 mm'} · ${esc(p.edgeNote)} · ${fmt(p.edgeMm)} mm/ks</td></tr>`).join('');
       return out;
@@ -7927,7 +7927,7 @@ function buildPrint(technicalRequested=true){
     const nCols = els.filter(e=>elKind3(e)==='column').length;
     const tableHead = `<thead><tr>
       <th class="num">#</th><th>Název prvku</th>
-      <th class="num">Šířka (mm)</th><th class="num">Hloubka (mm)</th>
+      <th class="num">Šířka prvku /<br>délka dílce (mm)</th><th class="num">Hloubka prvku /<br>šířka dílce (mm)</th>
       <th class="num">Ks</th><th class="num">Celkem (mm)</th><th>Poznámka</th>
     </tr></thead>`;
     const soklHtml = (() => {
