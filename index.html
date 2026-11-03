@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-blende-prirezy-v103'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-11-03-okno-bez-skoku-v104'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -2615,7 +2615,8 @@ function onDown(ev){
   if(winHit){
     select('win', winHit);
     hist.preDrag = snapshot();
-    drag = { mode:'winMove', id:winHit, moved:false };
+    const selectedWindow=S.project.windows.find(x=>x.id===winHit);
+    drag = { mode:'winMove', id:winHit, moved:false, startWorld:{...w}, startOff:selectedWindow.off, sx:ev.clientX, sy:ev.clientY };
     return;
   }
   const symHit = t.dataset?.symhit;
@@ -2692,11 +2693,13 @@ function onMove(ev){
     const win=S.project.windows.find(x=>x.id===drag.id); if(!win) return;
     const wall=S.project.walls.find(x=>x.id===win.wallId); if(!wall) return;
     const sg=wallSegments(wall)[win.seg]; if(!sg) return;
-    const dx=sg.b.x-sg.a.x, dy=sg.b.y-sg.a.y, L2=dx*dx+dy*dy||1;
-    let u=((w.x-sg.a.x)*dx+(w.y-sg.a.y)*dy)/L2; u=Math.max(0,Math.min(1,u));
-    const L=Math.sqrt(L2), half=Math.min(win.w,L)/2;
-    win.off=R(Math.max(half,Math.min(u*L,L-half)));
-    drag.moved=true; render(); return;
+    // Kliknutí / chvění prstu nesmí přemístit střed okna pod kurzor.
+    if(!drag.moved&&Math.hypot(ev.clientX-drag.sx,ev.clientY-drag.sy)<4)return;
+    const dx=sg.b.x-sg.a.x,dy=sg.b.y-sg.a.y,L=Math.hypot(dx,dy);if(L<1)return;
+    const delta=((w.x-drag.startWorld.x)*dx+(w.y-drag.startWorld.y)*dy)/L;
+    const half=Math.min(win.w,L)/2;
+    win.off=R(Math.max(half,Math.min(drag.startOff+delta,L-half)));
+    drag.moved=true;render();return;
   }
   if(drag.mode==='symMove'){
     const sm=S.project.symbols.find(x=>x.id===drag.id); if(!sm) return;
@@ -2813,7 +2816,8 @@ function onUp(ev){
     if(drag.moved) commitPreDrag();
     else hist.preDrag = null;
   }
-  if(drag && ['resize','vtx','gpt','winMove','symMove'].includes(drag.mode)) commitPreDrag();
+  if(drag?.mode==='winMove'){if(drag.moved)commitPreDrag();else hist.preDrag=null;}
+  if(drag && ['resize','vtx','gpt','symMove'].includes(drag.mode)) commitPreDrag();
   drag = null;
   render();
 }
