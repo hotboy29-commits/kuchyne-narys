@@ -1201,7 +1201,7 @@ License: GPL-2+
 const STORE_KEY = 'narysy-v2';
 const SNAP_MM_DEFAULT = 40;      // výchozí dosah magnetu [mm skutečnosti]
 const MIN_SIZE = 1;              // minimální rozměr [mm] – jde až na 1 mm
-const APP_VERSION = '2026-10-28-narez-ds-hs-v101'; // viditelné v liště dole – ať jde poznat, co je nasazeno
+const APP_VERSION = '2026-10-28-boky-hs-v102'; // viditelné v liště dole – ať jde poznat, co je nasazeno
 const GAP_TOL = 3;               // tolerance „dotyku“ pro celkové kóty [mm]
 const HISTORY_MAX = 100;
 const WALL_T_DEFAULT = 120;      // výchozí tloušťka zdi [mm]
@@ -3308,7 +3308,7 @@ function nicheCutParts(e){
  const W=elFrontW(e),H=elH3(e),D=nicheFullDepth(e),w=W-36,h=H-36,d=D-18,n=nicheShelves(e);
  if(w<=0||h<=0||d<=0)return [];
  const p=(label,w,h,qty,edgeMm)=>({group:'bok',label:'Nika — '+label,w,h,qty,edgeMm,edgeNote:edgeMm?'ABS přední hrana':'bez hranění (vloženo mezi dílce)',decor:finishDecor()});
- return [p('bočnice',elKind3(e)==='base'?H:D,elKind3(e)==='base'?D:H,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
+ return [p('bočnice',H,D,2,H),p('dno',w,D,1,w),p('půda',w,D,1,w),p('záda lamino 18 mm',w,h,1,0),...(n?[p('police',w,d,n,w)]:[])];
 }
 // Confirmed DS construction: 18mm sides, inset bottom, two 120mm rails.
 function baseCutParts(e){
@@ -6257,7 +6257,7 @@ function upperCutParts(e){
   if(isNiche(e))return nicheCutParts(e);
   const W=elFrontW(e),D=elFrontD(e),H=elH3(e),inner=W-36,horizontalDepth=D-15;
   return [
-    {group:'body',label:'bočnice HS',w:D,h:H,qty:2},
+    {group:'body',label:'bočnice HS',w:H,h:D,qty:2,edgeMm:H,edgeNote:'ABS přední hrana po výšce'},
     {group:'body',label:'dno HS',w:inner,h:horizontalDepth,qty:1},
     {group:'body',label:'půda HS',w:inner,h:horizontalDepth,qty:1},
     {group:'body',label:'police HS',w:inner,h:horizontalDepth,qty:2},
@@ -6649,7 +6649,7 @@ function materialParts(){
     }else if(isWire(e)){
       wireCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,Number.isFinite(p.edgeMm)?{edgeMm:p.edgeMm,edgeNote:p.edgeMm?'ABS přední hrana':'bez ABS'}:null));
     }else if(k==='upper'){
-      upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q));
+      upperCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,Number.isFinite(p.edgeMm)?{edgeMm:p.edgeMm,edgeNote:p.edgeNote}:null));
     }else if(k==='base'&&!isDishwasherSpace(e)){
       baseCutParts(e).forEach(p=>add(p.group,tag+' – '+p.label,p.w,p.h,p.qty*q,{edgeMm:p.edgeMm,edgeNote:p.edgeNote}));
     }else if(!isDishwasherSpace(e)){
