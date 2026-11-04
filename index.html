@@ -627,7 +627,6 @@ details.p-det summary{cursor:pointer;font-weight:700;font-size:13px}
       <label class="fld" id="fLaminoDecorWrap"><span>Dekor lamina čel</span><input id="fDecor_front" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Pracovní deska</span><input id="fDecor_worktop" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Bok+, rám HS a niky — společný dekor</span><input id="fDecor_finish" placeholder="Zadejte dekorové lamino — nezávislé na bílém korpusu"></label>
-      <label class="fld span2"><label><input id="fCladding" type="checkbox"> Opláštění boků skříněk</label><p class="hint">Při zapnutí budou viditelné boky skříněk opláštěny dekorativním lamem a objeví se v kalkulaci.</p></label>
       <label class="fld"><span>Korpusy</span><input id="fDecor_body" placeholder="8100 PE — bílá (výchozí)"></label>
       <label class="fld"><span>Zástěna</span><input id="fDecor_backsplash" placeholder="Název / kód / barva (volitelné)"></label>
       <label class="fld"><span>Úchytky</span><input id="fDecor_handles" placeholder="Název / kód / barva (volitelné)"></label>
@@ -1692,7 +1691,6 @@ function doRenderCanvas(){
   $('#root').setAttribute('transform', `translate(${v.tx},${v.ty}) scale(${v.zoom})`);
   $('#layerGrid').innerHTML   = S.showGrid ? gridMarkup() : '';
   $('#layerWalls').innerHTML  = wallsMarkup();
-  $('#layerElems').innerHTML  = elementsMarkup() + frontsMarkup() + windowsSvg(x=>x/S.view.zoom,true) + symbolsSvg(x=>x/S.view.zoom,true,x=>x,true,undefined,150/S.view.zoom) + bokMarkup() + (pricing().cladding ? claddingBokMarkup() : '') + framePlanSvg(mm=>mm*4/S.view.zoom,layerShowsEl) + guidesMarkup();
   $('#layerGuides').innerHTML = snapGuidesMarkup() + draftMarkup();
   /* přepínač Kóty řídí jen celkové kóty; kóty vybrané zdi svítí vždy */
   $('#layerDims').innerHTML   = dimsMarkup();
@@ -3488,6 +3486,7 @@ function framePrintHtml(){
 }
 
 function isDishwasherSpace(e){return !!e && e.spaceType==='dishwasher' && elKind3(e)==='base';}
+function isFridge(e){return !!e && e.spaceType==='fridge' && elKind3(e)==='base';}
 function setDishwasherSpace(e,on){
  e.spaceType=on?'dishwasher':'cabinet';
  if(on){e.kind='base';e.fronts={on:true,doors:1,drawers:0};}
@@ -3998,7 +3997,6 @@ function bokRects(e){
 }
 
 /* Opláštění boků skříněk – červené přerušované obrysy boků, když je zapnuté v Údajích projektu. */
-function claddingBokMarkup(){
   const z = S.view.zoom;
   let out = '';
   for(const e of S.project.elements){
@@ -4435,7 +4433,7 @@ function renderInspector(){
             <button type="button" id="iKindUpper" class="${elKind3(e)==='upper'?'on':''}">Horní</button>
           </div>
         </label>
-        <label class="fld"><span>Provedení prvku</span><select id="iSpecialType"><option value="cabinet" ${!isNiche(e)&&!isWire(e)&&!isDishwasherSpace(e)?'selected':''}>Běžná skříň</option><option value="niche" ${isNiche(e)?'selected':''}>Nika — otevřená, pohledové lamino</option>${elKind3(e)==='base'?`<option value="wire200" ${isWire(e)?'selected':''}>Drát — výsuvný dvojkoš 200 mm</option><option value="dishwasher" ${isDishwasherSpace(e)?'selected':''}>Prostor pro myčku</option>`:''}</select></label>
+        <label class="fld"><span>Provedení prvku</span><select id="iSpecialType"><option value="cabinet" ${!isNiche(e)&&!isWire(e)&&!isDishwasherSpace(e)?'selected':''}>Běžná skříň</option><option value="niche" ${isNiche(e)?'selected':''}>Nika — otevřená, pohledové lamino</option>${elKind3(e)==='base'?`<option value="wire200" ${isWire(e)?'selected':''}>Drát — výsuvný dvojkoš 200 mm</option><option value="dishwasher" ${isDishwasherSpace(e)?'selected':''}>Prostor pro myčku</option><option value="fridge" ${isFridge(e)?'selected':''}>Vestavná lednice</option>`:''}</select></label>
         ${isNiche(e)?`<label class="fld"><span>Hotová hloubka niky (včetně +20)</span><input id="iNicheFullDepth" type="number" min="120" step="5" value="${nicheFullDepth(e)}"></label>${e.nicheDepthReview?`<p class="hint">Nika ze starší verze: původní hloubka ${fmt(e.nicheDepthReview)} mm. Pokud už šlo o hotovou hloubku, zadejte tuto hodnotu do pole výše; nebude se znovu přičítat 20 mm.</p>`:""}<label class="fld"><span>Počet polic niky</span><input id="iNicheShelves" type="number" min="0" max="12" value="${nicheShelves(e)}"></label><p class="hint">Skutečná hloubka niky ${fmt(nicheFullDepth(e))} mm = referenční HS ${fmt(elFrontD(e))} + 20 mm. Opláštění zůstává ${fmt(elFrontD(e)+20)} mm, nikoli o dalších 20 více. Lamino 18 mm, vložená záda. Dekor: ${esc(finishDecor())}. Dno/půda mezi bočnicemi, police před zády. ABS na předních hranách, záda bez ABS.</p>`:''}
         ${elKind3(e)==='upper'?`<label class="chk"><input id="iFrameOff" type="checkbox" ${e.frameOff?'checked':''}> Vynechat spodní opláštění této HS (např. digestoř)</label><p class="hint">Horní opláštění pokračuje i nad touto skříní. Horní/spodní opláštění celé sestavy zapnete v Kalkulaci. Hloubka ${fmt(elFrontD(e)+20)} mm, délka podle souvislé řady.</p>`:''}
         ${elKind3(e)==='base'?`<label class="chk"><input id="iDishwasher" type="checkbox" ${isDishwasherSpace(e)?'checked':''}> Prostor pro vestavnou myčku — bez korpusu</label><p class="hint">${isDishwasherSpace(e)?'Pouze 1 čelo (šířka místa − 4 mm). Bez korpusu, zad, polic, pantů a noh. PD a průběžný sokl zůstávají; ručně zapnutý Bok+ se počítá zvlášť.':dishwasherNameSuggestion(e)?'Název odpovídá myčce. Potvrďte volbu výše, jinak se prvek počítá jako běžná skříň.':'Pro myčku 600 i 450 mm zapněte tuto volbu; šířku místa zadejte v rozměrech.'}</p>`:''}
@@ -4589,6 +4587,7 @@ function renderInspector(){
       if(type==='dishwasher')setDishwasherSpace(e,true);
       if(type==='niche'){e.fronts={on:false,doors:0,drawers:0};e.nicheDepthModel='reference+20';delete e.nicheDepthReview;}
       if(type==='wire200')e.fronts={on:true,doors:1,drawers:0};
+      if(type==='fridge'){e.h=B3D.colH;e.kind='base';pushHistoryQuiet();renderInspector();renderCanvas();return;}
       pushHistoryQuiet();renderInspector();renderCanvas();
     });
     $('#iNicheFullDepth')?.addEventListener('change',ev=>{const depth=clamp(+ev.target.value||340,120,3000)-20,old=elFrontD(e);if(isHorizFront(e.front)){e.d=depth;if(e.front==='sever')e.y+=old-depth;}else{e.w=depth;if(e.front==='západ')e.x+=old-depth;}e.nicheDepthModel='reference+20';delete e.nicheDepthReview;pushHistoryQuiet();renderInspector();renderCanvas();});
@@ -5006,6 +5005,7 @@ function elH3(e){ const h = +e.h; return h>=100 ? h : defaultH3(e); }
 function kindLabel3(e){
   if(isNiche(e))return 'nika — otevřená';
   if(isWire(e))return 'Drát — výsuv 200 mm';
+  if(isFridge(e))return 'Vestavná lednice';
   const k = elKind3(e);
   return k==='upper' ? 'horní skříň' : k==='column' ? 'sloup' : 'spodní skříň';
 }
@@ -6054,7 +6054,6 @@ function openProjectModal(){
   $('#fSplashHeight').value = i.splashHeight || '';
   DECOR_FIELDS.forEach(([k])=>{ $('#fDecor_'+k).value = i.decors?.[k] || ''; });
   $('#fLedEnabled').checked = S.project.pricing?.led?.enabled!==false;
-  $('#fCladding').checked = S.project.pricing?.cladding === true;
   refreshProjectFrontForm();
   renderProjectBrief();
   $('#modalProject').classList.remove('hidden');
@@ -6070,7 +6069,6 @@ function saveProjectInfo(){
   i.decors = Object.fromEntries(DECOR_FIELDS.map(([k])=>[k,$('#fDecor_'+k).value.trim()]));
   saveProjectFrontMaterial();
   const P=pricing();P.led=P.led||{};P.led.enabled=$('#fLedEnabled').checked;
-  P.cladding = $('#fCladding').checked;
   saveProjectBrief();
   $('#projTitle').textContent = i.name || 'Nový nárys';
   closeProjectModal(); pushHistory(); render();
@@ -6142,7 +6140,6 @@ function PRICE_DEFAULTS(){ return ({
   zastena: false,       // počítat zástěnu (samostatná položka)
   tl: false,            // počítat TL – těsnící lištu (samostatná položka)
   zastReserve: 100,     // rezerva k délce zástěny/TL na každou řadu [mm]
-  cladding: false,      // opláštění boků skříněk – zobrazí se ve výkresu i kalkulaci
   groups: [
     { id:'body',  name:'Korpus – lamino DTD 18 mm',        bw:2800, bh:2070, price:2400, waste:15 },
     { id:'front', name:'Čela a dvířka – lamino DTD 18 mm', bw:2800, bh:2070, price:2400, waste:15 },
@@ -7293,7 +7290,6 @@ function renderPriceModal(){
         <th>Materiál</th><th class="num">Plocha</th><th class="num">Dílů</th><th class="num">Prořez</th>
         <th class="num">Desky</th><th class="num">Kč / deska</th><th class="num">Celkem</th>
       </tr></thead>
-      <tbody>${rowsHtml}${P.cladding ? `<tr>
         <td>Opláštění boků skříněk<small>· viditelné boky dle zvoleného dekoru boků+</small></td>
         <td class="num">—</td>
         <td class="num">—</td>
